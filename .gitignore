@@ -10,4 +10,5 @@ venv/
 mcp_prototype/certs/
 .venv
 certs/
+.env
 .DS_Store

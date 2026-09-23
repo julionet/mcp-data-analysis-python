@@ -2,7 +2,7 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.7 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.8 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
 **Data:** 2026-09-23
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
@@ -18,6 +18,8 @@
 > **Nota de revisão (v1.5 → v1.6):** documento aprovado. Adicionada uma nova seção **§9.2 Produção Interna (nginx + Certbot)** — um servidor de produção dedicado, ainda em rede interna (Restrição T1 continua valendo), usando nginx como reverse proxy para terminação TLS e Certbot para emissão/renovação de certificado. Documentadas as duas estratégias possíveis para o Certbot: desafio DNS-01 contra um domínio público (não exige expor o servidor à internet, só o DNS do domínio) ou uma CA interna própria compatível com ACME (sem depender de domínio público, mas exige instalar essa CA em cada máquina cliente). A antiga §9.2 (Remoto — Futuro, Kubernetes) foi renumerada para §9.3. Nenhuma outra decisão de arquitetura foi alterada — o app continua servindo `/mcp` sem autenticação (ADR-006).
 
 > **Nota de revisão (v1.6 → v1.7):** documento aprovado. Explicitada em §9.2 a diferença de exigência de confiança do cliente entre as duas opções de Certbot: a Opção A (DNS-01/Let's Encrypt) não exige nenhuma configuração nos clientes MCP, porque a CA do Let's Encrypt já vem pré-instalada por padrão em qualquer sistema operacional/runtime — igual a qualquer API pública comum; a Opção B (CA interna) exige instalar/confiar nessa CA em cada máquina cliente, exatamente como o mkcert em §9.1. A distinção não é "nginx+Certbot vs. mkcert", é se a CA emissora já é publicamente confiável de fábrica ou é uma CA privada criada para esse ambiente.
+
+> **Nota de revisão (v1.7 → v1.8):** documento aprovado. Renomeada em §5.2 a pasta `mcp/` para **`mcp_transport/`** — durante a implementação de F1 (`F1_IMPLEMENTACAO.md`), constatou-se que um pacote local chamado `mcp/` colide com o SDK `mcp` que ele mesmo importa (`from mcp.server.lowlevel import Server`): rodando o processo a partir de `analysis_app/` (padrão usado desde o protótipo F0), o Python resolve `import mcp` para o pacote local em vez do SDK instalado, quebrando com `ModuleNotFoundError: No module named 'mcp.server'`. Nenhuma outra decisão de arquitetura foi alterada — apenas o nome da pasta em §5.2.
 
 ---
 
@@ -648,7 +650,8 @@ analysis_app/
 │   ├── execution.py
 │   └── handler.py
 │
-├── mcp/
+├── mcp_transport/             # nome definitivo — "mcp/" colide com o SDK `mcp` importado
+│   │                          # dentro do próprio pacote (confirmado na implementação de F1)
 │   ├── __init__.py
 │   ├── resources.py          # MCP resources (list_resources, read_resource)
 │   └── tools.py              # MCP tools (list_tools, call_tool)

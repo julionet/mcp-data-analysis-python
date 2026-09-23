@@ -1,6 +1,6 @@
 # F1 — FastAPI + MCP Server Setup via Streamable HTTP com TLS
 
-**ID:** F1 · **Prioridade:** 🔴 Crítica · **Esforço Estimado:** 2.5d · **Depende de:** — (primeira feature) · **Status:** ⬜ Todo
+**ID:** F1 · **Prioridade:** 🔴 Crítica · **Esforço Estimado:** 2.5d · **Depende de:** — (primeira feature) · **Status:** 🟩 Done
 
 ## 1. Visão
 
@@ -208,10 +208,10 @@ class TestServerSetup:
 
 ### 6.2 Checklist de Testes
 
-- [ ] Teste unitário: /health retorna 200
-- [ ] Teste unitário: /mcp sem barra final não redireciona
-- [ ] Teste de integração: handshake TLS/ALPN via `openssl s_client`
-- [ ] Manual: testar via pelo menos 1 cliente MCP real (Claude Desktop) conectando ao endpoint https
+- [x] Teste unitário: /health retorna 200
+- [x] Teste unitário: /mcp sem barra final não redireciona
+- [x] Teste de integração: handshake TLS/ALPN via `openssl s_client`
+- [x] Manual: testar via pelo menos 1 cliente MCP real (Claude Desktop) conectando ao endpoint https — confirmado por Jose (2026-09-23)
 
 ## 7. Mudanças na Configuração
 
@@ -254,19 +254,21 @@ O `ssl_context_factory` e a rota exata `/mcp` são a base fixa sobre a qual F5 r
 
 **Código:**
 
-- [ ] main.py com FastAPI + ssl\_context\_factory (ALPN) + mount/rota exata /mcp + CORS
-- [ ] config.py (.env via pydantic-settings)
-- [ ] requirements.txt travado conforme §7
-- [ ] Certificado TLS local gerado (mkcert)
+- [x] main.py com FastAPI + ssl\_context\_factory (ALPN) + mount/rota exata /mcp + CORS
+- [x] config.py (.env via pydantic-settings)
+- [x] requirements.txt travado conforme §7
+- [x] Certificado TLS local gerado (mkcert)
 - [ ] Code review completo
-- [ ] Testes passing (100% dos casos)
-- [ ] Docstrings
+- [x] Testes passing (100% dos casos)
+- [x] Docstrings
 
 **QA:**
 
-- [ ] Handshake TLS/ALPN confirmado via `openssl s_client`
+- [x] Handshake TLS/ALPN confirmado via `openssl s_client`
 - [ ] Code review aprovado
 - [ ] PR merge aprovado
+
+> Código, testes automatizados e teste manual com cliente real (Claude Desktop) concluídos e validados. Os 3 itens acima permanecem em aberto de propósito — são etapas de processo (revisão por pessoa e merge do PR) que dependem de ação do Jose, não deste agente.
 
 ## 10. Questões Abertas para o Jose
 
