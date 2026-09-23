@@ -2,7 +2,7 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.5 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.6 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
 **Data:** 2026-09-23
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
@@ -14,6 +14,8 @@
 > **Nota de revisão (v1.3 → v1.4):** documento aprovado. Trocado o transporte MCP de **HTTP+SSE** (endpoint `/sse`) para **Streamable HTTP** (endpoint único `/mcp`), o transporte mais recente da especificação MCP. Atualizados: ADR-006 (§7), diagrama de contexto (§1.1), topologia local (§1.2), exemplo de configuração de cliente, stack técnico (§5.1 — dependência `mcp` do SDK), estrutura de pastas (§5.2) e fluxo de inicialização (§6.1). Porta permanece 3000; nenhuma outra decisão de arquitetura foi alterada.
 
 > **Nota de revisão (v1.4 → v1.5):** documento aprovado. O protótipo F0 (`F0_PROTOTIPO_MCP_MEMORIA.md`) validou a decisão do ADR-006 na prática e revelou 4 ajustes técnicos necessários para o F1 real: (1) **TLS agora é obrigatório mesmo em rede interna** — clientes MCP reais (confirmado: Claude Desktop) recusam conector remoto via `http://` simples, independente da rede ser confiável; (2) a dependência `mcp` precisa de teto de versão — a v2.0.0 do SDK remove os decorators `list_tools()`/`call_tool()` da classe de baixo nível `Server` usada no ADR-006; (3) o handshake TLS precisa negociar ALPN explicitamente (a CLI padrão do uvicorn não faz isso, exigindo `ssl_context_factory` programático); (4) o endpoint MCP montado via `app.mount()` sob FastAPI precisa de uma rota exata adicional para o path sem barra final, evitando um redirect 307 que alguns clientes não toleram bem. Atualizados: ADR-006 (§7), §5.1 (dependências), §9.1 (plano de implantação local), nova nota em §6.1.
+
+> **Nota de revisão (v1.5 → v1.6):** documento aprovado. Adicionada uma nova seção **§9.2 Produção Interna (nginx + Certbot)** — um servidor de produção dedicado, ainda em rede interna (Restrição T1 continua valendo), usando nginx como reverse proxy para terminação TLS e Certbot para emissão/renovação de certificado. Documentadas as duas estratégias possíveis para o Certbot: desafio DNS-01 contra um domínio público (não exige expor o servidor à internet, só o DNS do domínio) ou uma CA interna própria compatível com ACME (sem depender de domínio público, mas exige instalar essa CA em cada máquina cliente). A antiga §9.2 (Remoto — Futuro, Kubernetes) foi renumerada para §9.3. Nenhuma outra decisão de arquitetura foi alterada — o app continua servindo `/mcp` sem autenticação (ADR-006).
 
 ---
 
@@ -889,7 +891,54 @@ curl https://localhost:3000/health
 
 **Tempo de setup:** 5-10 minutos
 
-### 9.2 Remoto (Produção — Futuro)
+### 9.2 Produção Interna (nginx + Certbot)
+
+Ainda dentro de V1.0 — rede interna, sem exposição pública (Restrição T1) — mas num servidor dedicado em vez da máquina de desenvolvimento. Aqui, **nginx** faz a terminação TLS como reverse proxy na frente do FastAPI/uvicorn, que passa a rodar atrás dele em HTTP simples. Isso elimina a necessidade do `ssl_context_factory`/ALPN manual da seção 9.1: o OpenSSL do nginx já negocia ALPN nativamente, então esse workaround é específico do cenário "uvicorn falando TLS diretamente" (dev com mkcert), não de produção com nginx.
+
+```nginx
+# /etc/nginx/sites-available/analysis-mcp
+server {
+    listen 443 ssl;
+    server_name analise.empresa.internal;
+
+    ssl_certificate     /etc/letsencrypt/live/analise.empresa.internal/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/analise.empresa.internal/privkey.pem;
+
+    location /mcp {
+        proxy_pass http://127.0.0.1:3000/mcp;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";   # necessário para o streaming (SSE) do Streamable HTTP
+        proxy_buffering off;
+        proxy_set_header Host $host;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:3000/health;
+    }
+}
+```
+
+**Certificado via Certbot — duas opções, a escolher quando o servidor de produção for provisionado:**
+
+**Opção A — DNS-01 com domínio público (se a operação já tiver domínio + acesso à API do provedor de DNS):**
+```bash
+certbot certonly --dns-<provedor> \
+  --dns-<provedor>-credentials /etc/letsencrypt/<provedor>.ini \
+  -d analise.empresa.internal
+# renovação automática via cron/systemd timer do próprio certbot
+```
+Não exige expor o servidor à internet — o desafio DNS-01 só cria um registro TXT no DNS **público** do domínio; o hostname em si pode continuar resolvendo só internamente (DNS split-horizon).
+
+**Opção B — CA interna própria (sem depender de domínio público):**
+```bash
+certbot certonly --server https://sua-ca-interna.empresa.internal/acme/directory \
+  -d analise.empresa.internal
+```
+Certbot suporta qualquer servidor compatível com ACME via `--server`, não só o Let's Encrypt — uma CA interna (ex.: `step-ca`) resolve isso sem tocar em DNS público. Contrapartida: essa CA interna precisa ser instalada como confiável em cada máquina cliente — mesma mecânica do `mkcert -install` da seção 9.1, só que centralizada, com renovação automática pelo Certbot em vez de manual por máquina.
+
+> Nenhuma das duas opções muda o resto da arquitetura: o app continua servindo em `/mcp` sem autenticação, conforme ADR-006 — só a origem/renovação do certificado muda.
+
+### 9.3 Remoto (Produção — Futuro)
 
 ```bash
 docker build -t analysis-mcp:1.0 .

@@ -528,7 +528,8 @@ Então:
 ├─ MongoDB 5+ (data source opcional)
 ├─ Python 3.11+ (FastAPI runtime)
 ├─ Cliente(s) MCP compatíveis com Streamable HTTP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
-├─ Certificado TLS (mkcert para desenvolvimento/máquina única; CA interna para múltiplas máquinas na rede)
+├─ Certificado TLS (mkcert para desenvolvimento; em produção interna, nginx + Certbot —
+│  via DNS-01 com domínio público ou via CA interna própria, ver ARQUITETURA.md §9.2)
 ├─ Redis 6+ (cache - remoto apenas)
 └─ Docker (para portabilidade)
 ```

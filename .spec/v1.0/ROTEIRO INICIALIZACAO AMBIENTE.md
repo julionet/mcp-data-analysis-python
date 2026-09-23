@@ -13,11 +13,17 @@
 ```bash
 # Verificar versões
 python3 --version   # precisa ser 3.11+ (Restrição T2, ARQUITETURA.md §5.1)
+# Python 3.12.14
 docker --version
+# Docker version 29.8.0, build 88096ef
 docker compose version
+# Docker version 29.8.0, build 88096ef
 git --version
+# git version 2.54.0 (Apple Git-157)
 psql --version       # PostgreSQL 13+ client (ARQUITETURA.md §10)
+# postgres (PostgreSQL) 18.6 (Homebrew)
 mkcert -version      # gera certificado TLS local confiável (ver seção 2) — instalar com `brew install mkcert` se ausente
+# v1.4.4
 ```
 
 > ⚠️ **SQL Server (F13):** o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) é dependência de SO, não `pip`. Só entra no `Dockerfile` na **F15 (Docker Setup, Sprint 3)** — não é necessário instalar agora para o Sprint 1.
@@ -200,14 +206,14 @@ curl https://localhost:3000/health                          # confirma TLS servi
 
 **Checklist antes de codar** (`FEATURES_ROADMAP.md` §4):
 
-- [ ] Python 3.11+ confirmado
-- [ ] PostgreSQL acessível na rede local
+- [x] Python 3.11+ confirmado
+- [x] PostgreSQL acessível na rede local
 - [ ] Certificado TLS local gerado e CA confiável instalada (mkcert)
-- [ ] Estrutura de diretórios criada
-- [ ] `requirements.txt` (mínimo Sprint 1) instalado
-- [ ] `.env` configurado (incluindo caminhos do certificado TLS)
+- [x] Estrutura de diretórios criada
+- [x] `requirements.txt` (mínimo Sprint 1) instalado
+- [x] `.env` configurado (incluindo caminhos do certificado TLS)
 - [ ] Schema aplicado (6 tabelas visíveis via `\dt`)
-- [ ] Branch `feature/F1-fastapi-mcp-setup` criada
+- [x] Branch `feature/F1-fastapi-mcp-setup` criada
 
 ---
 

@@ -8,3 +8,6 @@ dist/
 venv/
 *.db
 mcp_prototype/certs/
+.venv
+certs/
+.DS_Store
