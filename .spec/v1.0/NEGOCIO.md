@@ -2,7 +2,7 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.4 (Aprovado — Streamable HTTP Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.5 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
 **Data:** 2026-09-23
 **Autor:** Jose
 **Status:** ✅ Aprovado
@@ -12,6 +12,8 @@
 > **Nota de revisão (v1.2 → v1.3):** documento aprovado. Adicionado suporte a **SQL Server** como banco de dados de origem de primeira classe em V1.0 (RF5, seção 10), ao lado de PostgreSQL, MySQL e MongoDB.
 
 > **Nota de revisão (v1.3 → v1.4):** documento aprovado. Trocado o transporte MCP de **HTTP+SSE** para **Streamable HTTP** — o transporte mais recente da especificação MCP, que substitui o antigo transporte HTTP+SSE. Mantém a mesma topologia (serviço único, porta 3000, múltiplos clientes MCP simultâneos, sem autenticação em V1.0), mudando apenas o protocolo de transporte e o path do endpoint (de `/sse` para `/mcp`). Ver Restrição T4 (seção 9) e ARQUITETURA.md §7 ADR-006 para detalhes técnicos.
+
+> **Nota de revisão (v1.4 → v1.5):** documento aprovado. O protótipo F0 (`F0_PROTOTIPO_MCP_MEMORIA.md`) revelou que **TLS (HTTPS) é obrigatório mesmo em V1.0, mesmo em rede interna confiável** — não por política de segurança da arquitetura, mas porque clientes MCP reais (confirmado: Claude Desktop) recusam se conectar a um conector remoto via `http://` simples, independente da rede ser confiável ou não. Isso muda a Restrição T1 e a T4 (seção 9), a RNF5 (seção 8) e a lista de dependências externas (seção 10), que passam a exigir um certificado TLS (self-signed local via mkcert para desenvolvimento, ou CA interna quando o servidor precisar ser acessado por mais de uma máquina). Ver ARQUITETURA.md §7 ADR-006 e §9 para a estratégia de certificado.
 
 ---
 
@@ -472,6 +474,9 @@ Então:
 
 ```
 ├─ Rede interna: assumir confiável (sem autenticação em V1.0)
+├─ Transporte: TLS (HTTPS) obrigatório mesmo em rede interna — requisito de
+│  compatibilidade de cliente MCP (confirmado: Claude Desktop recusa conector
+│  remoto via http:// simples), não uma política de segurança em profundidade
 ├─ Credenciais BD: criptografadas em repouso
 ├─ SQL injection: parametrized queries obrigatório
 ├─ Validação: todos inputs validados antes execução
@@ -486,7 +491,7 @@ Então:
 ### Restrição T1: Rede Interna Apenas
 - ❌ Não expor aplicação na internet
 - ✅ Rodar em IP privado (192.168.x.x, 10.x.x.x)
-- ✅ Acessível via Streamable HTTP por qualquer cliente MCP na rede
+- ✅ Acessível via Streamable HTTP **com TLS (HTTPS)** por qualquer cliente MCP na rede
 
 ### Restrição T2: Python 3.11+
 - ✅ FastAPI necessita 3.9+
@@ -498,12 +503,13 @@ Então:
 - ✅ Separado do BD de negócio (data sources)
 - ✅ Backup obrigatório
 
-### Restrição T4: Transporte MCP via Streamable HTTP
+### Restrição T4: Transporte MCP via Streamable HTTP (com TLS)
 - ✅ Servidor roda como serviço HTTP persistente (uvicorn), não como subprocesso stdio por usuário
 - ✅ Cada cliente MCP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.) se conecta como **conector remoto** (URL), não via `command`/`args` local
 - ✅ Múltiplos clientes conectam à mesma instância/porta simultaneamente
-- ✅ Endpoint único em `http://<ip>:3000/mcp` (porta 3000, path `/mcp` — convenção padrão do transporte Streamable HTTP do SDK MCP)
+- ✅ Endpoint único em `https://<ip>:3000/mcp` (porta 3000, path `/mcp` — convenção padrão do transporte Streamable HTTP do SDK MCP)
 - ✅ Substitui o transporte HTTP+SSE (path `/sse`) usado nas versões 1.0-1.3 deste documento
+- ✅ **TLS obrigatório** mesmo em rede interna: certificado self-signed local via mkcert para desenvolvimento/máquina única, ou CA interna confiável instalada em cada máquina cliente quando o servidor for acessado por mais de uma máquina na rede (ver ARQUITETURA.md §7 ADR-006 e §9)
 
 ### Restrição T5: Sem Autenticação em V1.0
 - ✅ Rede interna é assumida confiável — qualquer pessoa/cliente na rede pode executar análises
@@ -522,6 +528,7 @@ Então:
 ├─ MongoDB 5+ (data source opcional)
 ├─ Python 3.11+ (FastAPI runtime)
 ├─ Cliente(s) MCP compatíveis com Streamable HTTP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+├─ Certificado TLS (mkcert para desenvolvimento/máquina única; CA interna para múltiplas máquinas na rede)
 ├─ Redis 6+ (cache - remoto apenas)
 └─ Docker (para portabilidade)
 ```

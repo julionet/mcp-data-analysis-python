@@ -2,16 +2,18 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.4 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.5 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório)
 **Data:** 2026-09-23
 **Status:** ✅ Aprovado
-**Escopo:** Qualquer cliente MCP via Streamable HTTP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+**Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
 > **Nota de revisão (v1.1 → v1.2):** removidas F6 (Client Identification) e F6B (User Identification) do Sprint 1 — autenticação não faz parte do escopo de V1.0 (ver NEGOCIO.md §9 T5 e ARQUITETURA.md §7 ADR-006). Removida também a "Sprint 1B: Multi-LLM Oficial" inteira: como o transporte é HTTP+SSE (na época) com protocolo MCP padrão, não existe "gateway" por cliente para construir — qualquer cliente compatível já funciona sem adaptação. A validação multi-cliente virou uma feature leve (F6) dentro do próprio Sprint 1. Todas as features foram renumeradas sequencialmente para não deixar buracos (F1...F23). Os números de esforço, que divergiam entre os documentos anteriores, foram recalculados e unificados aqui.
 
 > **Nota de revisão (v1.2 → v1.3):** documento aprovado. Adicionada **F13: SQL Server Adapter** no Sprint 2, ao lado do MongoDB e MySQL adapters. A antiga F13 (Built-in Handlers) passou a F14, e todas as features de Sprint 3/4 foram deslocadas em +1 (antigo F14→F15, ..., antigo F23→F24). Total agora: 24 features, ~33 dias.
 
 > **Nota de revisão (v1.3 → v1.4):** documento aprovado. F1 passa a implementar o servidor MCP via **Streamable HTTP** (endpoint `/mcp`, porta 3000) em vez de HTTP+SSE (endpoint `/sse`). Nenhuma feature foi adicionada, removida ou renumerada — só a descrição técnica de F1 e as URLs de exemplo em F6/timeline mudaram. Ver NEGOCIO.md §9 T4 e ARQUITETURA.md §7 ADR-006.
+
+> **Nota de revisão (v1.4 → v1.5):** documento aprovado. O protótipo F0 confirmou que TLS é obrigatório mesmo em V1.0 (clientes MCP reais recusam `http://` simples — ver NEGOCIO.md §8 RNF5, §9 T1/T4 e ARQUITETURA.md §7 ADR-006). F1 passa a incluir setup de certificado TLS local (mkcert) e negociação ALPN explícita, subindo o esforço estimado de 2d para 2.5d (Sprint 1 passa de ~11 para ~11.5 dias). F6 passa a exigir confirmação de handshake TLS/ALPN bem-sucedido antes do teste com clientes reais, e passa a citar Claude Code (CLI) como um terceiro tipo de cliente MCP já validado, ao lado de apps desktop. Nenhuma feature foi adicionada, removida ou renumerada. Nova nota em §3 registrando as lições técnicas do protótipo F0 para a implementação real de F1.
 
 ---
 
@@ -21,7 +23,7 @@
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F1 | FastAPI + MCP Server Setup via Streamable HTTP | 🔴 Crítica | 2d | — | ⬜ Todo |
+| F1 | FastAPI + MCP Server Setup via Streamable HTTP **com TLS** | 🔴 Crítica | 2.5d | — | ⬜ Todo |
 | F2 | PostgreSQL Adapter | 🔴 Crítica | 2d | F1 | ⬜ Todo |
 | F3 | HandlerRegistry e Discovery | 🔴 Crítica | 2d | F2 | ⬜ Todo |
 | F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | ⬜ Todo |
@@ -30,24 +32,42 @@
 | F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | ⬜ Todo |
 
-**Total Sprint 1:** ~11 dias (≈ 2 semanas com buffer)
+**Total Sprint 1:** ~11.5 dias (≈ 2 semanas com buffer)
 
 **Destaque:**
-- ✅ F1 + F5 garantem servidor MCP agnóstico de cliente, via Streamable HTTP
+- ✅ F1 + F5 garantem servidor MCP agnóstico de cliente, via Streamable HTTP com TLS
 - ✅ F6 valida na prática que 2+ clientes MCP diferentes conseguem usar o servidor ao mesmo tempo
 - ✅ F8 é um log simples (análise, parâmetros, status, tempo) — sem identificação de usuário/cliente
+
+**F1 em detalhe — itens adicionados após o protótipo F0 (ver ARQUITETURA.md §7 ADR-006):**
+```
+├─ Certificado TLS local (mkcert) gerado e configurado no servidor
+├─ ssl_context_factory programático negociando ALPN (http/1.1) — a CLI padrão
+│  do uvicorn não faz isso, e alguns clientes abandonam a conexão sem esse suporte
+├─ Rota exata para "/mcp" (sem barra final), além do mount, evitando redirect 307
+├─ CORSMiddleware habilitado (necessário mesmo sem navegador tradicional envolvido)
+└─ Dependência `mcp` travada com teto de versão (`>=1.9.0,<2.0.0`) — a v2.0.0 remove
+   os decorators list_tools()/call_tool() da classe de baixo nível Server
+```
 
 **F6 em detalhe (Validação Multi-Cliente):**
 ```
 Objetivo: confirmar que o servidor atende múltiplos clientes MCP diferentes,
-ao mesmo tempo, sem qualquer configuração de autenticação.
+ao mesmo tempo, sem qualquer configuração de autenticação, via HTTPS.
 
 Critério de aceitação:
+├─ Confirmar handshake TLS/ALPN bem-sucedido (ex.: openssl s_client -alpn h2,http/1.1)
+│  antes de testar com clientes reais — uma falha de ALPN não gera nenhum log HTTP,
+│  só uma conexão abandonada, e é fácil confundir com outro tipo de erro
 ├─ Configurar pelo menos 2 clientes MCP diferentes (ex.: Claude Desktop + Gemini Desktop
-│  ou outro disponível) apontando para a mesma URL http://<ip>:3000/mcp
+│  ou outro disponível) apontando para a mesma URL https://<ip>:3000/mcp
 ├─ Pedir a mesma análise nos dois clientes, em paralelo
 ├─ Ambos recebem resultado correto
 └─ execution_history mostra as duas execuções, sem erro de concorrência
+
+Nota: o protótipo F0 validou com sucesso um terceiro tipo de cliente MCP — o
+Claude Code (CLI, via `claude mcp add --transport http`), além de Claude Desktop —
+reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 ```
 
 ---
@@ -226,6 +246,7 @@ XXX_PARAM=value
 - Todas as features de Sprint 1 compartilham o mesmo processo `uvicorn` — não há middleware de autenticação a considerar em nenhuma delas.
 - F6 (validação multi-cliente) não é um serviço novo de código: é um passo de teste manual/integração que confirma que a arquitetura Streamable HTTP atende ao requisito de múltiplos clientes simultâneos.
 - Quando o requisito de autenticação voltar ao escopo (ver NEGOCIO.md §12 e ARQUITETURA.md §12), as features `ClientIdentificationService` e `UserIdentificationService` podem ser reintroduzidas aqui como novas entradas (numeração F24+, para não conflitar com o que já foi implementado).
+- **Lições técnicas do protótipo F0** (`F0_PROTOTIPO_MCP_MEMORIA.md`), a considerar na implementação real de F1 para não serem redescobertas do zero: (1) TLS obrigatório mesmo em rede interna — clientes MCP reais recusam `http://` simples; (2) `mcp` precisa de teto de versão (`<2.0.0`) — a API de baixo nível usada no ADR-006 muda na v2.0.0; (3) a CLI do uvicorn não negocia ALPN, exigindo `ssl_context_factory` programático; (4) montar o endpoint MCP via `app.mount()` sem uma rota exata adicional gera redirect 307 em `/mcp` sem barra final; (5) CORS é necessário mesmo sem navegador tradicional envolvido, por conta de clientes desktop que validam o conector via `fetch()` no processo de renderer. Detalhes e evidências completas no README do protótipo (`mcp_prototype/README.md`).
 
 ---
 

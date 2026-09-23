@@ -2,7 +2,7 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.4 (Aprovado — Streamable HTTP Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.5 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
 **Data:** 2026-09-23
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
@@ -12,6 +12,8 @@
 > **Nota de revisão (v1.2 → v1.3):** documento aprovado. Adicionado **SQLServerAdapter** como adapter de primeira classe em V1.0 (via ODBC/`aioodbc`), ao lado de PostgreSQL, MySQL e MongoDB (ver §2.1, §4.2, §5.1, §13).
 
 > **Nota de revisão (v1.3 → v1.4):** documento aprovado. Trocado o transporte MCP de **HTTP+SSE** (endpoint `/sse`) para **Streamable HTTP** (endpoint único `/mcp`), o transporte mais recente da especificação MCP. Atualizados: ADR-006 (§7), diagrama de contexto (§1.1), topologia local (§1.2), exemplo de configuração de cliente, stack técnico (§5.1 — dependência `mcp` do SDK), estrutura de pastas (§5.2) e fluxo de inicialização (§6.1). Porta permanece 3000; nenhuma outra decisão de arquitetura foi alterada.
+
+> **Nota de revisão (v1.4 → v1.5):** documento aprovado. O protótipo F0 (`F0_PROTOTIPO_MCP_MEMORIA.md`) validou a decisão do ADR-006 na prática e revelou 4 ajustes técnicos necessários para o F1 real: (1) **TLS agora é obrigatório mesmo em rede interna** — clientes MCP reais (confirmado: Claude Desktop) recusam conector remoto via `http://` simples, independente da rede ser confiável; (2) a dependência `mcp` precisa de teto de versão — a v2.0.0 do SDK remove os decorators `list_tools()`/`call_tool()` da classe de baixo nível `Server` usada no ADR-006; (3) o handshake TLS precisa negociar ALPN explicitamente (a CLI padrão do uvicorn não faz isso, exigindo `ssl_context_factory` programático); (4) o endpoint MCP montado via `app.mount()` sob FastAPI precisa de uma rota exata adicional para o path sem barra final, evitando um redirect 307 que alguns clientes não toleram bem. Atualizados: ADR-006 (§7), §5.1 (dependências), §9.1 (plano de implantação local), nova nota em §6.1.
 
 ---
 
@@ -70,11 +72,13 @@ sem necessidade de headers de autenticação em V1.0.
 {
   "mcpServers": {
     "analysis": {
-      "url": "http://192.168.1.50:3000/mcp"
+      "url": "https://192.168.1.50:3000/mcp"
     }
   }
 }
 ```
+
+> `https://`, não `http://` — TLS é obrigatório mesmo em rede interna (ver ADR-006). Certificado confiável nas máquinas clientes: mkcert (máquina única) ou CA interna instalada em cada cliente (múltiplas máquinas).
 Sem `command`, `args` ou `env` — o servidor já está rodando de forma independente na rede; o cliente só aponta para a URL.
 
 #### **Remoto (Produção — Futuro)**
@@ -535,13 +539,19 @@ result = await executor.execute(analysis_id, params)
 # requirements.txt
 
 # Web Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# Sem versão exata fixada de propósito: no protótipo F0, fixar fastapi==0.104.1 +
+# uvicorn[standard]==0.24.0 junto de mcp>=1.2.0 gerou ResolutionImpossible (dependências
+# transitivas do mcp exigem fastapi/starlette mais recentes). Deixar o pip resolver a
+# versão compatível e travar só o `mcp` (abaixo) evita esse conflito.
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
 
 # MCP
-mcp>=1.2.0  # versão mínima com suporte a transporte Streamable HTTP (mcp.server.Server)
+mcp>=1.9.0,<2.0.0  # teto obrigatório: a v2.0.0 remove os decorators list_tools()/call_tool()
+                    # da classe de baixo nível Server usada no ADR-006 (confirmado no protótipo F0,
+                    # que fixou mcp==1.30.0 — última 1.x com essa API)
 
 # Database
 asyncpg==0.29.0  # PostgreSQL async driver
@@ -760,22 +770,30 @@ Total time: < 1 segundo
 
 ---
 
-### ADR-006: MCP via Streamable HTTP, Agnóstico de Cliente, Sem Autenticação em V1.0
+### ADR-006: MCP via Streamable HTTP com TLS, Agnóstico de Cliente, Sem Autenticação em V1.0
 
-**Decisão:** Servidor MCP roda como serviço Streamable HTTP persistente na rede interna, aceitando qualquer cliente MCP padrão, sem autenticação.
+**Decisão:** Servidor MCP roda como serviço Streamable HTTP persistente na rede interna, com TLS (HTTPS), aceitando qualquer cliente MCP padrão, sem autenticação.
 **Razão:**
 - ✅ Funciona com qualquer cliente MCP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.) simultaneamente
 - ✅ Não fica preso a um único cliente
 - ✅ Rede interna é assumida confiável, então autenticação não é necessária em V1.0
 - ✅ Simplifica drasticamente o desenvolvimento inicial
+- ✅ TLS é obrigatório **mesmo assim** — não por política de segurança da arquitetura, mas porque clientes MCP reais recusam se conectar a um conector remoto via `http://` simples (confirmado empiricamente no protótipo F0 com Claude Desktop: a conexão TLS era abandonada antes mesmo de chegar uma requisição HTTP ao servidor)
 
 **Alternativas Rejeitadas:**
 - ❌ stdio (subprocesso por usuário): não permite múltiplos clientes/usuários na mesma instância compartilhada
 - ❌ HTTP+SSE (endpoint `/sse`): transporte usado nas versões 1.0-1.3 deste ADR; substituído por ser a versão anterior/legada do protocolo MCP para transporte remoto — Streamable HTTP é o transporte atual recomendado pela especificação, com endpoint único (`/mcp`) e mesmo modelo de sessão
+- ❌ HTTP simples (sem TLS): tecnicamente mais simples e "suficiente" para uma rede interna confiável, mas rejeitado porque, na prática, clientes MCP desktop recusam conectores remotos sem HTTPS — não é uma opção viável mesmo em V1.0
 - ❌ Proprietário: dificulta integração com novos clientes
 - ❌ Autenticação desde já: complexidade desnecessária para rede confiável (fica para quando o requisito de exposição remota existir — ver §12)
 
-**Substitui:** os antigos ADR-007 (Client Identification Automática) e ADR-008 (Autenticação Multi-User via API Key), removidos junto com o serviço correspondente, e revisa a própria decisão de transporte deste ADR-006 (v1.0-1.3: HTTP+SSE → v1.4: Streamable HTTP). A especificação técnica dos ADRs de identificação é preservada como referência para reintrodução futura.
+**Consequências práticas confirmadas no protótipo F0 (ver `F0_PROTOTIPO_MCP_MEMORIA.md`):**
+- Certificado TLS é dependência obrigatória mesmo em desenvolvimento local — mkcert para gerar um certificado confiável localmente (máquina única); CA interna instalada em cada máquina cliente quando o servidor precisar ser acessado por mais de uma máquina na rede.
+- A CLI padrão do uvicorn (`--ssl-certfile`/`--ssl-keyfile`) **não negocia ALPN** — alguns clientes (Chromium/Electron) abandonam a conexão TLS sem nunca enviar uma requisição HTTP se o servidor não participar da negociação ALPN. É necessário configurar um `ssl_context_factory` programático que chame `context.set_alpn_protocols(["http/1.1"])`.
+- O endpoint `/mcp`, se montado via `app.mount("/mcp", ...)` do Starlette/FastAPI, responde com redirect `307` para `/mcp/` quando a requisição bate exatamente em `/mcp` sem barra final — o padrão de URL usado por clientes reais. É necessário registrar também uma rota exata (`app.add_route("/mcp", ...)`) para esse caso, evitando o redirect. O próprio `FastMCP` (wrapper de alto nível do SDK, não usado aqui) resolve isso da mesma forma — registrando uma `Route` exata em vez de um `Mount`.
+- CORS precisa ser habilitado mesmo sem um navegador tradicional envolvido — clientes desktop (Electron) podem validar o conector via `fetch()` no processo de renderer, sujeito à mesma política de CORS de um browser.
+
+**Substitui:** os antigos ADR-007 (Client Identification Automática) e ADR-008 (Autenticação Multi-User via API Key), removidos junto com o serviço correspondente, e revisa a própria decisão de transporte deste ADR-006 (v1.0-1.3: HTTP+SSE → v1.4: Streamable HTTP → v1.5: Streamable HTTP com TLS obrigatório). A especificação técnica dos ADRs de identificação é preservada como referência para reintrodução futura.
 
 ---
 
@@ -839,21 +857,34 @@ git clone <repo>
 cd analysis_app
 cp .env.example .env
 
+# Certificado TLS local (obrigatório — ver ADR-006):
+brew install mkcert && mkcert -install
+mkcert -cert-file certs/server.pem -key-file certs/server-key.pem localhost 127.0.0.1 <ip-da-maquina>
+
 # Docker compose local
 docker-compose -f docker-compose.local.yml up
 
 # Verificar
-curl http://localhost:3000/health
+curl https://localhost:3000/health
 
 # Configuração em cada cliente MCP (exemplo genérico, formato varia por app):
 # {
 #   "mcpServers": {
-#     "analysis": { "url": "http://<ip-da-maquina>:3000/mcp" }
+#     "analysis": { "url": "https://<ip-da-maquina>:3000/mcp" }
 #   }
 # }
 #
 # Repita a mesma URL em Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.
-# Não é necessário nenhum header ou API Key em V1.0.
+# Não é necessário nenhum header ou API Key em V1.0 — mas HTTPS é obrigatório
+# (ver ADR-006): clientes MCP reais recusam conector remoto via http:// simples,
+# mesmo em rede interna confiável. Se o cliente estiver em outra máquina, instale
+# a CA do mkcert (`mkcert -CAROOT`) nela antes de confiar no certificado.
+#
+# ⚠️ Subir o servidor apenas com `uvicorn --ssl-certfile=... --ssl-keyfile=...`
+# não basta: a CLI do uvicorn não negocia ALPN, e alguns clientes (Chromium/Electron)
+# abandonam a conexão TLS sem nunca enviar uma requisição HTTP. É necessário um
+# `ssl_context_factory` programático chamando `context.set_alpn_protocols(["http/1.1"])`
+# (ver protótipo F0, `run_https.py`).
 ```
 
 **Tempo de setup:** 5-10 minutos
