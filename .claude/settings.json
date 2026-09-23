@@ -1,0 +1,33 @@
+{
+  "model": "claude-sonnet-5",
+  "cleanupPeriodDays": 90,
+  "includeCoAuthoredBy": true,
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash(pip install*)",
+      "Bash(uv *)",
+      "Bash(npm install*)",
+      "Bash(npm run*)",
+      "Bash(npx *)",
+      "Bash(ruff *)",
+      "Bash(uvicorn *)",
+      "Bash(python *)",
+      "Bash(git status)",
+      "Bash(git add *)"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf*)"
+    ]
+  }
+}
