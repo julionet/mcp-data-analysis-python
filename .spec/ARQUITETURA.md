@@ -2,7 +2,7 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.6 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.7 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
 **Data:** 2026-09-23
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
@@ -16,6 +16,8 @@
 > **Nota de revisão (v1.4 → v1.5):** documento aprovado. O protótipo F0 (`F0_PROTOTIPO_MCP_MEMORIA.md`) validou a decisão do ADR-006 na prática e revelou 4 ajustes técnicos necessários para o F1 real: (1) **TLS agora é obrigatório mesmo em rede interna** — clientes MCP reais (confirmado: Claude Desktop) recusam conector remoto via `http://` simples, independente da rede ser confiável; (2) a dependência `mcp` precisa de teto de versão — a v2.0.0 do SDK remove os decorators `list_tools()`/`call_tool()` da classe de baixo nível `Server` usada no ADR-006; (3) o handshake TLS precisa negociar ALPN explicitamente (a CLI padrão do uvicorn não faz isso, exigindo `ssl_context_factory` programático); (4) o endpoint MCP montado via `app.mount()` sob FastAPI precisa de uma rota exata adicional para o path sem barra final, evitando um redirect 307 que alguns clientes não toleram bem. Atualizados: ADR-006 (§7), §5.1 (dependências), §9.1 (plano de implantação local), nova nota em §6.1.
 
 > **Nota de revisão (v1.5 → v1.6):** documento aprovado. Adicionada uma nova seção **§9.2 Produção Interna (nginx + Certbot)** — um servidor de produção dedicado, ainda em rede interna (Restrição T1 continua valendo), usando nginx como reverse proxy para terminação TLS e Certbot para emissão/renovação de certificado. Documentadas as duas estratégias possíveis para o Certbot: desafio DNS-01 contra um domínio público (não exige expor o servidor à internet, só o DNS do domínio) ou uma CA interna própria compatível com ACME (sem depender de domínio público, mas exige instalar essa CA em cada máquina cliente). A antiga §9.2 (Remoto — Futuro, Kubernetes) foi renumerada para §9.3. Nenhuma outra decisão de arquitetura foi alterada — o app continua servindo `/mcp` sem autenticação (ADR-006).
+
+> **Nota de revisão (v1.6 → v1.7):** documento aprovado. Explicitada em §9.2 a diferença de exigência de confiança do cliente entre as duas opções de Certbot: a Opção A (DNS-01/Let's Encrypt) não exige nenhuma configuração nos clientes MCP, porque a CA do Let's Encrypt já vem pré-instalada por padrão em qualquer sistema operacional/runtime — igual a qualquer API pública comum; a Opção B (CA interna) exige instalar/confiar nessa CA em cada máquina cliente, exatamente como o mkcert em §9.1. A distinção não é "nginx+Certbot vs. mkcert", é se a CA emissora já é publicamente confiável de fábrica ou é uma CA privada criada para esse ambiente.
 
 ---
 
@@ -929,14 +931,18 @@ certbot certonly --dns-<provedor> \
 ```
 Não exige expor o servidor à internet — o desafio DNS-01 só cria um registro TXT no DNS **público** do domínio; o hostname em si pode continuar resolvendo só internamente (DNS split-horizon).
 
+> **Confiança do cliente: nenhuma configuração extra.** O certificado é assinado pela CA do Let's Encrypt, que já vem pré-instalada por padrão em todo sistema operacional, navegador e runtime (macOS, Windows, Linux, Node.js, etc.) — exatamente como qualquer certificado de uma API pública comum. Nenhum cliente MCP precisa instalar ou confiar em nada; a URL `https://analise.empresa.internal:3000/mcp` funciona de imediato, do mesmo jeito que funcionaria acessando qualquer site HTTPS público.
+
 **Opção B — CA interna própria (sem depender de domínio público):**
 ```bash
 certbot certonly --server https://sua-ca-interna.empresa.internal/acme/directory \
   -d analise.empresa.internal
 ```
-Certbot suporta qualquer servidor compatível com ACME via `--server`, não só o Let's Encrypt — uma CA interna (ex.: `step-ca`) resolve isso sem tocar em DNS público. Contrapartida: essa CA interna precisa ser instalada como confiável em cada máquina cliente — mesma mecânica do `mkcert -install` da seção 9.1, só que centralizada, com renovação automática pelo Certbot em vez de manual por máquina.
+Certbot suporta qualquer servidor compatível com ACME via `--server`, não só o Let's Encrypt — uma CA interna (ex.: `step-ca`) resolve isso sem tocar em DNS público.
 
-> Nenhuma das duas opções muda o resto da arquitetura: o app continua servindo em `/mcp` sem autenticação, conforme ADR-006 — só a origem/renovação do certificado muda.
+> **Confiança do cliente: mesma exigência do mkcert (seção 9.1).** Essa CA interna é privada — não está pré-instalada em lugar nenhum, então nenhum cliente confia nela por padrão. É necessário instalar/confiar nessa CA em cada máquina cliente antes de conseguir se conectar via HTTPS (import do certificado raiz no Keychain/Certificate Store/`ca-certificates`, conforme o SO). A vantagem sobre o mkcert é só a renovação centralizada e automática pelo Certbot, em vez de manual por máquina — mas o ônus de confiança client-side é o mesmo.
+
+> **Resumindo a diferença entre as opções:** o que exige (ou não) tocar em cada cliente não é "nginx+Certbot vs. mkcert" — é se o certificado é assinado por uma CA pública já confiável de fábrica (Opção A) ou por uma CA privada que só existe porque você a criou (Opção B e mkcert). Nenhuma das duas opções muda o resto da arquitetura: o app continua servindo em `/mcp` sem autenticação, conforme ADR-006 — só a origem/renovação do certificado, e a necessidade (ou não) de configurar os clientes, mudam.
 
 ### 9.3 Remoto (Produção — Futuro)
 
