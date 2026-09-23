@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.8 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.9 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
 **Data:** 2026-09-23
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.8 → v1.9):** documento aprovado. Removida inteiramente a camada de **Handlers Python** do servidor — `HandlerRegistry`, pasta `handlers/`, `HandlerRepository`, ADR-005 e a tabela `custom_handlers` do schema (decisão: remover, não manter tabela sem uso — o projeto ainda não está em produção, então não há risco de `DROP TABLE` destrutivo). O servidor deixa de transformar dados: executa a query parametrizada e devolve o **dataset bruto** ao cliente MCP, que interpreta/agrega os dados do lado do LLM. Em troca, ganha uma nova camada de **Controle de Volume** (`VolumeGuardService`): pré-checagem via `SELECT COUNT(*)`, checagem de tamanho serializado em KB, e recusa estruturada com pedido de refinamento (ou confirmação explícita via parâmetro reservado `confirmar_volume_alto`) — ver nova seção **§3.4**. Limites (`DEFAULT_MAX_RESULT_ROWS`, `DEFAULT_MAX_RESULT_SIZE_KB`) são 100% globais via `.env`, sem override por análise. Atualizados: §1.2, §2.1, §2.2 (schema), nova §2.3 (formato de `analyses.parameters` e conversão para JSON Schema MCP), §3.1, §3.2, nova §3.4, §4.3 (era Registry Pattern, agora Volume Guard), §5.1 (`cryptography`/Fernet), §5.2 (estrutura de pastas), §6.1 (startup), §7 (ADR-005 reescrito), §8.2 (formaliza Fernet para `connection_config.password`), §10.3, §11, §13, §14. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` para o racional completo e NEGOCIO.md v1.6 / FEATURES_ROADMAP.md v1.6 para as mudanças correspondentes nos outros documentos.
 
 > **Nota de revisão (v1.1 → v1.2):** removidos `ClientIdentificationService`, `UserIdentificationService`, as tabelas `mcp_clients`, `users`, `user_api_keys`, e os ADRs de autenticação (eram ADR-007 e ADR-008). O transporte deixou de ser descrito como stdio (subprocesso local por usuário) e passou a ser **HTTP+SSE**, um único serviço na rede interna acessível por múltiplos clientes MCP simultaneamente. Também corrigida a ordem de criação de tabelas no schema (havia uma FK para uma tabela definida mais adiante) e a numeração duplicada de seções (havia duas seções "12" e duas "13").
 
@@ -59,8 +61,7 @@
 │  ├─ Processo uvicorn (porta 3000)     │
 │  │  ├─ FastAPI Server                 │
 │  │  ├─ MCP Interface (Streamable HTTP)       │
-│  │  ├─ Handler Registry               │
-│  │  └─ Thread Pool (handlers)         │
+│  │  └─ Volume Guard (pré-check)       │
 │  ├─ PostgreSQL (config)                │
 │  └─ PostgreSQL (data source)           │
 └────────────────────────────────────────┘
@@ -102,10 +103,10 @@ Sem `command`, `args` ou `env` — o servidor já está rodando de forma indepen
 │  ┌────────────────────────────────────────────┐    │
 │  │ FastAPI MCP Servers (replicas)             │    │
 │  │  ├─ MCP Interface (Streamable HTTP)               │    │
-│  │  └─ Handler Registry                       │    │
+│  │  └─ Volume Guard (pré-check)                │    │
 │  ├────────────────────────────────────────────┤    │
 │  │ Celery Workers (replicas)                  │    │
-│  │  └─ Heavy handler execution                │    │
+│  │  └─ Execução de queries pesadas/demoradas  │    │
 │  ├────────────────────────────────────────────┤    │
 │  │ Redis Cluster (Cache + Task Queue)         │    │
 │  ├────────────────────────────────────────────┤    │
@@ -149,10 +150,10 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │  │  ├─ execute(analysis_id, params)                │   │
 │  │  │  ├─ get_all_analyses()                          │   │
 │  │  │  └─ validate_analysis(schema)                   │   │
-│  │  ├─ HandlerRegistry                                │   │
-│  │  │  ├─ load_from_database()                        │   │
-│  │  │  ├─ load_from_filesystem()                      │   │
-│  │  │  └─ get_handler(type)                           │   │
+│  │  ├─ VolumeGuardService                             │   │
+│  │  │  ├─ check_row_count(sql, params)                │   │
+│  │  │  ├─ check_serialized_size(result)                │   │
+│  │  │  └─ build_refinement_response(estimate, limit)   │   │
 │  │  ├─ CacheService                                   │   │
 │  │  │  ├─ get_or_execute(analysis_id, params)         │   │
 │  │  │  └─ invalidate_by_source(source_id)             │   │
@@ -176,24 +177,11 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  └─────────────────────────────────────────────────────┘   │
 │                           ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │         Handlers (Transformations)                 │   │
-│  │  ├─ DataHandler (Abstract)                         │   │
-│  │  ├─ Built-in/                                      │   │
-│  │  │  ├─ aggregation.py                              │   │
-│  │  │  ├─ filtering.py                                │   │
-│  │  │  └─ normalization.py                            │   │
-│  │  └─ Custom/                                        │   │
-│  │     ├─ anomaly_detector.py                         │   │
-│  │     └─ revenue_forecast.py                         │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                           ↓                                  │
-│  ┌─────────────────────────────────────────────────────┐   │
 │  │         Data Access (Repository)                   │   │
 │  │  ├─ AnalysisRepository                             │   │
 │  │  ├─ DataSourceRepository                           │   │
 │  │  ├─ VersionRepository                              │   │
-│  │  ├─ ExecutionRepository                            │   │
-│  │  └─ HandlerRepository                              │   │
+│  │  └─ ExecutionRepository                            │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -210,7 +198,7 @@ CREATE TABLE data_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) UNIQUE NOT NULL,
     type VARCHAR(50) NOT NULL,  -- postgresql, mysql, sqlserver, mongodb, api
-    connection_config JSONB NOT NULL,  -- {host, port, database, ...}
+    connection_config JSONB NOT NULL,  -- {host, port, database, user, password (Fernet), sslmode} — ver §8.2
     is_active BOOLEAN DEFAULT true,
     created_by VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
@@ -236,8 +224,9 @@ CREATE TABLE analysis_steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
     step_order INT NOT NULL,
-    step_type VARCHAR(50) NOT NULL,  -- query, transform, aggregate
-    definition JSONB NOT NULL,  -- {sql, handler, params, ...}
+    step_type VARCHAR(50) NOT NULL,  -- query (único tipo em uso em V1.0; coluna mantida
+                                      -- para permitir múltiplas queries por análise)
+    definition JSONB NOT NULL,  -- {sql, params, ...}
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(analysis_id, step_order)
@@ -256,22 +245,7 @@ CREATE TABLE analysis_versions (
     UNIQUE(analysis_id, version_number)
 );
 
--- Tabela 5: Handlers Customizados
-CREATE TABLE custom_handlers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    handler_type VARCHAR(100) UNIQUE NOT NULL,
-    module_path VARCHAR(255) NOT NULL,  -- custom.anomaly_detector
-    class_name VARCHAR(100) NOT NULL,   -- AnomalyDetector
-    description TEXT,
-    params_schema JSONB,
-    is_active BOOLEAN DEFAULT true,
-    execution_profile VARCHAR(50),  -- light, heavy, cpu_bound
-    estimated_duration_ms INT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Tabela 6: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
+-- Tabela 5: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),
@@ -296,6 +270,60 @@ CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
 ```
 
 > As tabelas `mcp_clients`, `users` e `user_api_keys`, e as colunas `user_id`, `username`, `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history`, foram removidas de V1.0. A especificação completa delas (com código de middleware, repositórios etc.) fica preservada como referência para quando esse requisito voltar ao escopo — ver §12 Roadmap Arquitetural.
+>
+> A tabela `custom_handlers` também foi removida do schema (revisão v1.9) — a camada de Handlers Python deixou de existir; ver nota de revisão no topo do documento e `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md`.
+
+---
+
+### 2.3 Formato de `analyses.parameters` e Conversão para JSON Schema MCP
+
+O campo `analyses.parameters` (JSONB, §2.2 Tabela 2) segue um formato fixo por parâmetro:
+
+```json
+{
+  "<nome_parametro>": {
+    "type": "string | integer | number | boolean | date | datetime",
+    "required": true,
+    "description": "Texto que explica o parâmetro — usado pelo LLM pra saber o que perguntar ao usuário",
+    "default": null,
+    "enum": ["valor1", "valor2"],
+    "min": null,
+    "max": null
+  }
+}
+```
+
+**Exemplo real (`vendas_por_regiao`):**
+```json
+{
+  "data_inicial": { "type": "date", "required": true, "description": "Data inicial do período de vendas (YYYY-MM-DD)" },
+  "data_final": { "type": "date", "required": true, "description": "Data final do período de vendas (YYYY-MM-DD)" },
+  "regiao": { "type": "string", "required": false, "description": "Filtrar por uma região específica", "enum": ["Norte", "Sul", "Leste", "Oeste", "Centro"] }
+}
+```
+
+**Módulo compartilhado** (usado por F5 — `list_tools` — e pelo Execution Engine F4, mesma fonte de verdade, sem duplicar regras):
+```
+schemas/analysis_parameters.py
+├─ to_json_schema(parameters: dict) -> dict
+│     # usado por F5 (list_tools) — gera o inputSchema padrão MCP
+└─ to_pydantic_model(parameters: dict) -> Type[BaseModel]
+      # usado pelo Execution Engine (F4) — valida antes de executar
+```
+
+**Mapeamento de tipos** (`type` interno → JSON Schema):
+
+| `type` (interno) | JSON Schema `type` | JSON Schema `format` |
+|---|---|---|
+| string | string | — |
+| integer | integer | — |
+| number | number | — |
+| boolean | boolean | — |
+| date | string | date |
+| datetime | string | date-time |
+
+> O parâmetro reservado `confirmar_volume_alto` (§3.4) não passa por este módulo — é injetado
+> diretamente pelo `mcp_transport/tools.py` no `inputSchema` de toda tool, por ser global.
 
 ---
 
@@ -315,12 +343,9 @@ CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
 ┌────────▼────────────────────────────┐
 │   FastAPI MCP Server                │
 │  list_tools() endpoint               │
-│  ├─ 1. HandlerRegistry.initialize() │
-│  │    ├─ Load from database         │
-│  │    └─ Load from filesystem       │
-│  ├─ 2. AnalysisService.get_all()   │
+│  ├─ 1. AnalysisService.get_all()   │
 │  │    └─ Query: SELECT * analyses   │
-│  └─ 3. Retorna JSON schema          │
+│  └─ 2. Retorna JSON schema          │
 └────────┬────────────────────────────┘
          │
          ├─ [análise_1, análise_2, ...]
@@ -359,19 +384,18 @@ CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
 │  │    ├─ Load analysis definition        │
 │  │    ├─ Get DataSource config           │
 │  │    ├─ Select Adapter                  │
-│  │    └─ For each step:                  │
-│  │        ├─ STEP 1 (query)              │
-│  │        │  ├─ Adapter.connect()        │
-│  │        │  ├─ Adapter.execute_query()  │
-│  │        │  └─ Result: DataFrame        │
-│  │        ├─ STEP 2 (transform)         │
-│  │        │  ├─ HandlerRegistry.get()   │
-│  │        │  ├─ Handler.execute()       │
-│  │        │  └─ Result: transformed     │
-│  │        └─ STEP N (...)               │
+│  │    ├─ VolumeGuardService.check_row_count()          │
+│  │    │    ├─ Adapter.execute_query(SELECT COUNT(*))  │
+│  │    │    └─ Excede limite? → devolve refinamento_necessario, PARA aqui │
+│  │    ├─ STEP 1 (query)                  │
+│  │    │    ├─ Adapter.connect()          │
+│  │    │    ├─ Adapter.execute_query()    │
+│  │    │    └─ Result: dataset bruto      │
+│  │    └─ VolumeGuardService.check_serialized_size()    │
+│  │         └─ Excede KB? → devolve refinamento_necessario (mesmo com count ok) │
 │  ├─ 4. AuditService.log_execution()      │
 │  ├─ 5. CacheService.set(result, ttl)    │
-│  └─ 6. Return JSON result               │
+│  └─ 6. Return JSON result (dataset bruto)│
 └─────────┬──────────────────────────────────┘
           │
 ┌─────────▼────────────────────────┐
@@ -439,6 +463,73 @@ Rollback (se necessário):
 
 ---
 
+### 3.4 Fluxo: Controle de Volume de Dados
+
+Como o servidor não transforma mais os dados (§1, §2.1), o dataset bruto vai
+inteiro para o cliente MCP — e um resultado de milhares de linhas pode custar
+centenas de milhares de tokens. Esta camada evita isso, em duas etapas:
+
+```
+1. Cliente MCP chama execute_analysis(id, params)
+2. VolumeGuardService roda um SELECT COUNT(*) barato, com os mesmos filtros
+   da query real, ANTES de buscar qualquer dado
+   ├─ count > DEFAULT_MAX_RESULT_ROWS → RECUSA (passo 5), nunca busca os dados completos
+   └─ count <= DEFAULT_MAX_RESULT_ROWS → segue para o passo 3
+3. AnalysisService executa a query completa (STEP 1) e serializa o resultado em JSON
+   └─ VolumeGuardService confere o tamanho real em KB — segunda checagem de segurança
+      (o count de linhas pode não refletir o tamanho real se as colunas forem muito largas)
+4. Se dentro dos dois limites: devolve o dataset bruto normalmente
+5. Se qualquer checagem falhar (linhas OU KB) e confirmar_volume_alto=false (default):
+   devolve uma resposta estruturada "refinamento_necessario" (ver exemplo abaixo),
+   sem nunca ter buscado o dataset completo (a menos que a falha tenha sido a de KB,
+   caso em que os dados já foram buscados só para medir — ver nota abaixo)
+```
+
+> Nota: como a checagem de KB só é possível depois de serializar o resultado, o caso
+> "count baixo mas colunas muito largas" busca o dado uma vez para medir e ainda assim
+> recusa devolvê-lo ao cliente. É um custo aceito (query já filtrada pelo `COUNT(*)`
+> anterior, então o volume de linhas já é baixo) em troca de nunca devolver ao cliente
+> um payload maior que o limite configurado.
+
+**Parâmetro reservado `confirmar_volume_alto`** — injetado pelo servidor no JSON Schema
+de toda tool MCP (não cadastrado em `analyses.parameters`, é global):
+```json
+{
+  "confirmar_volume_alto": {
+    "type": "boolean",
+    "required": false,
+    "default": false,
+    "description": "Confirma execução mesmo que o resultado seja grande (maior consumo de tokens)"
+  }
+}
+```
+
+**Resposta de recusa** (`confirmar_volume_alto=false`, volume acima do limite):
+```json
+{
+  "status": "refinamento_necessario",
+  "estimativa": { "linhas": 8400, "tamanho_estimado_kb": 510 },
+  "limite": { "linhas": 500, "tamanho_kb": 150 },
+  "mensagem": "Sua consulta retornaria aproximadamente 8.400 linhas (~510KB), acima do limite de 500 linhas / 150KB. Refine o período ou adicione filtros (ex: região, produto). Se quiser continuar mesmo assim, chame novamente com confirmar_volume_alto=true — atenção: isso pode consumir um volume alto de tokens."
+}
+```
+
+Se o cliente chamar de novo com `confirmar_volume_alto=true`, o servidor **ignora o
+limite** e devolve o dataset completo, incluindo `"aviso": "resultado grande, enviado
+por confirmação explícita"` no payload.
+
+**Configuração — 100% via `.env`, sem override por análise:**
+```
+# .env
+DEFAULT_MAX_RESULT_ROWS=500
+DEFAULT_MAX_RESULT_SIZE_KB=150
+```
+
+Ambos os limites são globais; não há coluna nova em `analyses` para isso, e nenhuma
+migration de schema é necessária além da remoção de `custom_handlers` (§2.2).
+
+---
+
 ## 4. Padrões de Design
 
 ### 4.1 Repository Pattern
@@ -489,28 +580,35 @@ adapter = AdapterFactory.create_adapter('postgresql', config)
 data = await adapter.execute_query(sql)
 ```
 
-### 4.3 Registry Pattern (Handlers)
+### 4.3 Volume Guard (Controle de Volume)
+
+Não é um Registry nem depende de discovery de filesystem/banco — é um serviço leve,
+usado diretamente pelo `AnalysisService` dentro do fluxo de execução (ver §3.4):
 
 ```python
-class HandlerRegistry:
-    _registry: Dict[str, Type[DataHandler]] = {}
+class VolumeGuardService:
+    def __init__(self, max_rows: int, max_size_kb: int):
+        self.max_rows = max_rows          # DEFAULT_MAX_RESULT_ROWS (.env)
+        self.max_size_kb = max_size_kb    # DEFAULT_MAX_RESULT_SIZE_KB (.env)
 
-    @classmethod
-    async def initialize(cls, db):
-        await cls._load_from_database(db)
-        await cls._load_from_filesystem()
+    async def check_row_count(self, adapter, count_sql: str, params: dict) -> int:
+        count = await adapter.execute_query(count_sql, params, scalar=True)
+        if count > self.max_rows:
+            raise VolumeExceededError(estimated_rows=count)
+        return count
 
-    @classmethod
-    def get_handler(cls, handler_type: str) -> DataHandler:
-        if handler_type not in cls._registry:
-            raise ValueError(f"Handler '{handler_type}' não encontrado")
-        return cls._registry[handler_type]()
+    def check_serialized_size(self, result: list[dict]) -> int:
+        size_kb = len(json.dumps(result).encode("utf-8")) / 1024
+        if size_kb > self.max_size_kb:
+            raise VolumeExceededError(estimated_size_kb=size_kb)
+        return size_kb
 
-    @classmethod
-    def get_all_metadata(cls) -> Dict:
+    def build_refinement_response(self, error: VolumeExceededError) -> dict:
         return {
-            handler_type: cls._registry[handler_type]().get_metadata()
-            for handler_type in cls._registry
+            "status": "refinamento_necessario",
+            "estimativa": {"linhas": error.estimated_rows, "tamanho_estimado_kb": error.estimated_size_kb},
+            "limite": {"linhas": self.max_rows, "tamanho_kb": self.max_size_kb},
+            "mensagem": "...",  # ver §3.4 para o texto completo
         }
 ```
 
@@ -586,6 +684,9 @@ marshmallow==3.20.1
 python-json-logger==2.0.7
 structlog==23.2.0
 
+# Security
+cryptography==41.0.7  # Fernet — cifra connection_config.password em repouso (ver §8.2)
+
 # Utils
 python-dotenv==1.0.0
 uuid6==1.0.3
@@ -612,24 +713,10 @@ analysis_app/
 │   ├── sqlserver.py          # via aioodbc/pyodbc — requer driver ODBC do SO (ver nota abaixo)
 │   └── api_adapter.py
 │
-├── handlers/
-│   ├── __init__.py
-│   ├── base_handler.py       # DataHandler (abstract)
-│   ├── built_in/
-│   │   ├── __init__.py
-│   │   ├── aggregation.py
-│   │   ├── filtering.py
-│   │   ├── normalization.py
-│   │   └── temporal.py
-│   └── custom/
-│       ├── __init__.py
-│       ├── anomaly_detector.py
-│       └── revenue_forecast.py
-│
 ├── services/
 │   ├── __init__.py
 │   ├── analysis_service.py   # Core execution logic
-│   ├── handler_registry.py   # Dynamic handler loading
+│   ├── volume_guard_service.py  # Pré-checagem de linhas/KB (ver §3.4, §4.3)
 │   ├── cache_service.py      # Caching logic
 │   ├── version_service.py    # Versioning & rollback
 │   └── audit_service.py      # Logging (simplificado)
@@ -640,15 +727,14 @@ analysis_app/
 │   ├── analysis_repo.py
 │   ├── data_source_repo.py
 │   ├── version_repo.py
-│   ├── execution_repo.py
-│   └── handler_repo.py
+│   └── execution_repo.py
 │
 ├── schemas/
 │   ├── __init__.py
 │   ├── analysis.py           # Pydantic models
 │   ├── data_source.py
 │   ├── execution.py
-│   └── handler.py
+│   └── analysis_parameters.py  # to_json_schema() / to_pydantic_model() — ver proposta §5
 │
 ├── mcp_transport/             # nome definitivo — "mcp/" colide com o SDK `mcp` importado
 │   │                          # dentro do próprio pacote (confirmado na implementação de F1)
@@ -671,7 +757,7 @@ analysis_app/
 └── tests/
     ├── __init__.py
     ├── test_analysis_service.py
-    ├── test_handlers.py
+    ├── test_volume_guard_service.py
     ├── test_cache_service.py
     └── fixtures.py
 ```
@@ -685,16 +771,14 @@ analysis_app/
 ```
 FastAPI Startup (processo uvicorn persistente):
 ├─ 1. Load config (.env)
+│    └─ Inclui DEFAULT_MAX_RESULT_ROWS, DEFAULT_MAX_RESULT_SIZE_KB (VolumeGuardService)
 ├─ 2. Connect to PostgreSQL (config DB)
-├─ 3. Initialize HandlerRegistry
-│    ├─ Load custom_handlers from DB
-│    └─ Load built-in handlers from filesystem
-├─ 4. Setup connection pools
+├─ 3. Setup connection pools
 │    └─ PostgreSQL, MongoDB, Redis (se ativado)
-├─ 5. Initialize CacheService
+├─ 4. Initialize CacheService
 │    └─ Decide: memory (local) ou Redis (remoto)
-├─ 6. Verify all data_sources are reachable
-└─ 7. Register MCP endpoints via Streamable HTTP
+├─ 5. Verify all data_sources are reachable
+└─ 6. Register MCP endpoints via Streamable HTTP
     ├─ list_tools()
     ├─ call_tool()
     ├─ list_resources()
@@ -766,14 +850,34 @@ Total time: < 1 segundo
 
 ---
 
-### ADR-005: Handlers como Python Classes
+### ADR-005: Servidor Entrega Dataset Bruto — Sem Camada de Handlers
 
-**Decisão:** Handlers herdam DataHandler base class
+**Decisão:** O servidor não transforma mais os dados. Ele executa a query parametrizada
+de `analysis_steps` e devolve o resultado bruto (JSON) ao cliente MCP; é o LLM do lado
+do cliente quem interpreta, calcula, agrega e visualiza os dados, a cada pedido.
 **Razão:**
-- ✅ Type safety (Pydantic validation)
-- ✅ Metadata autodiscovery
-- ✅ Fácil testes unitários
-- ✅ Hot reload sem restart
+- ✅ O espaço de perguntas de análise que um usuário pode fazer é infinito ("tendência
+  de vendas", "sazonalidade", "correlação entre X e Y") — não é viável pré-programar
+  um handler Python para cada tipo de análise possível
+- ✅ Qualquer LLM moderno já sabe interpretar, agregar e até gerar gráfico a partir de
+  um dataset bruto — reimplementar isso em Python no servidor é trabalho duplicado
+- ✅ Reduz drasticamente a superfície de código do servidor (sem Registry, sem discovery
+  de filesystem/banco, sem classes de handler para manter)
+- ⚠️ Risco introduzido: datasets grandes podem estourar o contexto/custo de tokens do
+  cliente — mitigado pelo **Volume Guard** (§3.4, §4.3), que recusa e pede refinamento
+  antes de buscar dados demais
+
+**Alternativas Rejeitadas:**
+- ❌ Manter Handlers Python (`HandlerRegistry`, discovery built-in + custom): não escala
+  para o espaço aberto de análises que os usuários pedem; cada handler novo exigia
+  código Python, indo contra o objetivo de "zero código novo por análise" (NEGOCIO.md O1)
+- ❌ Handlers "genéricos" configuráveis via JSON (ex.: um handler de agregação
+  parametrizável): ainda limitado às operações pré-pensadas; o LLM cliente já faz isso
+  sem limite de operações suportadas
+
+**Substitui:** o antigo ADR-005 ("Handlers como Python Classes"), a tabela `custom_handlers`
+(removida do schema, §2.2) e o antigo F3 do roadmap ("HandlerRegistry e Discovery"),
+agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 
 ---
 
@@ -843,13 +947,27 @@ Total time: < 1 segundo
 
 ```
 ✅ Armazenar:
-├─ connection_config em JSONB (encrypted)
+├─ connection_config em JSONB (campo `password` e demais credenciais cifrados
+│  com Fernet — biblioteca `cryptography` do Python — antes de persistir)
 ├─ Usar .env para secrets (Docker)
 └─ Log de execução como trilha de acesso
 
 Exemplo .env:
 POSTGRES_CONFIG_PASSWORD=secure_password
 MONGODB_CONNECTION_STRING=mongodb+srv://...
+FERNET_KEY=<chave gerada com Fernet.generate_key(), fora do repositório>
+```
+
+**Formato de `data_sources.connection_config`** (ver §2.2, Tabela 1 — antes um placeholder):
+```json
+{
+  "host": "192.168.1.10",
+  "port": 5432,
+  "database": "vendas_db",
+  "user": "readonly_user",
+  "password": "<cifrado com Fernet>",
+  "sslmode": "prefer"
+}
 ```
 
 ---
@@ -1018,7 +1136,7 @@ async def health_check():
         "status": "ok",
         "db": await check_postgres(),
         "cache": await check_cache(),
-        "handlers": len(HandlerRegistry._registry),
+        "volume_limits": {"max_rows": settings.DEFAULT_MAX_RESULT_ROWS, "max_size_kb": settings.DEFAULT_MAX_RESULT_SIZE_KB},
         "analyses": await AnalysisService.count()
     }
 ```
@@ -1028,36 +1146,35 @@ async def health_check():
 ## 11. Diagrama de Sequência (Caso de Uso Principal)
 
 ```
-Cliente MCP       FastAPI Server    PostgreSQL    Handler    Cache
-    │                 │                 │            │         │
-    │ list_tools()   │                 │            │         │
-    ├────────────────>│                 │            │         │
-    │                 │ SELECT analyses │            │         │
-    │                 ├────────────────>│            │         │
-    │                 │<────────────────┤            │         │
-    │                 │ load handlers   │            │         │
-    │                 ├────────────────────────────>│         │
-    │                 │<────────────────────────────┤         │
-    │<────────────────┤ [análise_1, análise_2, ...] │         │
-    │                 │                 │            │         │
-    │ execute_analysis│                 │            │         │
-    ├────────────────>│                 │            │         │
-    │                 │ get_or_execute  │            │         │
-    │                 ├───────────────────────────────────────>│
-    │                 │<───────────────────────────────────────┤ cache miss
-    │                 │ SELECT steps    │            │         │
-    │                 ├────────────────>│            │         │
-    │                 │<────────────────┤            │         │
-    │                 │ execute query   │            │         │
-    │                 │ + handlers      │            │         │
-    │                 ├────────────────────────────>│         │
-    │                 │<────────────────────────────┤         │
-    │                 │ set cache       │            │         │
-    │                 ├───────────────────────────────────────>│
-    │                 │ log execution   │            │         │
-    │                 ├────────────────>│            │         │
-    │<────────────────┤ result (JSON)   │            │         │
-    │                 │                 │            │         │
+Cliente MCP       FastAPI Server    PostgreSQL              Cache
+    │                 │                 │                      │
+    │ list_tools()   │                 │                      │
+    ├────────────────>│                 │                      │
+    │                 │ SELECT analyses │                      │
+    │                 ├────────────────>│                      │
+    │                 │<────────────────┤                      │
+    │<────────────────┤ [análise_1, análise_2, ...]            │
+    │                 │                 │                      │
+    │ execute_analysis│                 │                      │
+    ├────────────────>│                 │                      │
+    │                 │ get_or_execute  │                      │
+    │                 ├─────────────────────────────────────────>│
+    │                 │<─────────────────────────────────────────┤ cache miss
+    │                 │ SELECT steps    │                      │
+    │                 ├────────────────>│                      │
+    │                 │<────────────────┤                      │
+    │                 │ SELECT COUNT(*) (Volume Guard pré-check)│
+    │                 ├────────────────>│                      │
+    │                 │<────────────────┤ excede limite? recusa aqui
+    │                 │ execute query (dataset bruto)          │
+    │                 ├────────────────>│                      │
+    │                 │<────────────────┤                      │
+    │                 │ set cache       │                      │
+    │                 ├─────────────────────────────────────────>│
+    │                 │ log execution   │                      │
+    │                 ├────────────────>│                      │
+    │<────────────────┤ result (JSON, dataset bruto)            │
+    │                 │                 │                      │
 ```
 
 ---
@@ -1101,7 +1218,7 @@ V2.0 (Ecosystem):
 | **Cache (Local)** | Memória + Dict | Zero overhead, suficiente |
 | **Cache (Remoto)** | Redis | Distributed, cluster-ready |
 | **Task Queue** | Celery | Escala horizontal, remoto |
-| **Handlers** | Python classes | Type-safe, discoverable |
+| **Controle de Volume** | VolumeGuardService (COUNT(*) + checagem de KB) | Evita estourar tokens do cliente, sem handler nenhum |
 | **Containerização** | Docker | Portabilidade local ↔ remoto |
 | **Orchestração** | Docker Compose (local), Kubernetes (remoto) | Simplicity + power |
 
@@ -1114,7 +1231,7 @@ V2.0 (Ecosystem):
 ```
 ├─ FastAPI hello world (Streamable HTTP)
 ├─ 1 PostgreSQL adapter
-├─ HandlerRegistry básico
+├─ VolumeGuardService básico (checagem de linhas)
 ├─ 1 análise de exemplo
 ├─ MCP list_tools() + call_tool()
 ├─ 2 clientes MCP diferentes conectados simultaneamente

@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.5 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório)
+**Versão:** 1.6 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**)
 **Data:** 2026-09-23
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.5 → v1.6):** documento aprovado. Removida a camada de Handlers Python do servidor (ver NEGOCIO.md v1.6 e ARQUITETURA.md revisão correspondente): o servidor passa a devolver dataset bruto, e é o LLM do cliente MCP quem interpreta/agrega os dados. **F3** deixa de ser "HandlerRegistry e Discovery" e passa a ser **"Controle de Volume de Resultado"** (pré-checagem `COUNT(*)`, checagem de KB, recusa com refinamento ou confirmação explícita) — esforço cai de 2d para 1d. **F14 (Built-in Handlers)** é **removida inteiramente** do Sprint 2 (-2d). F4 (Execution Engine) mantém as mesmas dependências (F2, F3), só que agora F3 é o Controle de Volume, não mais o HandlerRegistry. Todas as features de F15 em diante são renumeradas em -1 (F15→F14, ..., F24→F23) para não deixar buraco. Total geral: 24→**23 features**, ~33→**~30 dias**. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` para o racional completo.
 
 > **Nota de revisão (v1.1 → v1.2):** removidas F6 (Client Identification) e F6B (User Identification) do Sprint 1 — autenticação não faz parte do escopo de V1.0 (ver NEGOCIO.md §9 T5 e ARQUITETURA.md §7 ADR-006). Removida também a "Sprint 1B: Multi-LLM Oficial" inteira: como o transporte é HTTP+SSE (na época) com protocolo MCP padrão, não existe "gateway" por cliente para construir — qualquer cliente compatível já funciona sem adaptação. A validação multi-cliente virou uma feature leve (F6) dentro do próprio Sprint 1. Todas as features foram renumeradas sequencialmente para não deixar buracos (F1...F23). Os números de esforço, que divergiam entre os documentos anteriores, foram recalculados e unificados aqui.
 
@@ -25,17 +27,18 @@
 |---|---------|-----------|--------|-----------|--------|
 | F1 | FastAPI + MCP Server Setup via Streamable HTTP **com TLS** | 🔴 Crítica | 2.5d | — | 🟩 Done |
 | F2 | PostgreSQL Adapter | 🔴 Crítica | 2d | F1 | 🟩 Done |
-| F3 | HandlerRegistry e Discovery | 🔴 Crítica | 2d | F2 | ⬜ Todo |
+| F3 | Controle de Volume de Resultado | 🔴 Crítica | 1d | F2 | ⬜ Todo |
 | F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | ⬜ Todo |
 | F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | ⬜ Todo |
 | F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | ⬜ Todo |
 | F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | ⬜ Todo |
 
-**Total Sprint 1:** ~11.5 dias (≈ 2 semanas com buffer)
+**Total Sprint 1:** ~10.5 dias (≈ 2 semanas com buffer)
 
 **Destaque:**
 - ✅ F1 + F5 garantem servidor MCP agnóstico de cliente, via Streamable HTTP com TLS
+- ✅ F3 garante que o servidor nunca devolve um dataset grande demais sem o cliente confirmar o custo de tokens
 - ✅ F6 valida na prática que 2+ clientes MCP diferentes conseguem usar o servidor ao mesmo tempo
 - ✅ F8 é um log simples (análise, parâmetros, status, tempo) — sem identificação de usuário/cliente
 
@@ -48,6 +51,30 @@
 ├─ CORSMiddleware habilitado (necessário mesmo sem navegador tradicional envolvido)
 └─ Dependência `mcp` travada com teto de versão (`>=1.9.0,<2.0.0`) — a v2.0.0 remove
    os decorators list_tools()/call_tool() da classe de baixo nível Server
+```
+
+**F3 em detalhe (Controle de Volume de Resultado — substitui o antigo "HandlerRegistry e Discovery"):**
+```
+Objetivo: impedir que uma análise devolva um dataset grande demais para o LLM
+cliente processar, sem nunca buscar os dados completos antes de decidir.
+
+Escopo:
+├─ Pré-checagem barata: SELECT COUNT(*) com os mesmos filtros da query real
+│  ├─ count > DEFAULT_MAX_RESULT_ROWS (.env) → recusa, sem buscar os dados
+│  └─ count dentro do limite → segue para a query completa
+├─ Segunda checagem: tamanho do resultado serializado em KB
+│  └─ excede DEFAULT_MAX_RESULT_SIZE_KB (.env) mesmo com poucas linhas
+│     (colunas largas) → recusa com a mesma mensagem
+├─ Resposta de recusa estruturada (status "refinamento_necessario", com
+│  estimativa de linhas/KB e o limite configurado)
+└─ Parâmetro reservado `confirmar_volume_alto` (injetado no schema de toda
+   tool, não cadastrado em `analyses.parameters`): se true, ignora o limite
+   e devolve o dataset completo com um aviso no payload
+
+Sem Registry Pattern, sem discovery de filesystem/banco, sem classes de
+handler — um serviço leve (`services/volume_guard_service.py`) chamado pelo
+Execution Engine (F4). Ver ARQUITETURA.md (seção de Controle de Volume) e
+`PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` §3 para o mecanismo completo.
 ```
 
 **F6 em detalhe (Validação Multi-Cliente):**
@@ -81,9 +108,8 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F11 | MongoDB Adapter | 🟠 Alta | 1.5d | F2 | ⬜ Todo |
 | F12 | MySQL Adapter | 🟡 Média | 1d | F2 | ⬜ Todo |
 | F13 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | ⬜ Todo |
-| F14 | Built-in Handlers (3x: aggregation, filtering, normalization) | 🟠 Alta | 2d | F3 | ⬜ Todo |
 
-**Total Sprint 2:** ~9 dias
+**Total Sprint 2:** ~7 dias
 
 **F13 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
 
@@ -93,12 +119,12 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F15 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8 | ⬜ Todo |
-| F16 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
-| F17 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
-| F18 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
-| F19 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F14 | ⬜ Todo |
-| F20 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F19 | ⬜ Todo |
+| F14 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8 | ⬜ Todo |
+| F15 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
+| F16 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
+| F17 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
+| F18 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F13 | ⬜ Todo |
+| F19 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F18 | ⬜ Todo |
 
 **Total Sprint 3:** ~9 dias
 
@@ -108,16 +134,16 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F21 | End-to-End Testing (Multi-Cliente) | 🟠 Alta | 1d | F20 | ⬜ Todo |
-| F22 | Production Deployment Guide (Local + Remoto) | 🟠 Alta | 1d | F15 | ⬜ Todo |
-| F23 | User Documentation (Setup por Cliente MCP) | 🟡 Média | 1d | F18 | ⬜ Todo |
-| F24 | Demo & Training (com múltiplos clientes) | 🟡 Média | 1d | F21 | ⬜ Todo |
+| F20 | End-to-End Testing (Multi-Cliente) | 🟠 Alta | 1d | F19 | ⬜ Todo |
+| F21 | Production Deployment Guide (Local + Remoto) | 🟠 Alta | 1d | F14 | ⬜ Todo |
+| F22 | User Documentation (Setup por Cliente MCP) | 🟡 Média | 1d | F17 | ⬜ Todo |
+| F23 | Demo & Training (com múltiplos clientes) | 🟡 Média | 1d | F20 | ⬜ Todo |
 
 **Total Sprint 4:** ~4 dias
 
 **Release:** V1.0 (MVP Local Multi-Cliente, sem autenticação, com PostgreSQL + MySQL + SQL Server + MongoDB)
 
-**Total geral do projeto:** 24 features, ~33 dias (≈ 6-7 semanas com buffer normal de imprevistos — número único, substitui as estimativas divergentes das versões anteriores deste documento, do EXECUTIVE_SUMMARY e do README, que foram descontinuados).
+**Total geral do projeto:** 23 features, ~30 dias (≈ 6 semanas com buffer normal de imprevistos — reduzido de 24 features/~33 dias na revisão v1.6 pela remoção da camada de Handlers: F3 caiu de 2d para 1d e a antiga F14 "Built-in Handlers" (2d) foi removida inteiramente — ver nota de revisão no topo do documento).
 
 ---
 
@@ -264,7 +290,7 @@ XXX_PARAM=value
 ```markdown
 1. ✅ F1: FastAPI + servidor MCP via Streamable HTTP rodando (porta 3000)
 2. ✅ F2: PostgreSQL Adapter conectando ao BD de config
-3. ⬜ F3: Handler Registry descobrindo handlers (built-in + custom)
+3. ⬜ F3: Controle de Volume de Resultado (pré-checagem `COUNT(*)` + KB)
 4. ⬜ F4: Primeira análise executando de ponta a ponta
 5. ⬜ F5: list_tools() / call_tool() expostos via MCP
 6. ⬜ F6: Validar com 2+ clientes MCP diferentes simultaneamente
@@ -308,7 +334,7 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 24/24 | 0/24 ⬜ |
+| **Features Implementadas** | 23/23 | 0/23 ⬜ |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 0 ⬜ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, MongoDB) | 0 ⬜ |
@@ -325,40 +351,39 @@ Para cada feature, siga este workflow:
 > Datas fixas foram removidas desta versão porque ficavam desatualizadas a cada revisão do escopo. Use dias relativos ao início real da Sprint 1.
 
 ```
-Sprint 1 (Dias 1-11): MVP Local Multi-Cliente
+Sprint 1 (Dias 1-10): MVP Local Multi-Cliente
 ├─ Dia 1-2:  F1 (FastAPI + MCP Streamable HTTP Setup)
 ├─ Dia 3-4:  F2 (PostgreSQL Adapter)
-├─ Dia 5-6:  F3 (Handler Registry)
-├─ Dia 7-8:  F4 (Execution Engine)
-├─ Dia 9:    F5 (MCP Tools Integration)
-├─ Dia 9.5:  F6 (Validação Multi-Cliente)
-├─ Dia 10:   F7 (Cache Service)
-└─ Dia 10.5: F8 (Log de Execução)
+├─ Dia 5:    F3 (Controle de Volume de Resultado)
+├─ Dia 6-7:  F4 (Execution Engine)
+├─ Dia 8:    F5 (MCP Tools Integration)
+├─ Dia 8.5:  F6 (Validação Multi-Cliente)
+├─ Dia 9:    F7 (Cache Service)
+└─ Dia 9.5:  F8 (Log de Execução)
 
-Sprint 2 (Dias 12-21): Versioning + Multi-DB
-├─ Dia 12-13: F9  (Version Management)
-├─ Dia 14:    F10 (Rollback)
-├─ Dia 15-16: F11 (MongoDB Adapter)
-├─ Dia 17:    F12 (MySQL Adapter)
-├─ Dia 18-19: F13 (SQL Server Adapter)
-└─ Dia 20-21: F14 (Built-in Handlers)
+Sprint 2 (Dias 10-17): Versioning + Multi-DB
+├─ Dia 10-11: F9  (Version Management)
+├─ Dia 12:    F10 (Rollback)
+├─ Dia 13-14: F11 (MongoDB Adapter)
+├─ Dia 15:    F12 (MySQL Adapter)
+└─ Dia 16-17: F13 (SQL Server Adapter)
 
-Sprint 3 (Dias 22-30): Production-Ready
-├─ Dia 22-23: F15 (Docker Local + Remote)
-├─ Dia 24:    F16 (Error Handling)
-├─ Dia 25-26: F17 (Performance)
-├─ Dia 27:    F18 (API Docs)
-├─ Dia 28-29: F19 (Unit Tests)
-└─ Dia 30:    F20 (Integration Tests)
+Sprint 3 (Dias 18-26): Production-Ready
+├─ Dia 18-19: F14 (Docker Local + Remote)
+├─ Dia 20:    F15 (Error Handling)
+├─ Dia 21-22: F16 (Performance)
+├─ Dia 23:    F17 (API Docs)
+├─ Dia 24-25: F18 (Unit Tests)
+└─ Dia 26:    F19 (Integration Tests)
 
-Sprint 4 (Dias 31-34): Deploy
-├─ Dia 31: F21 (E2E Testing)
-├─ Dia 32: F22 (Deploy Guide)
-├─ Dia 33: F23 (User Docs)
-└─ Dia 34: F24 (Demo) → RELEASE V1.0
+Sprint 4 (Dias 27-30): Deploy
+├─ Dia 27: F20 (E2E Testing)
+├─ Dia 28: F21 (Deploy Guide)
+├─ Dia 29: F22 (User Docs)
+└─ Dia 30: F23 (Demo) → RELEASE V1.0
 ```
 
-**Total:** ~33 dias úteis (≈ 6-7 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
+**Total:** ~30 dias úteis (≈ 6 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
 
 ---
 
@@ -375,7 +400,7 @@ Sprint 4 (Dias 31-34): Deploy
 ```
 ✅ DONE: F1 (FastAPI running)
 🟨 IN PROGRESS: F2 (PostgreSQL adapter - 50%)
-⬜ TODO: F3 (Handler registry)
+⬜ TODO: F3 (Controle de Volume)
 🟪 BLOCKED: F4 (Waiting for F3)
 ```
 

@@ -2,14 +2,16 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.5 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Versão:** 1.6 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
 **Data:** 2026-09-23
 **Autor:** Jose
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.5 → v1.6):** documento aprovado. Removida a camada de **Handlers Python** do servidor (RF4 e UC4 inteiros) — o espaço de análises possíveis é grande demais para pré-programar um handler por tipo de análise. O servidor passa a devolver o **dataset bruto** (resultado da query parametrizada) e é o **LLM do lado do cliente MCP** quem interpreta, calcula e agrega os dados, a cada pedido. Para não estourar o cliente com volumes grandes, RF2 ganha uma checagem de volume (linhas + KB, limites globais via `.env`) que recusa a execução com mensagem de refinamento, a menos que o cliente confirme explicitamente o custo alto de tokens. RF5 (Suporte a Múltiplos Bancos) renumerada para RF4, sem buraco na numeração. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` e ARQUITETURA.md (nova seção de Controle de Volume) para detalhes técnicos.
+
 > **Nota de revisão (v1.1 → v1.2):** a versão anterior deste documento (23/09) incluía RF6 e T5 (autenticação multi-user via API Key). Após revisão, ficou definido que **V1.0 roda em rede interna confiável, sem identificação de usuário ou de cliente MCP**. Esses requisitos foram removidos daqui e movidos para "Roadmap Futuro" (seção 12), para quando a aplicação precisar sair da rede confiável.
 
-> **Nota de revisão (v1.2 → v1.3):** documento aprovado. Adicionado suporte a **SQL Server** como banco de dados de origem de primeira classe em V1.0 (RF5, seção 10), ao lado de PostgreSQL, MySQL e MongoDB.
+> **Nota de revisão (v1.2 → v1.3):** documento aprovado. Adicionado suporte a **SQL Server** como banco de dados de origem de primeira classe em V1.0 (então RF5, seção 10; renumerada para RF4 na revisão v1.6 — ver nota acima), ao lado de PostgreSQL, MySQL e MongoDB.
 
 > **Nota de revisão (v1.3 → v1.4):** documento aprovado. Trocado o transporte MCP de **HTTP+SSE** para **Streamable HTTP** — o transporte mais recente da especificação MCP, que substitui o antigo transporte HTTP+SSE. Mantém a mesma topologia (serviço único, porta 3000, múltiplos clientes MCP simultâneos, sem autenticação em V1.0), mudando apenas o protocolo de transporte e o path do endpoint (de `/sse` para `/mcp`). Ver Restrição T4 (seção 9) e ARQUITETURA.md §7 ADR-006 para detalhes técnicos.
 
@@ -122,7 +124,7 @@ Nota: em V1.0 o log de execução NÃO identifica usuário nem cliente MCP
 - [x] Execução de análises contra MySQL (adapter)
 - [x] Execução de análises contra SQL Server (adapter)
 - [x] Execução de análises contra MongoDB (adapter)
-- [x] Transformações Python customizadas (handlers)
+- [x] Controle de volume do resultado (limites de linhas/KB via `.env`, com recusa e refinamento)
 - [x] Versionamento de análises com histórico
 - [x] Cache de resultados (memória local, Redis remoto)
 - [x] Servidor MCP via **Streamable HTTP**, acessível por múltiplos clientes simultaneamente na rede local
@@ -132,7 +134,6 @@ Nota: em V1.0 o log de execução NÃO identifica usuário nem cliente MCP
 - [x] Rodar localmente em rede interna (sem exposição pública)
 - [x] Portável para remoto (Docker + config parametrizada)
 - [x] Zero code changes para novas análises
-- [x] Suportar handlers pesados (Celery em ambiente remoto)
 - [x] Suportar múltiplos clientes MCP diferentes conectados simultaneamente
 
 ### Out of Scope (O Que NÃO Será Feito em V1.0)
@@ -142,7 +143,7 @@ Nota: em V1.0 o log de execução NÃO identifica usuário nem cliente MCP
 - [ ] **Autenticação ou identificação de usuário/cliente MCP** — rede interna é assumida confiável; qualquer pessoa com acesso à rede pode executar análises
 - [ ] Rate limiting / quotas por usuário (depende de identificação, fora de escopo)
 - [ ] RBAC (controle de acesso por papel)
-- [ ] Machine Learning real-time (forecasting é handler, não core)
+- [ ] Machine Learning real-time (forecasting fica a cargo do LLM cliente, não do servidor)
 - [ ] Integração com Salesforce/SAP (extensível via adapters later)
 - [ ] Notificações automáticas (manual via cliente MCP pedindo)
 
@@ -214,19 +215,18 @@ Nota: em V1.0 o log de execução NÃO identifica usuário nem cliente MCP
 │
 ├─ Necessidades
 │  ├─ Definir análises via SQL puro
-│  ├─ Reutilizar handlers customizados (python)
+│  ├─ Reutilizar queries parametrizadas (via `analysis_steps`)
 │  ├─ Garantir qualidade e acurácia
 │  └─ Suportar múltiplos BDs
 │
 ├─ Frustrations
 │  ├─ Repetir mesmas queries todo mês
-│  ├─ Sem versionamento de queries
-│  └─ Precisa de Python skills para handlers
+│  └─ Sem versionamento de queries
 │
 └─ Outcomes Desejados
    ├─ "Config uma vez, usa infinitamente"
    ├─ "SQL puro para configurar"
-   └─ "Handlers reutilizáveis"
+   └─ "Queries reutilizáveis, sem depender de código Python"
 ```
 
 ---
@@ -261,8 +261,8 @@ Scenario: Usuario A quer vendas de setembro (com Claude Desktop)
   When Usuario A pede: "Mostre vendas de setembro por região"
   Then Claude Desktop via MCP chama análise "vendas_por_regiao"
   And Sistema conecta ao BD configurado
-  And Executa query + transformações
-  And Retorna resultado em < 30s
+  And Executa query e verifica o volume do resultado
+  And Retorna dataset bruto em < 30s (sujeito a limite de volume — ver RF2)
   And Resultado é cacheado por 1 dia
   And Sistema registra a execução (análise, parâmetros, status, tempo) sem identificar quem pediu
 
@@ -298,25 +298,6 @@ Scenario: Jose quer voltar para versão anterior
 
 ---
 
-### UC4: Adicionar Handler Customizado
-
-```gherkin
-Feature: Reutilizar transformações Python
-
-Scenario: Jose quer detectar anomalias
-  Given Existe handler "anomaly_detection" em Python
-  When Jose insere step na análise com handler="anomaly_detection"
-  And Jose configura params (threshold=2.5)
-  Then Sistema carrega handler automaticamente
-  And Executa transformação nos dados
-  And Retorna resultado com anomalias marcadas
-  And Nenhum código novo foi escrito
-```
-
-**Esforço:** ~2 minutos (SQL + config)
-
----
-
 ## 7. Requisitos Funcionais
 
 ### RF1: Descoberta Dinâmica de Análises
@@ -347,9 +328,13 @@ Quando: Qualquer cliente MCP conectado ao servidor via Streamable HTTP chama
         execute_analysis(id, params) via MCP
 Então:
 ├─ Sistema conecta ao data_source correto
-├─ Executa query SQL parametrizado
-├─ Aplica transformações (handlers Python)
-├─ Retorna resultado estruturado JSON
+├─ Executa um `SELECT COUNT(*)` barato com os mesmos filtros, para estimar o volume
+├─ Se o volume estimado exceder o limite configurável (linhas e/ou KB — ver RNF1),
+│  recusa a execução e devolve mensagem estruturada pedindo refinamento
+│  (ou exige confirmação explícita via parâmetro reservado `confirmar_volume_alto=true`,
+│  avisando sobre o consumo alto de tokens)
+├─ Se dentro do limite, executa a query SQL parametrizada completa
+├─ Retorna o dataset bruto em JSON (sem transformação no servidor)
 └─ Registra execução em log de auditoria (sem identificar cliente/usuário)
 ```
 
@@ -360,6 +345,7 @@ Então:
 - ✅ Erro contém mensagem clara (não stack trace)
 - ✅ Protocolo MCP segue especificação padrão (não proprietário)
 - ✅ Suporta múltiplas conexões/clientes simultâneos sem autenticação em V1.0
+- ✅ Recusa de volume alto nunca busca o dataset completo antes de decidir (checagem por `COUNT(*)` primeiro)
 
 ---
 
@@ -384,29 +370,7 @@ Então:
 
 ---
 
-### RF4: Handlers Customizados
-
-```
-Dado: Handler Python "anomaly_detection" existe
-Quando: Análise inclui step com esse handler
-Então:
-├─ Handler é carregado automaticamente
-├─ Recebe dados da query anterior
-├─ Retorna dados transformados
-├─ Não requer restart da aplicação
-└─ Erros no handler são capturados
-```
-
-**Critério de Aceitação:**
-- ✅ Discovery automático de handlers (built-in + custom)
-- ✅ Handlers são Python classes herdando DataHandler
-- ✅ Metadata de handler inclui params schema
-- ✅ Timeout por handler configurável
-- ✅ Falha num handler não quebra pipeline
-
----
-
-### RF5: Suporte a Múltiplos Bancos de Dados
+### RF4: Suporte a Múltiplos Bancos de Dados
 
 ```
 Dado: 4 data sources (PostgreSQL + MySQL + SQL Server + MongoDB)
@@ -415,7 +379,6 @@ Então:
 ├─ Sistema seleciona adapter correto
 ├─ Query é executada na "língua" do BD
 ├─ Resultado é normalizado (JSON comum)
-├─ Transformações Python funcionam igual
 └─ Sem mudança de código para novo BD
 ```
 
@@ -436,6 +399,7 @@ Então:
 ├─ Análises médias (1-5s): resposta em < 15s
 ├─ Análises pesadas (> 5s): async com status check
 ├─ Discovery de análises: < 2s
+├─ Pré-checagem de volume (`COUNT(*)`): < 500ms esperado
 └─ Cache hit: < 100ms
 ```
 
@@ -551,8 +515,6 @@ Então:
 - ✅ Rollback testado
 
 ### Sprint 3 (Production-Ready)
-- ✅ Handler registry funcionando
-- ✅ 3 handlers customizados (aggregation, filter, anomaly)
 - ✅ Cache local funcional
 - ✅ Docker compose (local + remoto)
 - ✅ Testes automatizados (80%+ coverage)
@@ -581,7 +543,8 @@ V1.2: Remoto + Escalabilidade
 └─ Load balancing entre múltiplos clientes
 
 V1.3: Análises Avançadas
-├─ Machine Learning handlers (forecasting, clustering)
+├─ Machine Learning avançado (forecasting, clustering) — fora do modelo atual de
+│  dataset bruto; avaliar se cabe como serviço dedicado quando entrar em escopo
 ├─ Real-time streaming
 └─ Alertas automáticos
 
@@ -640,10 +603,10 @@ Nossa Plataforma: Funciona com QUALQUER cliente MCP (protocolo padrão, via Stre
 
 | Termo | Definição |
 |-------|-----------|
-| **Análise** | Especificação de como extrair, transformar e retornar dados |
+| **Análise** | Especificação de como extrair e retornar dados (query parametrizada) |
 | **Data Source** | Conexão a um BD externo (PostgreSQL, MongoDB, etc.) |
-| **Handler** | Transformação Python customizável aplicada a dados |
-| **Step** | Uma etapa da análise (query, transform, aggregate) |
+| **Step** | Uma etapa da análise (em V1.0, sempre do tipo `query`) |
+| **Controle de Volume** | Checagem de linhas/KB do resultado antes de devolver ao cliente MCP; recusa com pedido de refinamento se exceder o limite configurável |
 | **MCP** | Model Context Protocol — protocolo padrão de comunicação com LLMs |
 | **Cliente MCP** | Aplicativo que fala MCP com o servidor (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.) |
 | **Streamable HTTP** | Transporte MCP via HTTP com endpoint único (`/mcp`), sucessor do antigo transporte HTTP+SSE, permitindo múltiplos clientes remotos/na rede conectados ao mesmo servidor |
