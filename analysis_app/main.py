@@ -1,12 +1,29 @@
 """Entry point FastAPI — monta o transporte MCP (Streamable HTTP) e o /health.
 
-F1: apenas transporte. list_tools()/call_tool() reais entram em F5.
+F1: transporte. list_tools()/call_tool() reais entram em F5.
+F2: conexão com o Config DB no startup (fail-fast) e /health com check_postgres().
 """
+
+import contextlib
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from mcp_transport import configure_mcp, lifespan
+from database.connection import check_postgres, connect_config_db, disconnect_config_db
+from mcp_transport import configure_mcp
+from mcp_transport import lifespan as mcp_lifespan
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    await connect_config_db()  # passo 2 do fluxo de startup (ARQUITETURA.md §6.1) — fail-fast
+    try:
+        async with mcp_lifespan(app):
+            yield
+    finally:
+        await disconnect_config_db()
+
 
 app = FastAPI(lifespan=lifespan)
 configure_mcp(app)
@@ -14,4 +31,5 @@ configure_mcp(app)
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    return JSONResponse({"status": "ok"})  # confirmado: apenas isso nesta feature
+    db_ok = await check_postgres()
+    return JSONResponse({"status": "ok" if db_ok else "degraded", "db": db_ok})

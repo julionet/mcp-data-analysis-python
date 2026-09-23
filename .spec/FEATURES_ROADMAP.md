@@ -24,7 +24,7 @@
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
 | F1 | FastAPI + MCP Server Setup via Streamable HTTP **com TLS** | 🔴 Crítica | 2.5d | — | 🟩 Done |
-| F2 | PostgreSQL Adapter | 🔴 Crítica | 2d | F1 | ⬜ Todo |
+| F2 | PostgreSQL Adapter | 🔴 Crítica | 2d | F1 | 🟩 Done |
 | F3 | HandlerRegistry e Discovery | 🔴 Crítica | 2d | F2 | ⬜ Todo |
 | F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | ⬜ Todo |
 | F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | ⬜ Todo |
@@ -263,7 +263,7 @@ XXX_PARAM=value
 ### Sprint 1 — Ordem de Implementação
 ```markdown
 1. ✅ F1: FastAPI + servidor MCP via Streamable HTTP rodando (porta 3000)
-2. ⬜ F2: PostgreSQL Adapter conectando ao BD de config
+2. ✅ F2: PostgreSQL Adapter conectando ao BD de config
 3. ⬜ F3: Handler Registry descobrindo handlers (built-in + custom)
 4. ⬜ F4: Primeira análise executando de ponta a ponta
 5. ⬜ F5: list_tools() / call_tool() expostos via MCP
