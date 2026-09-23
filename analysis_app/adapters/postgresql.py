@@ -19,8 +19,10 @@ class PostgreSQLAdapter(DatabaseAdapter):
         if self._pool:
             await self._pool.close()
 
-    async def execute_query(self, query: str, params: dict | None = None) -> list[dict]:
+    async def execute_query(self, query: str, params: dict | None = None, scalar: bool = False):
         async with self._pool.acquire() as conn:
+            if scalar:
+                return await conn.fetchval(query, *(params or {}).values())
             records = await conn.fetch(query, *(params or {}).values())
             return [dict(r) for r in records]
 

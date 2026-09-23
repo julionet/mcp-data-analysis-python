@@ -21,8 +21,12 @@ class DatabaseAdapter(ABC):
         """Fecha o pool de conexões."""
 
     @abstractmethod
-    async def execute_query(self, query: str, params: dict | None = None) -> list[dict]:
-        """Executa query parametrizada e retorna resultado normalizado."""
+    async def execute_query(self, query: str, params: dict | None = None, scalar: bool = False):
+        """Executa query parametrizada e retorna resultado normalizado.
+
+        scalar=True retorna um único valor escalar (ex: COUNT(*)); scalar=False
+        (padrão) retorna list[dict], uma linha por dict.
+        """
 
     @abstractmethod
     async def test_connection(self) -> bool:

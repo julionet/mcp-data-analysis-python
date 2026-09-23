@@ -2,6 +2,7 @@
 
 F1: campos de transporte (host/porta/TLS) — ver F1_FastAPI_MCP_Server_Setup.md §7.
 F2: campos de conexão do Config DB — ver F2_POSTGRESQL_ADAPTER.md §7.
+F3: limites do Controle de Volume — ver F3_CONTROLE_VOLUME.md §7.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,9 @@ class Settings(BaseSettings):
     postgres_config_user: str
     postgres_config_password: str
     postgres_config_database: str
+
+    default_max_result_rows: int = 500
+    default_max_result_size_kb: int = 150
 
 
 settings = Settings()

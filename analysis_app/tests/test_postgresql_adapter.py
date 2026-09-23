@@ -82,3 +82,37 @@ class TestPostgreSQLAdapter:
         result = await adapter.test_connection()
 
         assert result is False
+
+
+class TestPostgreSQLAdapterScalar:
+    """F3_CONTROLE_VOLUME.md §6.1 — parâmetro `scalar` de execute_query."""
+
+    @pytest.mark.asyncio
+    async def test_execute_query_scalar_true_returns_int(self):
+        adapter = PostgreSQLAdapter(CONFIG)
+        fake_conn = MagicMock()
+        fake_conn.fetchval = AsyncMock(return_value=300)
+        fake_pool = MagicMock()
+        fake_pool.acquire = MagicMock(return_value=_FakeAcquireContext(fake_conn))
+        adapter._pool = fake_pool
+
+        result = await adapter.execute_query("SELECT COUNT(*) FROM produtos", {}, scalar=True)
+
+        assert result == 300
+        fake_conn.fetchval.assert_awaited_once_with("SELECT COUNT(*) FROM produtos")
+        fake_conn.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_query_scalar_false_returns_list_dict(self):
+        # comportamento atual (F2) não pode regredir
+        adapter = PostgreSQLAdapter(CONFIG)
+        fake_conn = MagicMock()
+        fake_conn.fetch = AsyncMock(return_value=[{"id": 1, "nome": "produto"}])
+        fake_pool = MagicMock()
+        fake_pool.acquire = MagicMock(return_value=_FakeAcquireContext(fake_conn))
+        adapter._pool = fake_pool
+
+        result = await adapter.execute_query("SELECT * FROM produtos")
+
+        assert result == [{"id": 1, "nome": "produto"}]
+        assert isinstance(result, list)
