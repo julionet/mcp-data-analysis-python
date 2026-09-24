@@ -28,7 +28,7 @@
 | F1 | FastAPI + MCP Server Setup via Streamable HTTP **com TLS** | 🔴 Crítica | 2.5d | — | 🟩 Done |
 | F2 | PostgreSQL Adapter | 🔴 Crítica | 2d | F1 | 🟩 Done |
 | F3 | Controle de Volume de Resultado | 🔴 Crítica | 1d | F2 | 🟩 Done |
-| F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | ⬜ Todo |
+| F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | 🟩 Done |
 | F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | ⬜ Todo |
 | F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | ⬜ Todo |
 | F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | ⬜ Todo |
@@ -291,7 +291,7 @@ XXX_PARAM=value
 1. ✅ F1: FastAPI + servidor MCP via Streamable HTTP rodando (porta 3000)
 2. ✅ F2: PostgreSQL Adapter conectando ao BD de config
 3. ✅ F3: Controle de Volume de Resultado (pré-checagem `COUNT(*)` + KB)
-4. ⬜ F4: Primeira análise executando de ponta a ponta
+4. ✅ F4: Primeira análise executando de ponta a ponta
 5. ⬜ F5: list_tools() / call_tool() expostos via MCP
 6. ⬜ F6: Validar com 2+ clientes MCP diferentes simultaneamente
 7. ⬜ F7: Cache in-memory funcionando
