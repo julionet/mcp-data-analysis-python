@@ -19,7 +19,7 @@ class VolumeGuardService:
 
     def check_serialized_size(self, result: list[dict]) -> float:
         """Mede o resultado já serializado em KB; levanta VolumeExceededError se exceder."""
-        size_kb = len(json.dumps(result).encode("utf-8")) / 1024
+        size_kb = len(json.dumps(result, default=str).encode("utf-8")) / 1024
         if size_kb > self.max_size_kb:
             raise VolumeExceededError(estimated_size_kb=size_kb)
         return size_kb
