@@ -196,7 +196,39 @@ git checkout -b feature/F1-fastapi-mcp-setup
 
 ---
 
-## 9. Verificação Final
+## 9. Configuração do Claude Desktop
+
+Para conectar o Claude Desktop ao servidor MCP local, edite o arquivo de configuração:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Adicione a entrada abaixo em `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "analise-dados": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://127.0.0.1:3000/mcp"
+      ],
+      "env": {
+        "NODE_OPTIONS": "--use-system-ca"
+      }
+    }
+  }
+}
+```
+
+> `NODE_OPTIONS=--use-system-ca` faz o Node.js (usado pelo `mcp-remote`) confiar na CA do sistema onde o `mkcert -install` foi executado na seção 2 — sem isso ele rejeita o certificado TLS local com `UNABLE_TO_VERIFY_LEAF_SIGNATURE`.
+
+> Após salvar, **reiniciar o Claude Desktop** para que ele recarregue os servidores MCP. O servidor local deve estar no ar (`python main.py` ou equivalente) antes de abrir o Claude.
+
+---
+
+## 10. Verificação Final
 
 ```bash
 docker compose -f docker-compose.local.yml up -d
@@ -217,7 +249,7 @@ curl https://localhost:3000/health                          # confirma TLS servi
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 - **Porta 3000 já em uso** (`address already in use` ao subir o servidor): identificar e encerrar o processo antigo antes de subir um novo —
   ```bash

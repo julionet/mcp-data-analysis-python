@@ -51,22 +51,7 @@ CREATE TABLE analysis_versions (
     UNIQUE(analysis_id, version_number)
 );
 
--- Tabela 5: Handlers Customizados
-CREATE TABLE custom_handlers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    handler_type VARCHAR(100) UNIQUE NOT NULL,
-    module_path VARCHAR(255) NOT NULL,  -- custom.anomaly_detector
-    class_name VARCHAR(100) NOT NULL,   -- AnomalyDetector
-    description TEXT,
-    params_schema JSONB,
-    is_active BOOLEAN DEFAULT true,
-    execution_profile VARCHAR(50),  -- light, heavy, cpu_bound
-    estimated_duration_ms INT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Tabela 6: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
+-- Tabela 5: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),

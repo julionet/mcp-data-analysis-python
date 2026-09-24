@@ -14,7 +14,6 @@ from database.connection import check_postgres, connect_config_db, disconnect_co
 from mcp_transport import configure_mcp
 from mcp_transport import lifespan as mcp_lifespan
 
-
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await connect_config_db()  # passo 2 do fluxo de startup (ARQUITETURA.md §6.1) — fail-fast
