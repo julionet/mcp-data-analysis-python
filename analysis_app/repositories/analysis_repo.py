@@ -72,6 +72,20 @@ class AnalysisRepository:
         )
         return _to_analysis(rows[0]) if rows else None
 
+    async def get_by_name(self, name: str) -> Analysis | None:
+        """Busca uma análise ativa OU inativa pelo nome único (analyses.name).
+        Usada por call_tool() (F5) a cada execução — sem cache, para refletir
+        imediatamente qualquer mudança feita no banco (ativação/desativação/
+        rename). Ao contrário de get_by_id(), não filtra por is_active: quem
+        chama precisa distinguir "não encontrada" de "inativa" (F5_MCP_TOOLS_
+        INTEGRATION.md §4.2 Fluxo B, passo 4)."""
+        rows = await self._db.execute_query(
+            "SELECT id, name, description, data_source_id, parameters, is_active "
+            "FROM analyses WHERE name = $1",
+            {"name": name},
+        )
+        return _to_analysis(rows[0]) if rows else None
+
     async def get_all(self) -> list[Analysis]:
         rows = await self._db.execute_query(
             "SELECT id, name, description, data_source_id, parameters, is_active "

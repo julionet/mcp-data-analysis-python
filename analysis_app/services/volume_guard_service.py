@@ -25,9 +25,9 @@ class VolumeGuardService:
         return size_kb
 
     def build_refinement_response(self, error: VolumeExceededError) -> dict:
-        """Monta o payload estruturado de recusa (status refinamento_necessario)."""
+        """Monta o payload estruturado de recusa (status volume_exceeded)."""
         return {
-            "status": "refinamento_necessario",
+            "status": "volume_exceeded",
             "estimativa": {
                 "linhas": error.estimated_rows,
                 "tamanho_estimado_kb": error.estimated_size_kb,

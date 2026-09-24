@@ -29,7 +29,7 @@
 | F2 | PostgreSQL Adapter | 🔴 Crítica | 2d | F1 | 🟩 Done |
 | F3 | Controle de Volume de Resultado | 🔴 Crítica | 1d | F2 | 🟩 Done |
 | F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | 🟩 Done |
-| F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | ⬜ Todo |
+| F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | 🟩 Done |
 | F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | ⬜ Todo |
 | F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | ⬜ Todo |
@@ -65,7 +65,7 @@ Escopo:
 ├─ Segunda checagem: tamanho do resultado serializado em KB
 │  └─ excede DEFAULT_MAX_RESULT_SIZE_KB (.env) mesmo com poucas linhas
 │     (colunas largas) → recusa com a mesma mensagem
-├─ Resposta de recusa estruturada (status "refinamento_necessario", com
+├─ Resposta de recusa estruturada (status "volume_exceeded", com
 │  estimativa de linhas/KB e o limite configurado)
 └─ Parâmetro reservado `confirmar_volume_alto` (injetado no schema de toda
    tool, não cadastrado em `analyses.parameters`): se true, ignora o limite
@@ -292,7 +292,7 @@ XXX_PARAM=value
 2. ✅ F2: PostgreSQL Adapter conectando ao BD de config
 3. ✅ F3: Controle de Volume de Resultado (pré-checagem `COUNT(*)` + KB)
 4. ✅ F4: Primeira análise executando de ponta a ponta
-5. ⬜ F5: list_tools() / call_tool() expostos via MCP
+5. ✅ F5: list_tools() / call_tool() expostos via MCP
 6. ⬜ F6: Validar com 2+ clientes MCP diferentes simultaneamente
 7. ⬜ F7: Cache in-memory funcionando
 8. ⬜ F8: Log de execução (analysis_id, params, status, tempo)

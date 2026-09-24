@@ -1,10 +1,11 @@
 """Servidor MCP de baixo nível + transporte Streamable HTTP (ADR-006, ARQUITETURA.md §7).
 
-F1: apenas o transporte. `list_tools()`/`call_tool()` ficam como stub —
-a lógica real (AnalysisService, HandlerRegistry) entra em F5.
+F5: `list_tools()`/`call_tool()` delegam para mcp_transport/tools.py, que
+gera as tools dinamicamente a partir de `analyses` (F5_MCP_TOOLS_INTEGRATION.md).
 """
 
 import contextlib
+import json
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
@@ -13,23 +14,26 @@ from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
 
+from mcp_transport import tools
+
 mcp_server = Server(
     "analysis-mcp",
     instructions=(
-        "Servidor de análises de dados de negócio. Nenhuma análise cadastrada "
-        "ainda nesta etapa (F1) — apenas o transporte está disponível."
+        "Servidor de análises de dados de negócio. Cada análise ativa cadastrada "
+        "em 'analyses' aparece como uma tool 'execute_<nome_da_analise>'."
     ),
 )
 
 
 @mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
-    return []  # stub nesta feature — análises reais entram em F5
+    return await tools.list_tools()
 
 
 @mcp_server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    raise NotImplementedError("Nenhuma análise cadastrada ainda — ver F5")
+    result = await tools.call_tool(name, arguments)
+    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
 
 
 session_manager = StreamableHTTPSessionManager(app=mcp_server)

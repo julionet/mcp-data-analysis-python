@@ -1,5 +1,12 @@
 """Analysis Execution Engine — núcleo do fluxo "pedir análise → receber dado
-real". Ver F4_EXECUTION_ENGINE.md §4.2 para o fluxo completo."""
+real". Ver F4_EXECUTION_ENGINE.md §4.2 para o fluxo completo.
+
+F5 (ajuste retroativo, F5_MCP_TOOLS_INTEGRATION.md §4.2 Fluxo B / §4.4):
+execute() deixou de propagar exceção — todo caminho de saída é um dict
+estruturado ("success" / "volume_exceeded" / "error"), pois é chamado
+diretamente por mcp_transport/tools.py::call_tool(), que nunca pode deixar
+uma exceção vazar para o transporte MCP.
+"""
 
 import logging
 import re
@@ -14,6 +21,7 @@ from schemas.analysis_parameters import to_pydantic_model, validate_schema
 from schemas.exceptions import (
     AnalysisNotFoundError,
     DataSourceConnectionError,
+    InvalidAnalysisSchemaError,
     InvalidParametersError,
     VolumeExceededError,
 )
@@ -49,10 +57,38 @@ class AnalysisService:
         self.data_source_repo = data_source_repo
         self.volume_guard = volume_guard
 
-    async def execute(self, analysis_id: UUID, params: dict) -> dict:
-        """Executa uma análise cadastrada — ver fluxo completo em §4.2.
-        Retorna {"status": "success", "data": [...]} ou
-        {"status": "refinamento_necessario", ...} (ver ARQUITETURA.md §3.4)."""
+    async def execute(
+        self,
+        analysis_id: UUID,
+        params: dict,
+        confirmar_volume_alto: bool = False,
+    ) -> dict:
+        """Executa uma análise e SEMPRE retorna um dict estruturado — nunca
+        propaga exceção (F5, ajuste retroativo). Formatos possíveis:
+          {"status": "success", "data": [...]}
+          {"status": "success", "data": [...], "aviso": "..."}  (confirmar_volume_alto=true)
+          {"status": "volume_exceeded", "estimativa": {...}, "limite": {...}, "mensagem": "..."}
+          {"status": "error", "mensagem": "..."}
+        """
+        try:
+            return await self._execute(analysis_id, params, confirmar_volume_alto)
+        except (
+            AnalysisNotFoundError,
+            InvalidAnalysisSchemaError,
+            InvalidParametersError,
+            DataSourceConnectionError,
+        ) as exc:
+            return {"status": "error", "mensagem": str(exc)}
+        except Exception:
+            logger.exception("Erro inesperado ao executar a análise '%s'", analysis_id)
+            return {"status": "error", "mensagem": "Erro interno ao executar a análise."}
+
+    async def _execute(
+        self,
+        analysis_id: UUID,
+        params: dict,
+        confirmar_volume_alto: bool,
+    ) -> dict:
         analysis = await self.analysis_repo.get_by_id(analysis_id)
         if analysis is None:
             raise AnalysisNotFoundError(analysis_id)
@@ -88,7 +124,8 @@ class AnalysisService:
 
         try:
             await adapter.connect()
-            await self.volume_guard.check_row_count(adapter, count_sql, ordered_values)
+            if not confirmar_volume_alto:
+                await self.volume_guard.check_row_count(adapter, count_sql, ordered_values)
             dataset = await adapter.execute_query(translated_sql, ordered_values)
         except VolumeExceededError as exc:
             return self.volume_guard.build_refinement_response(exc)
@@ -104,12 +141,18 @@ class AnalysisService:
         finally:
             await adapter.disconnect()
 
-        try:
-            self.volume_guard.check_serialized_size(dataset)
-        except VolumeExceededError as exc:
-            return self.volume_guard.build_refinement_response(exc)
+        if not confirmar_volume_alto:
+            try:
+                self.volume_guard.check_serialized_size(dataset)
+            except VolumeExceededError as exc:
+                return self.volume_guard.build_refinement_response(exc)
 
-        return {"status": "success", "data": dataset}
+        result = {"status": "success", "data": dataset}
+        if confirmar_volume_alto:
+            # bypass explícito — ARQUITETURA.md §3.4: "ignora o limite e devolve
+            # o dataset completo, incluindo aviso"
+            result["aviso"] = "resultado grande, enviado por confirmação explícita"
+        return result
 
     async def get_all_analyses(self) -> list[Analysis]:
         """Lista análises ativas. Sem endpoint MCP nesta feature (isso é F5) —

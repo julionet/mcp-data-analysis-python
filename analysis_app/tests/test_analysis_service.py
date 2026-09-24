@@ -1,4 +1,9 @@
-"""Testes unitários da F4 — ver F4_EXECUTION_ENGINE.md §6.1 (TestAnalysisService)."""
+"""Testes unitários da F4 — ver F4_EXECUTION_ENGINE.md §6.1 (TestAnalysisService).
+
+F5 (ajuste retroativo, F5_MCP_TOOLS_INTEGRATION.md §6.1 TestAnalysisServiceExecuteContract):
+execute() passou a nunca propagar exceção — os testes abaixo que antes
+verificavam `pytest.raises(...)` agora verificam o dict {"status": "error", ...}.
+"""
 
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -7,12 +12,6 @@ import pytest
 
 from repositories.analysis_repo import Analysis, AnalysisStep
 from repositories.data_source_repo import DataSource
-from schemas.exceptions import (
-    AnalysisNotFoundError,
-    DataSourceConnectionError,
-    InvalidAnalysisSchemaError,
-    InvalidParametersError,
-)
 from services.analysis_service import AnalysisService
 from services.volume_guard_service import VolumeGuardService
 
@@ -113,20 +112,21 @@ class TestAnalysisService:
         analysis_repo.get_by_id.return_value = None
         service = _service(analysis_repo)
 
-        with pytest.raises(AnalysisNotFoundError):
-            await service.execute(uuid4(), {})
+        result = await service.execute(uuid4(), {})
+
+        assert result["status"] == "error"
 
     @pytest.mark.asyncio
-    async def test_execute_invalid_params_raises_clear_error(self):
+    async def test_execute_invalid_params_returns_error_with_clear_message(self):
         analysis = _make_analysis()
         analysis_repo = AsyncMock()
         analysis_repo.get_by_id.return_value = analysis
         service = _service(analysis_repo)
 
-        with pytest.raises(InvalidParametersError) as exc:
-            await service.execute(analysis.id, {"data_final": "2026-01-31"})
+        result = await service.execute(analysis.id, {"data_final": "2026-01-31"})
 
-        assert "data_inicial" in str(exc.value)
+        assert result["status"] == "error"
+        assert "data_inicial" in result["mensagem"]
 
     @pytest.mark.asyncio
     async def test_execute_rejects_malformed_analysis_schema_before_pydantic(self):
@@ -136,9 +136,9 @@ class TestAnalysisService:
         service = _service(analysis_repo)
 
         with patch("services.analysis_service.to_pydantic_model") as mock_to_model:
-            with pytest.raises(InvalidAnalysisSchemaError):
-                await service.execute(analysis.id, {"regiao": "Norte"})
+            result = await service.execute(analysis.id, {"regiao": "Norte"})
 
+        assert result["status"] == "error"
         mock_to_model.assert_not_called()
 
     @pytest.mark.asyncio
@@ -167,7 +167,7 @@ class TestAnalysisService:
                 analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
             )
 
-        assert result["status"] == "refinamento_necessario"
+        assert result["status"] == "volume_exceeded"
         assert fake_adapter.execute_query.await_count == 1  # dataset completo nunca foi buscado
         fake_adapter.disconnect.assert_awaited_once()
 
@@ -193,14 +193,58 @@ class TestAnalysisService:
             patch("services.analysis_service.AdapterFactory.create_adapter", return_value=fake_adapter),
             patch("services.analysis_service.decrypt_password", return_value="senha_decifrada"),
         ):
-            with pytest.raises(DataSourceConnectionError) as exc:
-                await service.execute(
-                    analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
-                )
+            result = await service.execute(
+                analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+            )
 
-        assert "Senha123" not in str(exc.value)
-        assert "Traceback" not in str(exc.value)
+        assert result["status"] == "error"
+        assert "Senha123" not in result["mensagem"]
+        assert "Traceback" not in result["mensagem"]
         fake_adapter.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_confirmar_volume_alto_bypasses_limit_and_adds_aviso(self):
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+        step = _make_step(analysis)
+
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = [step]
+
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = data_source
+
+        fake_adapter = AsyncMock()
+        expected_dataset = [{"data": "2026-01-05", "valor": 100.0, "pago": True}] * 5000
+        fake_adapter.execute_query.return_value = expected_dataset  # sem COUNT(*) — bypass
+
+        service = _service(analysis_repo, data_source_repo)
+
+        with (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=fake_adapter),
+            patch("services.analysis_service.decrypt_password", return_value="senha_decifrada"),
+        ):
+            result = await service.execute(
+                analysis.id,
+                {"data_inicial": "2026-01-01", "data_final": "2026-01-31"},
+                confirmar_volume_alto=True,
+            )
+
+        assert result["status"] == "success"
+        assert result["data"] == expected_dataset
+        assert result["aviso"] == "resultado grande, enviado por confirmação explícita"
+        assert fake_adapter.execute_query.await_count == 1  # nenhum COUNT(*) foi executado
+
+    @pytest.mark.asyncio
+    async def test_execute_internal_error_returns_error_dict_never_raises(self):
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.side_effect = RuntimeError("bug inesperado")
+        service = _service(analysis_repo)
+
+        result = await service.execute(uuid4(), {})
+
+        assert result == {"status": "error", "mensagem": "Erro interno ao executar a análise."}
 
     @pytest.mark.asyncio
     async def test_execute_translates_named_params_to_positional(self):

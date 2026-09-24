@@ -51,7 +51,7 @@ class TestVolumeGuardService:
 
         response = service.build_refinement_response(error)
 
-        assert response["status"] == "refinamento_necessario"
+        assert response["status"] == "volume_exceeded"
         assert response["estimativa"] == {"linhas": 8400, "tamanho_estimado_kb": 510}
         assert response["limite"] == {"linhas": 500, "tamanho_kb": 150}
         assert "8400" in response["mensagem"]

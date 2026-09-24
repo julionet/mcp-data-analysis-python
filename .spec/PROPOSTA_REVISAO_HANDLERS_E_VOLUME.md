@@ -92,7 +92,7 @@ Toda análise aceita, implicitamente, um parâmetro reservado adicional (não pr
 **Resposta quando o volume excede o limite e `confirmar_volume_alto=false` (default):**
 ```json
 {
-  "status": "refinamento_necessario",
+  "status": "volume_exceeded",
   "estimativa": {
     "linhas": 8400,
     "tamanho_estimado_kb": 510

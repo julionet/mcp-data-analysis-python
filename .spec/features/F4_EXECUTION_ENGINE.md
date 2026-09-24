@@ -8,6 +8,8 @@
 **Esforço Estimado:** 2d (16h)
 **Status:** 🟩 Done
 
+> **Ajuste retroativo (F5, 2026-09-24):** `AnalysisService.execute()` ganhou o parâmetro `confirmar_volume_alto` (bypass real dos checks de volume) e deixou de propagar exceção — todo retorno é um dict `{"status": "success"|"volume_exceeded"|"error", ...}`. Ver F5_MCP_TOOLS_INTEGRATION.md §4.2/§4.4/§10.
+
 ---
 
 ## 1. Visão
@@ -72,13 +74,13 @@ AnalysisService.execute(analysis_id: UUID, params: dict) -> dict
 │         ($1, $2, ...) na ordem de definition["params"]
 │
 ├─ 7. VolumeGuardService.check_row_count(adapter, count_sql, valores_ordenados)
-│      └─ excede DEFAULT_MAX_RESULT_ROWS → devolve refinamento_necessario, PARA aqui
+│      └─ excede DEFAULT_MAX_RESULT_ROWS → devolve volume_exceeded, PARA aqui
 │
 ├─ 8. adapter.execute_query(sql_traduzido, valores_ordenados) → dataset bruto
 │      └─ erro de conexão/SQL → DataSourceConnectionError (mensagem clara)
 │
 ├─ 9. VolumeGuardService.check_serialized_size(dataset)
-│      └─ excede DEFAULT_MAX_RESULT_SIZE_KB → devolve refinamento_necessario
+│      └─ excede DEFAULT_MAX_RESULT_SIZE_KB → devolve volume_exceeded
 │
 └─ 10. return {"status": "success", "data": dataset}
 ```
@@ -137,7 +139,7 @@ class AnalysisService:
     async def execute(self, analysis_id: UUID, params: dict) -> dict:
         """Executa uma análise cadastrada — ver fluxo completo em §4.2.
         Retorna {"status": "success", "data": [...]} ou
-        {"status": "refinamento_necessario", ...} (ver ARQUITETURA.md §3.4)."""
+        {"status": "volume_exceeded", ...} (ver ARQUITETURA.md §3.4)."""
         ...
 
     async def get_all_analyses(self) -> list[Analysis]:
@@ -206,7 +208,7 @@ Scenario: Análise inexistente ou inativa
 Scenario: Volume de dados excedido (linhas)
   Given os filtros informados retornariam mais linhas que DEFAULT_MAX_RESULT_ROWS
   When execute() é chamado
-  Then o resultado é {"status": "refinamento_necessario", ...}
+  Then o resultado é {"status": "volume_exceeded", ...}
   And a query completa (sem COUNT) nunca é executada
 
 Scenario: Erro de conexão com o data source

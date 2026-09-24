@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.9 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
-**Data:** 2026-09-23
+**Versão:** 1.10 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
+**Data:** 2026-09-24
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.9 → v1.10):** F5 (MCP Tools Integration) implementada — `list_tools()`/`call_tool()` reais em `mcp_transport/tools.py`, consumindo `AnalysisService`/`AnalysisRepository.get_by_name()` (F5_MCP_TOOLS_INTEGRATION.md). Duas correções de nomenclatura/contrato aplicadas retroativamente em toda a documentação (§3.4, F3, F4) para bater com o texto já aprovado da spec F5: (1) o status de recusa por volume passa a se chamar **`volume_exceeded`** (era `refinamento_necessario` desde a v1.9 — mesmo formato de payload, só o nome do status mudou); (2) `AnalysisService.execute()` deixa de propagar exceção — todo caminho de saída é um dict `{"status": "success"|"volume_exceeded"|"error", ...}`, e o parâmetro `confirmar_volume_alto` agora é aceito diretamente por `execute()` (bypass real dos dois checks de volume, com `"aviso"` no payload de sucesso).
+>
 > **Nota de revisão (v1.8 → v1.9):** documento aprovado. Removida inteiramente a camada de **Handlers Python** do servidor — `HandlerRegistry`, pasta `handlers/`, `HandlerRepository`, ADR-005 e a tabela `custom_handlers` do schema (decisão: remover, não manter tabela sem uso — o projeto ainda não está em produção, então não há risco de `DROP TABLE` destrutivo). O servidor deixa de transformar dados: executa a query parametrizada e devolve o **dataset bruto** ao cliente MCP, que interpreta/agrega os dados do lado do LLM. Em troca, ganha uma nova camada de **Controle de Volume** (`VolumeGuardService`): pré-checagem via `SELECT COUNT(*)`, checagem de tamanho serializado em KB, e recusa estruturada com pedido de refinamento (ou confirmação explícita via parâmetro reservado `confirmar_volume_alto`) — ver nova seção **§3.4**. Limites (`DEFAULT_MAX_RESULT_ROWS`, `DEFAULT_MAX_RESULT_SIZE_KB`) são 100% globais via `.env`, sem override por análise. Atualizados: §1.2, §2.1, §2.2 (schema), nova §2.3 (formato de `analyses.parameters` e conversão para JSON Schema MCP), §3.1, §3.2, nova §3.4, §4.3 (era Registry Pattern, agora Volume Guard), §5.1 (`cryptography`/Fernet), §5.2 (estrutura de pastas), §6.1 (startup), §7 (ADR-005 reescrito), §8.2 (formaliza Fernet para `connection_config.password`), §10.3, §11, §13, §14. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` para o racional completo e NEGOCIO.md v1.6 / FEATURES_ROADMAP.md v1.6 para as mudanças correspondentes nos outros documentos.
 
 > **Nota de revisão (v1.1 → v1.2):** removidos `ClientIdentificationService`, `UserIdentificationService`, as tabelas `mcp_clients`, `users`, `user_api_keys`, e os ADRs de autenticação (eram ADR-007 e ADR-008). O transporte deixou de ser descrito como stdio (subprocesso local por usuário) e passou a ser **HTTP+SSE**, um único serviço na rede interna acessível por múltiplos clientes MCP simultaneamente. Também corrigida a ordem de criação de tabelas no schema (havia uma FK para uma tabela definida mais adiante) e a numeração duplicada de seções (havia duas seções "12" e duas "13").
@@ -386,13 +388,13 @@ schemas/analysis_parameters.py
 │  │    ├─ Select Adapter                  │
 │  │    ├─ VolumeGuardService.check_row_count()          │
 │  │    │    ├─ Adapter.execute_query(SELECT COUNT(*))  │
-│  │    │    └─ Excede limite? → devolve refinamento_necessario, PARA aqui │
+│  │    │    └─ Excede limite? → devolve volume_exceeded, PARA aqui │
 │  │    ├─ STEP 1 (query)                  │
 │  │    │    ├─ Adapter.connect()          │
 │  │    │    ├─ Adapter.execute_query()    │
 │  │    │    └─ Result: dataset bruto      │
 │  │    └─ VolumeGuardService.check_serialized_size()    │
-│  │         └─ Excede KB? → devolve refinamento_necessario (mesmo com count ok) │
+│  │         └─ Excede KB? → devolve volume_exceeded (mesmo com count ok) │
 │  ├─ 4. AuditService.log_execution()      │
 │  ├─ 5. CacheService.set(result, ttl)    │
 │  └─ 6. Return JSON result (dataset bruto)│
@@ -480,7 +482,7 @@ centenas de milhares de tokens. Esta camada evita isso, em duas etapas:
       (o count de linhas pode não refletir o tamanho real se as colunas forem muito largas)
 4. Se dentro dos dois limites: devolve o dataset bruto normalmente
 5. Se qualquer checagem falhar (linhas OU KB) e confirmar_volume_alto=false (default):
-   devolve uma resposta estruturada "refinamento_necessario" (ver exemplo abaixo),
+   devolve uma resposta estruturada "volume_exceeded" (ver exemplo abaixo),
    sem nunca ter buscado o dataset completo (a menos que a falha tenha sido a de KB,
    caso em que os dados já foram buscados só para medir — ver nota abaixo)
 ```
@@ -507,7 +509,7 @@ de toda tool MCP (não cadastrado em `analyses.parameters`, é global):
 **Resposta de recusa** (`confirmar_volume_alto=false`, volume acima do limite):
 ```json
 {
-  "status": "refinamento_necessario",
+  "status": "volume_exceeded",
   "estimativa": { "linhas": 8400, "tamanho_estimado_kb": 510 },
   "limite": { "linhas": 500, "tamanho_kb": 150 },
   "mensagem": "Sua consulta retornaria aproximadamente 8.400 linhas (~510KB), acima do limite de 500 linhas / 150KB. Refine o período ou adicione filtros (ex: região, produto). Se quiser continuar mesmo assim, chame novamente com confirmar_volume_alto=true — atenção: isso pode consumir um volume alto de tokens."
@@ -605,7 +607,7 @@ class VolumeGuardService:
 
     def build_refinement_response(self, error: VolumeExceededError) -> dict:
         return {
-            "status": "refinamento_necessario",
+            "status": "volume_exceeded",
             "estimativa": {"linhas": error.estimated_rows, "tamanho_estimado_kb": error.estimated_size_kb},
             "limite": {"linhas": self.max_rows, "tamanho_kb": self.max_size_kb},
             "mensagem": "...",  # ver §3.4 para o texto completo

@@ -1,7 +1,9 @@
 """Entry point FastAPI — monta o transporte MCP (Streamable HTTP) e o /health.
 
-F1: transporte. list_tools()/call_tool() reais entram em F5.
+F1: transporte.
 F2: conexão com o Config DB no startup (fail-fast) e /health com check_postgres().
+F5: list_tools()/call_tool() reais — handlers registrados em mcp_transport/__init__.py,
+    que delega para mcp_transport/tools.py (ver F5_MCP_TOOLS_INTEGRATION.md).
 """
 
 import contextlib

@@ -8,6 +8,8 @@
 **Esforço Estimado:** 1d (8h)
 **Status:** 🟩 Done
 
+> **Ajuste retroativo (F5, 2026-09-24):** status de recusa renomeado de `refinamento_necessario` para `volume_exceeded` (mesmo payload, só o nome mudou), para bater com o texto já aprovado da spec F5. Ver F5_MCP_TOOLS_INTEGRATION.md §10.
+
 ---
 
 ## 1. Visão
@@ -92,9 +94,9 @@ class VolumeGuardService:
         return size_kb
 
     def build_refinement_response(self, error: VolumeExceededError) -> dict:
-        """Monta o payload estruturado de recusa (status refinamento_necessario)."""
+        """Monta o payload estruturado de recusa (status volume_exceeded)."""
         return {
-            "status": "refinamento_necessario",
+            "status": "volume_exceeded",
             "estimativa": {
                 "linhas": error.estimated_rows,
                 "tamanho_estimado_kb": error.estimated_size_kb,
@@ -155,7 +157,7 @@ Scenario: Contagem de linhas ok, mas tamanho serializado excede
 Scenario: Construção da resposta de recusa
   Given um VolumeExceededError com estimated_rows=8400
   When VolumeGuardService.build_refinement_response é chamado
-  Then retorna dict com status "refinamento_necessario", estimativa, limite e mensagem no formato especificado
+  Then retorna dict com status "volume_exceeded", estimativa, limite e mensagem no formato especificado
 ```
 
 ## 6. Testes
@@ -195,7 +197,7 @@ class TestVolumeGuardService:
         service = VolumeGuardService(max_rows=500, max_size_kb=150)
         error = VolumeExceededError(estimated_rows=8400, estimated_size_kb=510)
         response = service.build_refinement_response(error)
-        assert response["status"] == "refinamento_necessario"
+        assert response["status"] == "volume_exceeded"
         assert response["limite"] == {"linhas": 500, "tamanho_kb": 150}
 
 class TestPostgreSQLAdapterScalar:
@@ -228,7 +230,7 @@ DEFAULT_MAX_RESULT_SIZE_KB=150
 
 ## 8. Documentação
 ### 8.1 Como a feature aparece no MCP
-Não aparece diretamente ainda — F3 é um serviço interno. A resposta `refinamento_necessario` só chega ao cliente MCP quando integrada em F4/F5.
+Não aparece diretamente ainda — F3 é um serviço interno. A resposta `volume_exceeded` só chega ao cliente MCP quando integrada em F4/F5.
 
 ### 8.2 Como o usuário usa essa feature
 Indiretamente: ao pedir uma análise sem filtros suficientes, recebe a mensagem de refinamento em vez do dataset (via F4).
