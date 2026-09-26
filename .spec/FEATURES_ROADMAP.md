@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.6 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**)
-**Data:** 2026-09-23
+**Versão:** 1.7 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**)
+**Data:** 2026-09-26
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.6 → v1.7):** documento aprovado. Decisão desta sessão: o critério "execution_history mostra as duas execuções, sem erro de concorrência" do F6 (Validação Multi-Cliente) só pode ser validado depois que o F8 (Log de Execução) for implementado — hoje `AuditService.log_execution()` ainda não existe (F8 está ⬜ Todo). F6 pode ser dado como concluído nos critérios 1–4 antes disso, ficando esse critério pendente até a conclusão do F8. Nenhuma mudança de esforço, dependência, status ou numeração de feature.
 
 > **Nota de revisão (v1.5 → v1.6):** documento aprovado. Removida a camada de Handlers Python do servidor (ver NEGOCIO.md v1.6 e ARQUITETURA.md revisão correspondente): o servidor passa a devolver dataset bruto, e é o LLM do cliente MCP quem interpreta/agrega os dados. **F3** deixa de ser "HandlerRegistry e Discovery" e passa a ser **"Controle de Volume de Resultado"** (pré-checagem `COUNT(*)`, checagem de KB, recusa com refinamento ou confirmação explícita) — esforço cai de 2d para 1d. **F14 (Built-in Handlers)** é **removida inteiramente** do Sprint 2 (-2d). F4 (Execution Engine) mantém as mesmas dependências (F2, F3), só que agora F3 é o Controle de Volume, não mais o HandlerRegistry. Todas as features de F15 em diante são renumeradas em -1 (F15→F14, ..., F24→F23) para não deixar buraco. Total geral: 24→**23 features**, ~33→**~30 dias**. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` para o racional completo.
 
@@ -91,6 +93,8 @@ Critério de aceitação:
 ├─ Pedir a mesma análise nos dois clientes, em paralelo
 ├─ Ambos recebem resultado correto
 └─ execution_history mostra as duas execuções, sem erro de concorrência
+   (⚠️ só validável após a conclusão do F8 — Log de Execução / AuditService.log_execution(),
+   hoje ⬜ Todo; F6 pode ser dado como concluído nos critérios 1–4 antes disso)
 
 Nota: o protótipo F0 validou com sucesso um terceiro tipo de cliente MCP — o
 Claude Code (CLI, via `claude mcp add --transport http`), além de Claude Desktop —
@@ -280,9 +284,9 @@ XXX_PARAM=value
 
 ### Antes de codar
 ```markdown
-1. ✅ Revisar Documento de Negócio (NEGOCIO.md) — v1.2
-2. ✅ Revisar Documento de Arquitetura (ARQUITETURA.md) — v1.2
-3. ✅ Revisar este Roadmap (FEATURES_ROADMAP.md) — v1.2
+1. ✅ Revisar Documento de Negócio (NEGOCIO.md) — v1.6
+2. ✅ Revisar Documento de Arquitetura (ARQUITETURA.md) — v1.11
+3. ✅ Revisar este Roadmap (FEATURES_ROADMAP.md) — v1.7
 4. ⬜ Confirmar ambiente: Python 3.11, PostgreSQL acessível na rede local
 ```
 

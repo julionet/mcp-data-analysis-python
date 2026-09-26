@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.10 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
-**Data:** 2026-09-24
+**Versão:** 1.11 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
+**Data:** 2026-09-26
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.10 → v1.11):** documento aprovado. Corrigida contradição em §8.1 ("Rede Interna, Sem Autenticação (V1.0)") com o ADR-006 (§7), com o §9.1 e com o F1 já implementado: TLS (HTTPS) e CORS estavam listados em "❌ Não implementar em V1.0", mas ambos já são obrigatórios/implementados desde o F1 — TLS porque clientes MCP reais recusam conector remoto via `http://` simples mesmo em rede interna confiável, e CORS porque clientes desktop validam o conector via `fetch()` no processo de renderer. As duas entradas foram movidas para "✅ Implementar em V1.0", com o motivo técnico (compatibilidade de cliente MCP, não política de segurança em profundidade) referenciando o ADR-006. Removida do bloco "⚠️ Futuro" a linha "SSL/TLS entre cliente → servidor" (já implementado em V1.0, deixa de ser item futuro); nenhum item novo foi colocado no lugar por não haver, em nenhum documento existente, uma definição do que realmente falta em segurança de transporte para V1.1+ — a decidir numa próxima revisão.
+>
 > **Nota de revisão (v1.9 → v1.10):** F5 (MCP Tools Integration) implementada — `list_tools()`/`call_tool()` reais em `mcp_transport/tools.py`, consumindo `AnalysisService`/`AnalysisRepository.get_by_name()` (F5_MCP_TOOLS_INTEGRATION.md). Duas correções de nomenclatura/contrato aplicadas retroativamente em toda a documentação (§3.4, F3, F4) para bater com o texto já aprovado da spec F5: (1) o status de recusa por volume passa a se chamar **`volume_exceeded`** (era `refinamento_necessario` desde a v1.9 — mesmo formato de payload, só o nome do status mudou); (2) `AnalysisService.execute()` deixa de propagar exceção — todo caminho de saída é um dict `{"status": "success"|"volume_exceeded"|"error", ...}`, e o parâmetro `confirmar_volume_alto` agora é aceito diretamente por `execute()` (bypass real dos dois checks de volume, com `"aviso"` no payload de sucesso).
 >
 > **Nota de revisão (v1.8 → v1.9):** documento aprovado. Removida inteiramente a camada de **Handlers Python** do servidor — `HandlerRegistry`, pasta `handlers/`, `HandlerRepository`, ADR-005 e a tabela `custom_handlers` do schema (decisão: remover, não manter tabela sem uso — o projeto ainda não está em produção, então não há risco de `DROP TABLE` destrutivo). O servidor deixa de transformar dados: executa a query parametrizada e devolve o **dataset bruto** ao cliente MCP, que interpreta/agrega os dados do lado do LLM. Em troca, ganha uma nova camada de **Controle de Volume** (`VolumeGuardService`): pré-checagem via `SELECT COUNT(*)`, checagem de tamanho serializado em KB, e recusa estruturada com pedido de refinamento (ou confirmação explícita via parâmetro reservado `confirmar_volume_alto`) — ver nova seção **§3.4**. Limites (`DEFAULT_MAX_RESULT_ROWS`, `DEFAULT_MAX_RESULT_SIZE_KB`) são 100% globais via `.env`, sem override por análise. Atualizados: §1.2, §2.1, §2.2 (schema), nova §2.3 (formato de `analyses.parameters` e conversão para JSON Schema MCP), §3.1, §3.2, nova §3.4, §4.3 (era Registry Pattern, agora Volume Guard), §5.1 (`cryptography`/Fernet), §5.2 (estrutura de pastas), §6.1 (startup), §7 (ADR-005 reescrito), §8.2 (formaliza Fernet para `connection_config.password`), §10.3, §11, §13, §14. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` para o racional completo e NEGOCIO.md v1.6 / FEATURES_ROADMAP.md v1.6 para as mudanças correspondentes nos outros documentos.
@@ -922,6 +924,13 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 │  └─ Pydantic schemas em tudo
 ├─ Timeout protection
 │  └─ Max 60s por query (remoto) / 30s (local)
+├─ TLS (HTTPS) obrigatório
+│  └─ Requisito de compatibilidade de cliente MCP, não política de segurança em
+│     profundidade — clientes MCP reais recusam conector remoto via http:// simples,
+│     mesmo em rede interna confiável (ver ADR-006, §7)
+├─ CORS habilitado (CORSMiddleware)
+│  └─ Clientes desktop podem validar o conector via fetch() no processo de
+│     renderer, sujeito à mesma política de CORS de um browser (ver ADR-006, §7)
 └─ Log de execução
    ├─ O quê (qual análise) foi executado
    ├─ Quando (timestamp)
@@ -930,15 +939,12 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 ❌ Não implementar em V1.0 (rede privada confiável):
 ├─ Autenticação/identificação de usuário ou cliente MCP
 ├─ Rate limiting / quotas por usuário
-├─ TLS/SSL entre cliente-servidor (confiança local)
-├─ CORS (não é cross-origin, todos locais)
 ├─ RBAC avançado (roles complexos)
 └─ SSO/LDAP (complexo para rede local)
 
 ⚠️ Futuro (quando expor remotamente ou sair da rede confiável — V1.1+):
 ├─ Reintroduzir ClientIdentificationService (qual cliente MCP)
 ├─ Reintroduzir UserIdentificationService (qual pessoa, API Key, quota)
-├─ SSL/TLS entre cliente → servidor
 ├─ Rate limiting mais rigoroso
 ├─ IP whitelist
 ├─ SSO/LDAP/Azure AD
