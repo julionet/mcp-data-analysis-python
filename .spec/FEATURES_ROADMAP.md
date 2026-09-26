@@ -32,7 +32,7 @@
 | F3 | Controle de Volume de Resultado | 🔴 Crítica | 1d | F2 | 🟩 Done |
 | F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | 🟩 Done |
 | F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | 🟩 Done |
-| F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | ⬜ Todo |
+| F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | 🟩 Done (critérios 1–4; critério 5 pendente do F8) |
 | F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | ⬜ Todo |
 
@@ -41,7 +41,7 @@
 **Destaque:**
 - ✅ F1 + F5 garantem servidor MCP agnóstico de cliente, via Streamable HTTP com TLS
 - ✅ F3 garante que o servidor nunca devolve um dataset grande demais sem o cliente confirmar o custo de tokens
-- ✅ F6 valida na prática que 2+ clientes MCP diferentes conseguem usar o servidor ao mesmo tempo
+- ✅ F6 validou na prática que 2+ clientes MCP diferentes conseguem usar o servidor ao mesmo tempo (critérios 1–4; critério 5 — execution_history sem erro de concorrência — só é validável após o F8)
 - ✅ F8 é um log simples (análise, parâmetros, status, tempo) — sem identificação de usuário/cliente
 
 **F1 em detalhe — itens adicionados após o protótipo F0 (ver ARQUITETURA.md §7 ADR-006):**
@@ -297,7 +297,7 @@ XXX_PARAM=value
 3. ✅ F3: Controle de Volume de Resultado (pré-checagem `COUNT(*)` + KB)
 4. ✅ F4: Primeira análise executando de ponta a ponta
 5. ✅ F5: list_tools() / call_tool() expostos via MCP
-6. ⬜ F6: Validar com 2+ clientes MCP diferentes simultaneamente
+6. ✅ F6: Validado com 2+ clientes MCP diferentes simultaneamente (critérios 1–4; critério 5 pendente do F8)
 7. ⬜ F7: Cache in-memory funcionando
 8. ⬜ F8: Log de execução (analysis_id, params, status, tempo)
 ```
@@ -342,7 +342,7 @@ Para cada feature, siga este workflow:
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 0 ⬜ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, MongoDB) | 0 ⬜ |
-| **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 0 ⬜ |
+| **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |
 | **Tempo de Análise** | < 30s | TBD |
 | **Uptime Local** | 99%+ | TBD |
 | **Agnóstico de Cliente** | 100% (MCP padrão via Streamable HTTP) | TBD |

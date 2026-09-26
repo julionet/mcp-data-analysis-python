@@ -14,7 +14,7 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F3: Controle de Volume de Resultado (era HandlerRegistry e Discovery — ver ARQUITETURA.md §3.4/§4.3) 🟩 Done
 - F4: Analysis Execution Engine 🟩 Done
 - F5: MCP Tools Integration (`list_tools`/`call_tool`) 🟩 Done
-- F6: Validação Multi-Cliente Simultâneo (2+ clientes MCP diferentes) ⬜ Todo
+- F6: Validação Multi-Cliente Simultâneo (2+ clientes MCP diferentes) 🟩 Done (critérios 1–4; critério 5 pendente do F8)
 - F7: Cache Service (in-memory) ⬜ Todo
 - F8: Log de Execução (simplificado, sem identificação de usuário/cliente) ⬜ Todo
 
