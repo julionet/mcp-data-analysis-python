@@ -1,5 +1,6 @@
 """Repository para execution_history — logs de execução de análises (F8)."""
 
+import json
 from uuid import UUID
 
 
@@ -33,7 +34,7 @@ class ExecutionRepository:
             """,
             analysis_id,
             analysis_version_id,
-            parameters,
+            json.dumps(parameters, default=str),
             status,
             execution_time_ms,
             rows_affected,
