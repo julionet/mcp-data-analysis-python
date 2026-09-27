@@ -15,8 +15,10 @@ from config import settings
 from database.connection import config_db_adapter
 from repositories.analysis_repo import Analysis, AnalysisRepository
 from repositories.data_source_repo import DataSourceRepository
+from repositories.execution_repo import ExecutionRepository
 from schemas.analysis_parameters import to_json_schema
 from services.analysis_service import AnalysisService
+from services.audit_service import AuditService
 from services.cache_backend import CacheBackend, InMemoryBackend, NullBackend
 from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
@@ -57,8 +59,10 @@ else:
 _cache_service = CacheService(
     _cache_backend, settings.default_max_result_rows, settings.default_max_result_size_kb
 )
+_execution_repo = ExecutionRepository(config_db_adapter)
+_audit_service = AuditService(_execution_repo)
 analysis_service = AnalysisService(
-    analysis_repo, _data_source_repo, _volume_guard, _cache_service
+    analysis_repo, _data_source_repo, _volume_guard, _cache_service, _audit_service
 )
 
 

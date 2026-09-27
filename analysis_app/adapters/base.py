@@ -29,5 +29,9 @@ class DatabaseAdapter(ABC):
         """
 
     @abstractmethod
+    async def execute(self, query: str, *args) -> None:
+        """Executa comando INSERT/UPDATE/DELETE parametrizado."""
+
+    @abstractmethod
     async def test_connection(self) -> bool:
         """Usado pelo /health e por validações de data_source."""

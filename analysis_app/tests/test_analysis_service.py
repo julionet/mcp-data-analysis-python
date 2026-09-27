@@ -77,7 +77,7 @@ def _make_step(analysis: Analysis) -> AnalysisStep:
 
 
 def _service(
-    analysis_repo=None, data_source_repo=None, volume_guard=None, cache_service=None
+    analysis_repo=None, data_source_repo=None, volume_guard=None, cache_service=None, audit_service=None
 ) -> AnalysisService:
     return AnalysisService(
         analysis_repo or AsyncMock(),
@@ -85,6 +85,7 @@ def _service(
         volume_guard or VolumeGuardService(max_rows=500, max_size_kb=150),
         cache_service
         or CacheService(InMemoryBackend(max_entries=1000, max_size_mb=100), max_rows=500, max_size_kb=150),
+        audit_service or AsyncMock(),
     )
 
 

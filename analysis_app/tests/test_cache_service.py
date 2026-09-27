@@ -357,6 +357,7 @@ class TestAnalysisServiceCache:
             data_source_repo,
             VolumeGuardService(max_rows=500, max_size_kb=150),
             CacheService(InMemoryBackend(max_entries=100, max_size_mb=10), max_rows=500, max_size_kb=150),
+            AsyncMock(),  # audit_service
         )
 
     @pytest.mark.asyncio

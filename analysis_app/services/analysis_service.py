@@ -24,6 +24,7 @@ CacheService.get_or_execute(). Todo retorno de execute() ganha o campo
 import asyncio
 import logging
 import re
+import time
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -42,6 +43,7 @@ from schemas.exceptions import (
     VolumeExceededError,
 )
 from security.crypto import decrypt_password
+from services.audit_service import AuditService
 from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
 
@@ -70,11 +72,13 @@ class AnalysisService:
         data_source_repo: DataSourceRepository,
         volume_guard: VolumeGuardService,
         cache_service: CacheService,
+        audit_service: AuditService,
     ) -> None:
         self.analysis_repo = analysis_repo
         self.data_source_repo = data_source_repo
         self.volume_guard = volume_guard
         self.cache_service = cache_service
+        self.audit_service = audit_service
         self._adapters: dict[UUID, DatabaseAdapter] = {}
         self._adapters_lock = asyncio.Lock()
 
@@ -119,30 +123,70 @@ class AnalysisService:
         if analysis is None:
             raise AnalysisNotFoundError(analysis_id)
 
-        validate_schema(analysis.parameters)
-
-        params_model = to_pydantic_model(analysis.parameters)
         try:
-            validated_params = params_model(**params)
-        except ValidationError as exc:
-            raise InvalidParametersError(_format_validation_error(exc)) from exc
+            validate_schema(analysis.parameters)
 
-        ttl_seconds = CacheService.resolve_ttl(analysis.cache_frequency)
+            params_model = to_pydantic_model(analysis.parameters)
+            try:
+                validated_params = params_model(**params)
+            except ValidationError as exc:
+                raise InvalidParametersError(_format_validation_error(exc)) from exc
 
-        async def executor() -> dict:
-            return await self._run_query(analysis, validated_params, confirmar_volume_alto)
+            ttl_seconds = CacheService.resolve_ttl(analysis.cache_frequency)
 
-        if ttl_seconds is None:  # cache_frequency == "none" — pula o cache (F7_CACHE_SERVICE.md §4.2)
-            logger.info("Cache BYPASS (cache_frequency='none') para a análise '%s'", analysis.name)
-            result = await executor()
-            return {**result, "cached": False}
+            exec_time_ms = {"value": 0}
 
-        key = self.cache_service.build_key(
-            analysis.id, analysis.updated_at, validated_params.model_dump()
+            async def executor() -> dict:
+                start = time.perf_counter()
+                result = await self._run_query(analysis, validated_params, confirmar_volume_alto)
+                exec_time_ms["value"] = int((time.perf_counter() - start) * 1000)
+                return result
+
+            if ttl_seconds is None:  # cache_frequency == "none" — pula o cache
+                logger.info("Cache BYPASS (cache_frequency='none') para a análise '%s'", analysis.name)
+                result = {**(await executor()), "cached": False}
+            else:
+                key = self.cache_service.build_key(
+                    analysis.id, analysis.updated_at, validated_params.model_dump()
+                )
+                result = await self.cache_service.get_or_execute(
+                    key, ttl_seconds, confirmar_volume_alto, executor
+                )
+        except (
+            InvalidAnalysisSchemaError,
+            InvalidParametersError,
+            InvalidCacheFrequencyError,
+            DataSourceConnectionError,
+        ) as exc:
+            await self.audit_service.log_execution(
+                analysis_id=analysis.id,
+                parameters=params,
+                status="error",
+                execution_time_ms=0,
+                cached=False,
+                error_message=str(exc),
+            )
+            raise
+        except Exception:
+            await self.audit_service.log_execution(
+                analysis_id=analysis.id,
+                parameters=params,
+                status="error",
+                execution_time_ms=0,
+                cached=False,
+                error_message="Erro interno ao executar a análise.",
+            )
+            raise
+
+        await self.audit_service.log_execution(
+            analysis_id=analysis.id,
+            parameters=params,
+            status=result["status"],
+            execution_time_ms=exec_time_ms["value"],
+            cached=result.get("cached", False),
+            result=result,
         )
-        return await self.cache_service.get_or_execute(
-            key, ttl_seconds, confirmar_volume_alto, executor
-        )
+        return result
 
     async def _run_query(
         self,

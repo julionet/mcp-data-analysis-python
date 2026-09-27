@@ -29,6 +29,11 @@ class PostgreSQLAdapter(DatabaseAdapter):
             records = await conn.fetch(query, *(params or {}).values())
             return [dict(r) for r in records]
 
+    async def execute(self, query: str, *args) -> None:
+        """Executa INSERT/UPDATE/DELETE com parâmetros posicionais."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(query, *args)
+
     async def test_connection(self) -> bool:
         try:
             await self.execute_query("SELECT 1")
