@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from database.connection import check_postgres, connect_config_db, disconnect_config_db
 from mcp_transport import configure_mcp
 from mcp_transport import lifespan as mcp_lifespan
+from mcp_transport.tools import analysis_service
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with mcp_lifespan(app):
             yield
     finally:
+        await analysis_service.aclose()  # fecha pools de data source cacheados (F4, ajuste 2026-09-26)
         await disconnect_config_db()
 
 

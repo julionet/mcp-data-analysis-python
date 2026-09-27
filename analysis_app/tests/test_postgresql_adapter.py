@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from adapters.postgresql import PostgreSQLAdapter
+from config import settings
 
 CONFIG = {
     "host": "localhost",
@@ -41,6 +42,7 @@ class TestPostgreSQLAdapter:
             user="test_user",
             password="test_password",
             database="test_db",
+            command_timeout=settings.query_timeout_seconds,
         )
         assert adapter._pool is fake_pool
 

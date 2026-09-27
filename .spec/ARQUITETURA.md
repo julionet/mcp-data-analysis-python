@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.11 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
+**Versão:** 1.12 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
 **Data:** 2026-09-26
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.11 → v1.12):** revisão de documentação/implementação (sem mudança de decisão arquitetural). Duas correções: (1) §2.1, §5.2 e §6.1 corrigidos para não listar `list_resources()`/`read_resource()` como entregues — F5_MCP_TOOLS_INTEGRATION.md §3 já documentava a decisão de não implementá-los em V1.0 (sem requisito de negócio), mas o diagrama de componentes, a estrutura de pastas e o fluxo de startup aqui ainda os listavam como se existissem; `mcp_transport/resources.py` nunca foi criado. (2) Removida a pasta `handlers/` (stubs vazios `handlers/`, `handlers/built_in/`, `handlers/custom/`) que sobrevivera no código após a remoção formal da camada de Handlers no ADR-005 (v1.9) — código morto, sem referência em nenhum documento aprovado. Ver também F4_EXECUTION_ENGINE.md, nota de ajuste retroativo de 2026-09-26 (pool de conexão por data_source e timeout de query), que não altera nada neste documento além do já previsto em §8.1.
+>
 > **Nota de revisão (v1.10 → v1.11):** documento aprovado. Corrigida contradição em §8.1 ("Rede Interna, Sem Autenticação (V1.0)") com o ADR-006 (§7), com o §9.1 e com o F1 já implementado: TLS (HTTPS) e CORS estavam listados em "❌ Não implementar em V1.0", mas ambos já são obrigatórios/implementados desde o F1 — TLS porque clientes MCP reais recusam conector remoto via `http://` simples mesmo em rede interna confiável, e CORS porque clientes desktop validam o conector via `fetch()` no processo de renderer. As duas entradas foram movidas para "✅ Implementar em V1.0", com o motivo técnico (compatibilidade de cliente MCP, não política de segurança em profundidade) referenciando o ADR-006. Removida do bloco "⚠️ Futuro" a linha "SSL/TLS entre cliente → servidor" (já implementado em V1.0, deixa de ser item futuro); nenhum item novo foi colocado no lugar por não haver, em nenhum documento existente, uma definição do que realmente falta em segurança de transporte para V1.1+ — a decidir numa próxima revisão.
 >
 > **Nota de revisão (v1.9 → v1.10):** F5 (MCP Tools Integration) implementada — `list_tools()`/`call_tool()` reais em `mcp_transport/tools.py`, consumindo `AnalysisService`/`AnalysisRepository.get_by_name()` (F5_MCP_TOOLS_INTEGRATION.md). Duas correções de nomenclatura/contrato aplicadas retroativamente em toda a documentação (§3.4, F3, F4) para bater com o texto já aprovado da spec F5: (1) o status de recusa por volume passa a se chamar **`volume_exceeded`** (era `refinamento_necessario` desde a v1.9 — mesmo formato de payload, só o nome do status mudou); (2) `AnalysisService.execute()` deixa de propagar exceção — todo caminho de saída é um dict `{"status": "success"|"volume_exceeded"|"error", ...}`, e o parâmetro `confirmar_volume_alto` agora é aceito diretamente por `execute()` (bypass real dos dois checks de volume, com `"aviso"` no payload de sucesso).
@@ -143,9 +145,11 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │                                                      │   │
 │  │  Endpoints Padrão MCP:                             │   │
 │  │  ├─ list_tools()         → todas análises          │   │
-│  │  ├─ call_tool()          → executa análise         │   │
-│  │  ├─ list_resources()     → lista recursos          │   │
-│  │  └─ read_resource()      → detalhes do recurso     │   │
+│  │  └─ call_tool()          → executa análise         │   │
+│  │  (list_resources()/read_resource() disponíveis no  │   │
+│  │   SDK mas não implementados em V1.0 — decisão do   │   │
+│  │   F5, ver F5_MCP_TOOLS_INTEGRATION.md §3: sem      │   │
+│  │   requisito de negócio que os justifique)          │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                           ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -743,8 +747,9 @@ analysis_app/
 ├── mcp_transport/             # nome definitivo — "mcp/" colide com o SDK `mcp` importado
 │   │                          # dentro do próprio pacote (confirmado na implementação de F1)
 │   ├── __init__.py
-│   ├── resources.py          # MCP resources (list_resources, read_resource)
-│   └── tools.py              # MCP tools (list_tools, call_tool)
+│   └── tools.py              # MCP tools (list_tools, call_tool) — resources.py
+│                              # (list_resources/read_resource) não existe: fora de
+│                              # escopo em V1.0, ver F5_MCP_TOOLS_INTEGRATION.md §3
 │
 ├── database/
 │   ├── __init__.py
@@ -784,9 +789,8 @@ FastAPI Startup (processo uvicorn persistente):
 ├─ 5. Verify all data_sources are reachable
 └─ 6. Register MCP endpoints via Streamable HTTP
     ├─ list_tools()
-    ├─ call_tool()
-    ├─ list_resources()
-    └─ read_resource()
+    └─ call_tool()
+    (list_resources()/read_resource() fora de escopo em V1.0 — F5)
 
 Total time: 3-5 segundos
 ```

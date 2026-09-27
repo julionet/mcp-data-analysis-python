@@ -3,6 +3,8 @@
 F1: campos de transporte (host/porta/TLS) — ver F1_FastAPI_MCP_Server_Setup.md §7.
 F2: campos de conexão do Config DB — ver F2_POSTGRESQL_ADAPTER.md §7.
 F3: limites do Controle de Volume — ver F3_CONTROLE_VOLUME.md §7.
+F4 (ajuste retroativo, 2026-09-26): query_timeout_seconds — timeout de query no
+    Postgres (RNF2/§8.1 ARQUITETURA.md), antes ausente — ver F4_EXECUTION_ENGINE.md.
 F4: FERNET_KEY passa a ser efetivamente usada por security/crypto.py — ver F4_EXECUTION_ENGINE.md §7.
 """
 
@@ -25,6 +27,7 @@ class Settings(BaseSettings):
 
     default_max_result_rows: int = 500
     default_max_result_size_kb: int = 150
+    query_timeout_seconds: int = 30
 
     fernet_key: str
 

@@ -3,6 +3,11 @@
 F5 (ajuste retroativo, F5_MCP_TOOLS_INTEGRATION.md §6.1 TestAnalysisServiceExecuteContract):
 execute() passou a nunca propagar exceção — os testes abaixo que antes
 verificavam `pytest.raises(...)` agora verificam o dict {"status": "error", ...}.
+
+F4 (ajuste retroativo, 2026-09-26): o adapter deixou de ser desconectado a
+cada execute() — fica cacheado em AnalysisService._adapters e só é fechado
+por aclose() (shutdown). Os testes abaixo não verificam mais
+`disconnect.assert_awaited_once()` por chamada; ver TestAnalysisServiceAdapterCache.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -104,7 +109,6 @@ class TestAnalysisService:
 
         assert result == {"status": "success", "data": expected_dataset}
         fake_adapter.connect.assert_awaited_once()
-        fake_adapter.disconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_execute_analysis_not_found(self):
@@ -169,7 +173,6 @@ class TestAnalysisService:
 
         assert result["status"] == "volume_exceeded"
         assert fake_adapter.execute_query.await_count == 1  # dataset completo nunca foi buscado
-        fake_adapter.disconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_execute_wraps_connection_error_without_stacktrace(self):
@@ -200,7 +203,6 @@ class TestAnalysisService:
         assert result["status"] == "error"
         assert "Senha123" not in result["mensagem"]
         assert "Traceback" not in result["mensagem"]
-        fake_adapter.disconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_execute_confirmar_volume_alto_bypasses_limit_and_adds_aviso(self):
@@ -279,3 +281,73 @@ class TestAnalysisService:
         assert "$1" in count_sql and "$2" in count_sql and "$3" in count_sql
         assert ":data_inicial" not in query_sql and ":pago" not in query_sql
         assert list(query_params.keys()) == ["data_inicial", "data_final", "pago"]
+
+
+class TestAnalysisServiceAdapterCache:
+    """F4 (ajuste retroativo, 2026-09-26) — pool de conexão reutilizado por
+    data_source_id em vez de aberto/fechado a cada execute()."""
+
+    @pytest.mark.asyncio
+    async def test_execute_reuses_adapter_across_calls_for_same_data_source(self):
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+        step = _make_step(analysis)
+
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = [step]
+
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = data_source
+
+        fake_adapter = AsyncMock()
+        fake_adapter.execute_query.side_effect = [1, [], 1, []]  # 2 execuções, COUNT + SELECT cada
+
+        service = _service(analysis_repo, data_source_repo)
+
+        with (
+            patch(
+                "services.analysis_service.AdapterFactory.create_adapter", return_value=fake_adapter
+            ) as mock_create_adapter,
+            patch("services.analysis_service.decrypt_password", return_value="senha_decifrada"),
+        ):
+            params = {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+            result_1 = await service.execute(analysis.id, params)
+            result_2 = await service.execute(analysis.id, params)
+
+        assert result_1["status"] == "success"
+        assert result_2["status"] == "success"
+        mock_create_adapter.assert_called_once()  # adapter criado só na 1ª chamada
+        fake_adapter.connect.assert_awaited_once()  # conectado só na 1ª chamada
+        fake_adapter.disconnect.assert_not_awaited()  # nunca desconectado entre chamadas
+
+    @pytest.mark.asyncio
+    async def test_aclose_disconnects_all_cached_adapters(self):
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+        step = _make_step(analysis)
+
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = [step]
+
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = data_source
+
+        fake_adapter = AsyncMock()
+        fake_adapter.execute_query.side_effect = [1, []]
+
+        service = _service(analysis_repo, data_source_repo)
+
+        with (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=fake_adapter),
+            patch("services.analysis_service.decrypt_password", return_value="senha_decifrada"),
+        ):
+            await service.execute(
+                analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+            )
+
+        await service.aclose()
+
+        fake_adapter.disconnect.assert_awaited_once()
+        assert service._adapters == {}

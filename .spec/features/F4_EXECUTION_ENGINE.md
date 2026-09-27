@@ -9,6 +9,12 @@
 **Status:** 🟩 Done
 
 > **Ajuste retroativo (F5, 2026-09-24):** `AnalysisService.execute()` ganhou o parâmetro `confirmar_volume_alto` (bypass real dos checks de volume) e deixou de propagar exceção — todo retorno é um dict `{"status": "success"|"volume_exceeded"|"error", ...}`. Ver F5_MCP_TOOLS_INTEGRATION.md §4.2/§4.4/§10.
+>
+> **Ajuste retroativo (revisão de código, 2026-09-26):** dois gaps identificados numa revisão de documentação/implementação, corrigidos nesta sessão:
+> 1. **Pool de conexão por execução:** `AnalysisService.execute()` chamava `adapter.connect()`/`adapter.disconnect()` a cada chamada, e `PostgreSQLAdapter.connect()` abre um `asyncpg.create_pool()` inteiro (default 10 conexões) — ou seja, cada análise abria e fechava até 10 conexões físicas no data source por query. Sob chamadas concorrentes (RNF4, NEGOCIO.md — "10+ conexões/clientes MCP simultâneos"), isso podia esgotar o `max_connections` do Postgres de origem. Corrigido: `AnalysisService` agora cacheia um adapter por `data_source_id` em `self._adapters` (com `asyncio.Lock` para a criação) e reutiliza o mesmo pool entre chamadas; só fecha via `aclose()`, chamado no shutdown do FastAPI (`main.py`). Limitação conhecida: se a senha do data source for rotacionada, o adapter cacheado só reflete a mudança após restart do servidor (não há invalidação do cache de adapter — igual ao limite já documentado para `analyses.updated_at` no F7).
+> 2. **Timeout de query ausente:** ARQUITETURA.md §8.1 e NEGOCIO.md RNF2 exigem timeout de 30s (local)/60s (remoto) por query, mas nem `create_pool()` nem `execute_query()` aplicavam nenhum. Corrigido: nova variável `QUERY_TIMEOUT_SECONDS` (`.env`, default `30`) passada como `command_timeout` no `asyncpg.create_pool()` de `PostgreSQLAdapter`.
+>
+> Testes atualizados: `tests/test_analysis_service.py` (nova classe `TestAnalysisServiceAdapterCache`; removidas as asserções de `disconnect` por chamada) e `tests/test_postgresql_adapter.py` (`test_connect_success` agora espera `command_timeout`).
 
 ---
 

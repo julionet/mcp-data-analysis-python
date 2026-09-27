@@ -6,17 +6,26 @@ execute() deixou de propagar exceção — todo caminho de saída é um dict
 estruturado ("success" / "volume_exceeded" / "error"), pois é chamado
 diretamente por mcp_transport/tools.py::call_tool(), que nunca pode deixar
 uma exceção vazar para o transporte MCP.
+
+F4 (ajuste retroativo, 2026-09-26): o adapter de cada data_source deixou de
+ser criado/conectado/desconectado a cada execute() — um pool inteiro
+(asyncpg.create_pool, default 10 conexões) era aberto e fechado por query,
+o que não escalava sob chamadas concorrentes (RNF4). Agora o adapter é
+cacheado por data_source_id em self._adapters e reutilizado entre chamadas;
+só é fechado no shutdown, via aclose() (ver main.py).
 """
 
+import asyncio
 import logging
 import re
 from uuid import UUID
 
 from pydantic import ValidationError
 
+from adapters.base import DatabaseAdapter
 from adapters.factory import AdapterFactory
 from repositories.analysis_repo import Analysis, AnalysisRepository
-from repositories.data_source_repo import DataSourceRepository
+from repositories.data_source_repo import DataSource, DataSourceRepository
 from schemas.analysis_parameters import to_pydantic_model, validate_schema
 from schemas.exceptions import (
     AnalysisNotFoundError,
@@ -56,6 +65,8 @@ class AnalysisService:
         self.analysis_repo = analysis_repo
         self.data_source_repo = data_source_repo
         self.volume_guard = volume_guard
+        self._adapters: dict[UUID, DatabaseAdapter] = {}
+        self._adapters_lock = asyncio.Lock()
 
     async def execute(
         self,
@@ -107,11 +118,15 @@ class AnalysisService:
                 f"Data source da análise '{analysis.name}' não encontrado ou inativo"
             )
 
-        adapter_config = {
-            **data_source.connection_config,
-            "password": decrypt_password(data_source.connection_config["password"]),
-        }
-        adapter = AdapterFactory.create_adapter(data_source.type, adapter_config)
+        try:
+            adapter = await self._get_adapter(data_source)
+        except Exception as exc:
+            logger.exception(
+                "Falha ao conectar ao data source '%s'", data_source.name
+            )
+            raise DataSourceConnectionError(
+                f"Não foi possível conectar ao data source '{data_source.name}'"
+            ) from exc
 
         steps = await self.analysis_repo.get_steps(analysis_id)
         step = steps[0]  # step_order=1, type='query' — único tipo em uso em V1.0
@@ -123,7 +138,6 @@ class AnalysisService:
         ordered_values = {name: values[name] for name in param_names}
 
         try:
-            await adapter.connect()
             if not confirmar_volume_alto:
                 await self.volume_guard.check_row_count(adapter, count_sql, ordered_values)
             dataset = await adapter.execute_query(translated_sql, ordered_values)
@@ -138,8 +152,6 @@ class AnalysisService:
             raise DataSourceConnectionError(
                 f"Não foi possível executar a análise no data source '{data_source.name}'"
             ) from exc
-        finally:
-            await adapter.disconnect()
 
         if not confirmar_volume_alto:
             try:
@@ -158,3 +170,33 @@ class AnalysisService:
         """Lista análises ativas. Sem endpoint MCP nesta feature (isso é F5) —
         método já disponível no Service para o F5 consumir depois."""
         return await self.analysis_repo.get_all()
+
+    async def _get_adapter(self, data_source: DataSource) -> DatabaseAdapter:
+        """Reutiliza um adapter (e seu pool) por data_source_id entre
+        execuções, em vez de abrir/fechar um pool inteiro a cada chamada
+        (ajuste retroativo — ver nota de módulo). Só entra no cache depois
+        de connect() ter sucesso, para não reter um adapter quebrado."""
+        adapter = self._adapters.get(data_source.id)
+        if adapter is not None:
+            return adapter
+
+        async with self._adapters_lock:
+            adapter = self._adapters.get(data_source.id)
+            if adapter is not None:
+                return adapter
+
+            adapter_config = {
+                **data_source.connection_config,
+                "password": decrypt_password(data_source.connection_config["password"]),
+            }
+            adapter = AdapterFactory.create_adapter(data_source.type, adapter_config)
+            await adapter.connect()
+            self._adapters[data_source.id] = adapter
+            return adapter
+
+    async def aclose(self) -> None:
+        """Fecha todos os pools de adapter cacheados. Chamado no shutdown do
+        FastAPI (main.py), nunca durante execute()."""
+        for adapter in self._adapters.values():
+            await adapter.disconnect()
+        self._adapters.clear()

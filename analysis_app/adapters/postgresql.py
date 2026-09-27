@@ -3,6 +3,7 @@
 import asyncpg
 
 from adapters.base import DatabaseAdapter
+from config import settings
 
 
 class PostgreSQLAdapter(DatabaseAdapter):
@@ -13,7 +14,9 @@ class PostgreSQLAdapter(DatabaseAdapter):
             user=self.config["user"],
             password=self.config["password"],
             database=self.config["database"],
-        )  # min_size/max_size/timeout = defaults do asyncpg
+            command_timeout=settings.query_timeout_seconds,
+        )  # min_size/max_size = defaults do asyncpg; command_timeout via .env (ajuste
+        # retroativo F4, 2026-09-26 — ver ARQUITETURA.md §8.1 / F4_EXECUTION_ENGINE.md)
 
     async def disconnect(self) -> None:
         if self._pool:

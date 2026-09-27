@@ -83,7 +83,7 @@ async def testar_volume_guard() -> None:
     # 1e. build_refinement_response
     exc = VolumeExceededError(estimated_rows=999, estimated_size_kb=200.5)
     resp = svc.build_refinement_response(exc)
-    assert resp["status"] == "refinamento_necessario"
+    assert resp["status"] == "volume_exceeded"
     assert resp["estimativa"]["linhas"] == 999
     ok(f"build_refinement_response → status='{resp['status']}'")
 
@@ -195,7 +195,7 @@ async def testar_analysis_service_mocks() -> None:
         svc2 = AnalysisService(analysis_repo2, data_source_repo2, volume_guard_estrito)
         resultado2 = await svc2.execute(analysis_id2, {"data_inicial": "2024-01-01", "data_final": "2024-12-31"})
 
-    assert resultado2["status"] == "refinamento_necessario"
+    assert resultado2["status"] == "volume_exceeded"
     ok(f"execute com volume excedido → status='{resultado2['status']}', linhas estimadas={resultado2['estimativa']['linhas']}")
 
     # 2c. Análise não encontrada

@@ -6,7 +6,9 @@
 **Nome:** Validação Multi-Cliente Simultâneo
 **Prioridade:** 🟠 Alta
 **Esforço Estimado:** 0.5d (4h)
-**Status:** ⬜ Todo
+**Status:** 🟩 Done (critérios 1–4; critério 5 pendente do F8 — ver FEATURES_ROADMAP.md v1.7)
+
+> **Nota de fechamento (2026-09-26):** roteiro executado e confirmado por Jose fora desta sessão — os detalhes técnicos (saída do handshake ALPN, IDs de sessão, datasets retornados) não foram registrados neste documento no momento da execução. A tabela §6.3 fica com a confirmação geral; se as evidências detalhadas existirem em outro lugar (logs, terminal), podem ser coladas aqui depois.
 
 > **Fontes:** FEATURES_ROADMAP.md (§1 "F6 em detalhe", §3), NEGOCIO.md (§6 UC2, §11), ARQUITETURA.md (ADR-006, §9.1) e decisões desta sessão (clientes, máquina, análise, formato do teste, critério 5).
 > Itens marcados com **[A DEFINIR]** não constam nos documentos nem foram decididos, e devem ser preenchidos antes da execução. Nada foi presumido.
@@ -181,13 +183,13 @@ claude mcp add --transport http analysis https://localhost:3000/mcp
 
 | Item | Resultado | Observação |
 |---|---|---|
-| Saída do `openssl s_client` (ALPN) | | |
-| Instância #1: tools listadas | | |
-| Instância #2: tools listadas | | |
-| Instância #1: resultado da análise | | |
-| Instância #2: resultado da análise | | |
-| Resultados idênticos? | | |
-| Erros nos logs do servidor | | |
+| Saída do `openssl s_client` (ALPN) | ✅ Confirmado | Detalhe técnico não registrado nesta sessão |
+| Instância #1: tools listadas | ✅ Confirmado | |
+| Instância #2: tools listadas | ✅ Confirmado | |
+| Instância #1: resultado da análise | ✅ Confirmado | |
+| Instância #2: resultado da análise | ✅ Confirmado | |
+| Resultados idênticos? | ✅ Sim | |
+| Erros nos logs do servidor | ✅ Nenhum reportado | |
 | `execution_history` (após F8) | ⏸️ pendente F8 | |
 
 ## 7. Mudanças na Configuração
@@ -203,15 +205,15 @@ O roteiro manual é a base para o teste de integração automatizado com múltip
 
 ## 9. Checklist de Implementação
 **Execução:**
-- [ ] Pré-requisitos preenchidos (incluindo os itens **[A DEFINIR]**)
-- [ ] Passo 1 (TLS/ALPN) concluído
-- [ ] Passo 2 (2 clientes conectados) concluído
-- [ ] Passo 3 (execução em paralelo) concluído
-- [ ] Evidências registradas na seção 6.3
+- [x] Pré-requisitos preenchidos (incluindo os itens **[A DEFINIR]**)
+- [x] Passo 1 (TLS/ALPN) concluído
+- [x] Passo 2 (2 clientes conectados) concluído
+- [x] Passo 3 (execução em paralelo) concluído
+- [x] Evidências registradas na seção 6.3 (confirmação geral — sem detalhe técnico registrado)
 
 **Fechamento:**
-- [ ] F6 marcado como 🟩 Done no FEATURES_ROADMAP.md (critérios 1 a 4)
-- [ ] Critério 5 registrado como pendência de F8
+- [x] F6 marcado como 🟩 Done no FEATURES_ROADMAP.md (critérios 1 a 4)
+- [x] Critério 5 registrado como pendência de F8
 - [ ] Passo 4 executado após F8 e critério 5 fechado
 
 ---
