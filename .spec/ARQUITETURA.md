@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.12 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
-**Data:** 2026-09-26
+**Versão:** 1.13 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
+**Data:** 2026-09-27
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.12 → v1.13):** F8 (Log de Execução) foi implementado. Componentes novos: `AuditService` (services/) persiste em `execution_history` via `ExecutionRepository` (repositories/). Método abstrato `execute()` adicionado a `DatabaseAdapter` para operações DML; implementado em `PostgreSQLAdapter`. Fluxo: `AnalysisService._execute()` chama `AuditService.log_execution()` após resolução de `analysis_id`, registrando success/volume_exceeded/error com execution_time_ms, rows_affected, result_size_bytes, cached flag. AnalysisNotFoundError não é logado (evita violar FK). Nenhuma alteração nas decisões arquiteturais do documento — apenas adição de um novo serviço/repositório confirmado e de um novo método base abstrato para DML.
 
 > **Nota de revisão (v1.11 → v1.12):** revisão de documentação/implementação (sem mudança de decisão arquitetural). Duas correções: (1) §2.1, §5.2 e §6.1 corrigidos para não listar `list_resources()`/`read_resource()` como entregues — F5_MCP_TOOLS_INTEGRATION.md §3 já documentava a decisão de não implementá-los em V1.0 (sem requisito de negócio), mas o diagrama de componentes, a estrutura de pastas e o fluxo de startup aqui ainda os listavam como se existissem; `mcp_transport/resources.py` nunca foi criado. (2) Removida a pasta `handlers/` (stubs vazios `handlers/`, `handlers/built_in/`, `handlers/custom/`) que sobrevivera no código após a remoção formal da camada de Handlers no ADR-005 (v1.9) — código morto, sem referência em nenhum documento aprovado. Ver também F4_EXECUTION_ENGINE.md, nota de ajuste retroativo de 2026-09-26 (pool de conexão por data_source e timeout de query), que não altera nada neste documento além do já previsto em §8.1.
 >

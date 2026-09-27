@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.7 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**)
-**Data:** 2026-09-26
+**Versão:** 1.8 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**)
+**Data:** 2026-09-27
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.7 → v1.8):** documento aprovado. F8 (Log de Execução) foi implementado e testado com 100% de cobertura. `AuditService` persiste em `execution_history`: análise_id, parâmetros, status (success/volume_exceeded/error), execution_time_ms (0 para cache hit), rows_affected, result_size_bytes, error_message, cached flag. AnalysisNotFoundError não é logado em BD (evita violar FK). Critério 5 do F6 (execution_history mostra execuções paralelas sem erro de concorrência) agora pode ser validado. Adicionado método `execute()` abstrato ao `DatabaseAdapter` e implementado em `PostgreSQLAdapter` para operações INSERT/UPDATE/DELETE. Total Sprint 1 permanece ~10.5 dias.
 
 > **Nota de revisão (v1.6 → v1.7):** documento aprovado. Decisão desta sessão: o critério "execution_history mostra as duas execuções, sem erro de concorrência" do F6 (Validação Multi-Cliente) só pode ser validado depois que o F8 (Log de Execução) for implementado — hoje `AuditService.log_execution()` ainda não existe (F8 está ⬜ Todo). F6 pode ser dado como concluído nos critérios 1–4 antes disso, ficando esse critério pendente até a conclusão do F8. Nenhuma mudança de esforço, dependência, status ou numeração de feature.
 
@@ -34,15 +36,15 @@
 | F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | 🟩 Done |
 | F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | 🟩 Done (critérios 1–4; critério 5 pendente do F8) |
 | F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | 🟩 Done |
-| F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | ⬜ Todo |
+| F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | 🟩 Done |
 
 **Total Sprint 1:** ~10.5 dias (≈ 2 semanas com buffer)
 
 **Destaque:**
 - ✅ F1 + F5 garantem servidor MCP agnóstico de cliente, via Streamable HTTP com TLS
 - ✅ F3 garante que o servidor nunca devolve um dataset grande demais sem o cliente confirmar o custo de tokens
-- ✅ F6 validou na prática que 2+ clientes MCP diferentes conseguem usar o servidor ao mesmo tempo (critérios 1–4; critério 5 — execution_history sem erro de concorrência — só é validável após o F8)
-- ✅ F8 é um log simples (análise, parâmetros, status, tempo) — sem identificação de usuário/cliente
+- ✅ F6 validou na prática que 2+ clientes MCP diferentes conseguem usar o servidor ao mesmo tempo (critérios 1–4); **critério 5 (execution_history sem erro de concorrência) agora pronto para validação após F8**
+- ✅ F8 completo: log simples em `execution_history` (análise, parâmetros, status, tempo, cached flag) — sem identificação de usuário/cliente
 
 **F1 em detalhe — itens adicionados após o protótipo F0 (ver ARQUITETURA.md §7 ADR-006):**
 ```
