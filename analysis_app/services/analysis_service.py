@@ -13,6 +13,12 @@ ser criado/conectado/desconectado a cada execute() — um pool inteiro
 o que não escalava sob chamadas concorrentes (RNF4). Agora o adapter é
 cacheado por data_source_id em self._adapters e reutilizado entre chamadas;
 só é fechado no shutdown, via aclose() (ver main.py).
+
+F7: execute() passa a resolver o cache antes de tocar o BD — ver
+F7_CACHE_SERVICE.md §4.2. A query em si (data_source → adapter → steps →
+Volume Guard → query) virou _run_query(), usada como "executor" passado a
+CacheService.get_or_execute(). Todo retorno de execute() ganha o campo
+"cached" (tabela de contrato em F7_CACHE_SERVICE.md §4.4).
 """
 
 import asyncio
@@ -31,10 +37,12 @@ from schemas.exceptions import (
     AnalysisNotFoundError,
     DataSourceConnectionError,
     InvalidAnalysisSchemaError,
+    InvalidCacheFrequencyError,
     InvalidParametersError,
     VolumeExceededError,
 )
 from security.crypto import decrypt_password
+from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
 
 logger = logging.getLogger(__name__)
@@ -61,10 +69,12 @@ class AnalysisService:
         analysis_repo: AnalysisRepository,
         data_source_repo: DataSourceRepository,
         volume_guard: VolumeGuardService,
+        cache_service: CacheService,
     ) -> None:
         self.analysis_repo = analysis_repo
         self.data_source_repo = data_source_repo
         self.volume_guard = volume_guard
+        self.cache_service = cache_service
         self._adapters: dict[UUID, DatabaseAdapter] = {}
         self._adapters_lock = asyncio.Lock()
 
@@ -76,10 +86,10 @@ class AnalysisService:
     ) -> dict:
         """Executa uma análise e SEMPRE retorna um dict estruturado — nunca
         propaga exceção (F5, ajuste retroativo). Formatos possíveis:
-          {"status": "success", "data": [...]}
-          {"status": "success", "data": [...], "aviso": "..."}  (confirmar_volume_alto=true)
-          {"status": "volume_exceeded", "estimativa": {...}, "limite": {...}, "mensagem": "..."}
-          {"status": "error", "mensagem": "..."}
+          {"status": "success", "data": [...], "cached": bool}
+          {"status": "success", "data": [...], "aviso": "...", "cached": bool}
+          {"status": "volume_exceeded", "estimativa": {...}, "limite": {...}, "mensagem": "...", "cached": false}
+          {"status": "error", "mensagem": "...", "cached": false}
         """
         try:
             return await self._execute(analysis_id, params, confirmar_volume_alto)
@@ -88,11 +98,16 @@ class AnalysisService:
             InvalidAnalysisSchemaError,
             InvalidParametersError,
             DataSourceConnectionError,
+            InvalidCacheFrequencyError,
         ) as exc:
-            return {"status": "error", "mensagem": str(exc)}
+            return {"status": "error", "mensagem": str(exc), "cached": False}
         except Exception:
             logger.exception("Erro inesperado ao executar a análise '%s'", analysis_id)
-            return {"status": "error", "mensagem": "Erro interno ao executar a análise."}
+            return {
+                "status": "error",
+                "mensagem": "Erro interno ao executar a análise.",
+                "cached": False,
+            }
 
     async def _execute(
         self,
@@ -112,6 +127,32 @@ class AnalysisService:
         except ValidationError as exc:
             raise InvalidParametersError(_format_validation_error(exc)) from exc
 
+        ttl_seconds = CacheService.resolve_ttl(analysis.cache_frequency)
+
+        async def executor() -> dict:
+            return await self._run_query(analysis, validated_params, confirmar_volume_alto)
+
+        if ttl_seconds is None:  # cache_frequency == "none" — pula o cache (F7_CACHE_SERVICE.md §4.2)
+            logger.info("Cache BYPASS (cache_frequency='none') para a análise '%s'", analysis.name)
+            result = await executor()
+            return {**result, "cached": False}
+
+        key = self.cache_service.build_key(
+            analysis.id, analysis.updated_at, validated_params.model_dump()
+        )
+        return await self.cache_service.get_or_execute(
+            key, ttl_seconds, confirmar_volume_alto, executor
+        )
+
+    async def _run_query(
+        self,
+        analysis: Analysis,
+        validated_params,
+        confirmar_volume_alto: bool,
+    ) -> dict:
+        """Data source → adapter → steps → Volume Guard → query — o "executor"
+        passado a CacheService.get_or_execute() em um miss. Nunca é chamado em
+        um cache hit (F7_CACHE_SERVICE.md §4.2)."""
         data_source = await self.data_source_repo.get_by_id(analysis.data_source_id)
         if data_source is None or not data_source.is_active:
             raise DataSourceConnectionError(
@@ -128,7 +169,7 @@ class AnalysisService:
                 f"Não foi possível conectar ao data source '{data_source.name}'"
             ) from exc
 
-        steps = await self.analysis_repo.get_steps(analysis_id)
+        steps = await self.analysis_repo.get_steps(analysis.id)
         step = steps[0]  # step_order=1, type='query' — único tipo em uso em V1.0
         param_names = step.definition["params"]
         translated_sql = _translate_named_params(step.definition["sql"], param_names)

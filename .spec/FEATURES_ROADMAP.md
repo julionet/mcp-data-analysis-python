@@ -33,7 +33,7 @@
 | F4 | Analysis Execution Engine | 🔴 Crítica | 2d | F2, F3 | 🟩 Done |
 | F5 | MCP Tools Integration (`list_tools` / `call_tool`) | 🔴 Crítica | 1d | F1, F4 | 🟩 Done |
 | F6 | Validação Multi-Cliente Simultâneo | 🟠 Alta | 0.5d | F5 | 🟩 Done (critérios 1–4; critério 5 pendente do F8) |
-| F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | ⬜ Todo |
+| F7 | Cache Service (In-Memory) | 🟠 Alta | 1d | F4 | 🟩 Done |
 | F8 | Log de Execução (Simplificado) | 🟠 Alta | 0.5d | F4 | ⬜ Todo |
 
 **Total Sprint 1:** ~10.5 dias (≈ 2 semanas com buffer)
@@ -298,7 +298,7 @@ XXX_PARAM=value
 4. ✅ F4: Primeira análise executando de ponta a ponta
 5. ✅ F5: list_tools() / call_tool() expostos via MCP
 6. ✅ F6: Validado com 2+ clientes MCP diferentes simultaneamente (critérios 1–4; critério 5 pendente do F8)
-7. ⬜ F7: Cache in-memory funcionando
+7. ✅ F7: Cache in-memory funcionando
 8. ⬜ F8: Log de execução (analysis_id, params, status, tempo)
 ```
 

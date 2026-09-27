@@ -28,3 +28,7 @@ class InvalidParametersError(Exception):
 
 class DataSourceConnectionError(Exception):
     """Erro de conexão/SQL no data source — mensagem sem stack trace nem credenciais."""
+
+
+class InvalidCacheFrequencyError(Exception):
+    """analyses.cache_frequency não é um dos valores aceitos (hourly/daily/weekly/none)."""

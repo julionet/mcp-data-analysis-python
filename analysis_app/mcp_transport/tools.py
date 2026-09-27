@@ -17,6 +17,8 @@ from repositories.analysis_repo import Analysis, AnalysisRepository
 from repositories.data_source_repo import DataSourceRepository
 from schemas.analysis_parameters import to_json_schema
 from services.analysis_service import AnalysisService
+from services.cache_backend import CacheBackend, InMemoryBackend, NullBackend
+from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
 
 logger = logging.getLogger(__name__)
@@ -37,7 +39,27 @@ _data_source_repo = DataSourceRepository(config_db_adapter)
 _volume_guard = VolumeGuardService(
     settings.default_max_result_rows, settings.default_max_result_size_kb
 )
-analysis_service = AnalysisService(analysis_repo, _data_source_repo, _volume_guard)
+# CACHE_BACKEND só aceita "memory"/"none" em V1.0 — outro valor já falhou no
+# startup em config.py (Settings.model_post_init). "none" é o kill-switch
+# global de cache (NullBackend, ajuste retroativo 2026-09-27). Um novo backend
+# (Redis, F7_CACHE_SERVICE.md §8.3) entraria aqui como mais um branch.
+_cache_backend: CacheBackend
+if settings.cache_backend == "none":
+    _cache_backend = NullBackend()
+    logger.warning("CACHE_BACKEND=none - cache desligado globalmente para todas as análises")
+else:
+    _cache_backend = InMemoryBackend(settings.cache_max_entries, settings.cache_max_size_mb)
+    logger.info(
+        "Cache em memória ativo (CACHE_MAX_ENTRIES=%d, CACHE_MAX_SIZE_MB=%d)",
+        settings.cache_max_entries,
+        settings.cache_max_size_mb,
+    )
+_cache_service = CacheService(
+    _cache_backend, settings.default_max_result_rows, settings.default_max_result_size_kb
+)
+analysis_service = AnalysisService(
+    analysis_repo, _data_source_repo, _volume_guard, _cache_service
+)
 
 
 def _build_tool(analysis: Analysis) -> Tool:

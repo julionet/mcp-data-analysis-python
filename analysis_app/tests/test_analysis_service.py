@@ -10,6 +10,7 @@ por aclose() (shutdown). Os testes abaixo não verificam mais
 `disconnect.assert_awaited_once()` por chamada; ver TestAnalysisServiceAdapterCache.
 """
 
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -18,6 +19,8 @@ import pytest
 from repositories.analysis_repo import Analysis, AnalysisStep
 from repositories.data_source_repo import DataSource
 from services.analysis_service import AnalysisService
+from services.cache_backend import InMemoryBackend
+from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
 
 VENDAS_PARAMETERS = {
@@ -33,7 +36,7 @@ VENDAS_SQL = (
 )
 
 
-def _make_analysis(parameters=None) -> Analysis:
+def _make_analysis(parameters=None, updated_at=None, cache_frequency="daily") -> Analysis:
     return Analysis(
         id=uuid4(),
         name="vendas_por_periodo",
@@ -41,6 +44,8 @@ def _make_analysis(parameters=None) -> Analysis:
         data_source_id=uuid4(),
         parameters=VENDAS_PARAMETERS if parameters is None else parameters,
         is_active=True,
+        updated_at=updated_at or datetime(2026, 1, 1, 12, 0, 0),
+        cache_frequency=cache_frequency,
     )
 
 
@@ -71,11 +76,15 @@ def _make_step(analysis: Analysis) -> AnalysisStep:
     )
 
 
-def _service(analysis_repo=None, data_source_repo=None, volume_guard=None) -> AnalysisService:
+def _service(
+    analysis_repo=None, data_source_repo=None, volume_guard=None, cache_service=None
+) -> AnalysisService:
     return AnalysisService(
         analysis_repo or AsyncMock(),
         data_source_repo or AsyncMock(),
         volume_guard or VolumeGuardService(max_rows=500, max_size_kb=150),
+        cache_service
+        or CacheService(InMemoryBackend(max_entries=1000, max_size_mb=100), max_rows=500, max_size_kb=150),
     )
 
 
@@ -107,7 +116,7 @@ class TestAnalysisService:
                 analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
             )
 
-        assert result == {"status": "success", "data": expected_dataset}
+        assert result == {"status": "success", "data": expected_dataset, "cached": False}
         fake_adapter.connect.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -246,7 +255,11 @@ class TestAnalysisService:
 
         result = await service.execute(uuid4(), {})
 
-        assert result == {"status": "error", "mensagem": "Erro interno ao executar a análise."}
+        assert result == {
+            "status": "error",
+            "mensagem": "Erro interno ao executar a análise.",
+            "cached": False,
+        }
 
     @pytest.mark.asyncio
     async def test_execute_translates_named_params_to_positional(self):

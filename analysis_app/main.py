@@ -4,10 +4,22 @@ F1: transporte.
 F2: conexão com o Config DB no startup (fail-fast) e /health com check_postgres().
 F5: list_tools()/call_tool() reais — handlers registrados em mcp_transport/__init__.py,
     que delega para mcp_transport/tools.py (ver F5_MCP_TOOLS_INTEGRATION.md).
+F7 (ajuste retroativo, 2026-09-27): logging.basicConfig() — sem isso, os
+    logger.info() de services/* (ex.: hit/miss de cache) são descartados
+    silenciosamente, porque o logger raiz fica no nível WARNING por padrão
+    e o uvicorn só configura os loggers "uvicorn.*", não o resto da app.
+    Setup mínimo aqui; um formato/handler mais completo fica para o F8
+    (Log de Execução).
 """
 
 import contextlib
+import logging
 from collections.abc import AsyncIterator
+
+# Precisa rodar ANTES de importar mcp_transport/* — mcp_transport/tools.py já
+# loga no nível de módulo (qual cache backend está ativo), e isso só chega ao
+# console se basicConfig() já tiver rodado quando esse import acontecer.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse

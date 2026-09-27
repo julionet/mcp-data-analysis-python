@@ -4,13 +4,17 @@
 Seção 1: VolumeGuardService (sem banco)
 Seção 2: AnalysisService com mocks (sem banco)
 Seção 3: AnalysisService com banco real (requer .env e Config DB rodando)
+Seção 4: Validação do Cache Service (F7) — duas execuções da mesma análise,
+         confirmando "cached": false/true e a diferença de latência
 """
 
 import asyncio
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+from datetime import datetime
 
 # Garante que o pacote analysis_app está no path quando rodado de qualquer cwd
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -19,6 +23,8 @@ from repositories.analysis_repo import Analysis, AnalysisStep
 from repositories.data_source_repo import DataSource
 from schemas.exceptions import VolumeExceededError
 from services.analysis_service import AnalysisService
+from services.cache_backend import InMemoryBackend
+from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
 
 # ---------------------------------------------------------------------------
@@ -114,6 +120,8 @@ def _build_mocks(analysis_id=None, linhas_count=5):
         data_source_id=data_source_id,
         parameters=PARAMETERS,
         is_active=True,
+        updated_at=datetime(2026, 1, 1, 12, 0, 0),
+        cache_frequency="daily",
     )
 
     step = AnalysisStep(
@@ -157,6 +165,13 @@ def _build_mocks(analysis_id=None, linhas_count=5):
     return analysis_repo, data_source_repo, adapter_mock, analysis_id, dados_retornados
 
 
+def _nova_cache_service(max_rows: int = 500, max_size_kb: int = 150) -> CacheService:
+    """Cache isolado (InMemoryBackend novo) por cenário — evita que um teste
+    "veja" cache gravado por outro nesta Seção 2 (cada um usa um analysis_id
+    novo de qualquer forma, mas fica explícito)."""
+    return CacheService(InMemoryBackend(max_entries=100, max_size_mb=10), max_rows, max_size_kb)
+
+
 async def testar_analysis_service_mocks() -> None:
     secao("Seção 2: AnalysisService com mocks")
 
@@ -172,12 +187,13 @@ async def testar_analysis_service_mocks() -> None:
             "services.analysis_service.decrypt_password", return_value="senha_decifrada"
         ),
     ):
-        svc = AnalysisService(analysis_repo, data_source_repo, volume_guard)
+        svc = AnalysisService(analysis_repo, data_source_repo, volume_guard, _nova_cache_service())
         resultado = await svc.execute(analysis_id, {"data_inicial": "2024-01-01", "data_final": "2024-01-31"})
 
     assert resultado["status"] == "success"
     assert len(resultado["data"]) == 5
-    ok(f"execute bem-sucedido → {len(resultado['data'])} linhas retornadas")
+    assert resultado["cached"] is False
+    ok(f"execute bem-sucedido → {len(resultado['data'])} linhas retornadas, cached={resultado['cached']}")
 
     # 2b. Volume excedido → refinamento
     analysis_repo2, data_source_repo2, adapter_mock2, analysis_id2, _ = _build_mocks(linhas_count=5)
@@ -192,31 +208,32 @@ async def testar_analysis_service_mocks() -> None:
             "services.analysis_service.decrypt_password", return_value="senha_decifrada"
         ),
     ):
-        svc2 = AnalysisService(analysis_repo2, data_source_repo2, volume_guard_estrito)
+        svc2 = AnalysisService(analysis_repo2, data_source_repo2, volume_guard_estrito, _nova_cache_service())
         resultado2 = await svc2.execute(analysis_id2, {"data_inicial": "2024-01-01", "data_final": "2024-12-31"})
 
     assert resultado2["status"] == "volume_exceeded"
     ok(f"execute com volume excedido → status='{resultado2['status']}', linhas estimadas={resultado2['estimativa']['linhas']}")
 
-    # 2c. Análise não encontrada
+    # 2c. Análise não encontrada (execute() nunca propaga exceção desde o F5 —
+    # o contrato é status "error" no dict de retorno, não uma exceção)
     analysis_repo3 = MagicMock()
     analysis_repo3.get_by_id = AsyncMock(return_value=None)
     data_source_repo3 = MagicMock()
-    svc3 = AnalysisService(analysis_repo3, data_source_repo3, VolumeGuardService(100, 150))
-    try:
-        await svc3.execute(uuid4(), {})
-        erro("Esperava AnalysisNotFoundError mas não veio")
-    except __import__("schemas.exceptions", fromlist=["AnalysisNotFoundError"]).AnalysisNotFoundError as exc:
-        ok(f"Análise não encontrada detectada → {exc}")
+    svc3 = AnalysisService(analysis_repo3, data_source_repo3, VolumeGuardService(100, 150), _nova_cache_service())
+    resultado3 = await svc3.execute(uuid4(), {})
+    if resultado3["status"] == "error":
+        ok(f"Análise não encontrada detectada → {resultado3['mensagem']}")
+    else:
+        erro(f"Esperava status='error' mas veio '{resultado3['status']}'")
 
     # 2d. Parâmetros inválidos (data_final ausente)
     analysis_repo4, data_source_repo4, _, analysis_id4, _ = _build_mocks()
-    svc4 = AnalysisService(analysis_repo4, data_source_repo4, VolumeGuardService(100, 150))
-    try:
-        await svc4.execute(analysis_id4, {"data_inicial": "2024-01-01"})  # falta data_final
-        erro("Esperava InvalidParametersError mas não veio")
-    except __import__("schemas.exceptions", fromlist=["InvalidParametersError"]).InvalidParametersError as exc:
-        ok(f"Parâmetro inválido detectado → {exc}")
+    svc4 = AnalysisService(analysis_repo4, data_source_repo4, VolumeGuardService(100, 150), _nova_cache_service())
+    resultado4 = await svc4.execute(analysis_id4, {"data_inicial": "2024-01-01"})  # falta data_final
+    if resultado4["status"] == "error":
+        ok(f"Parâmetro inválido detectado → {resultado4['mensagem']}")
+    else:
+        erro(f"Esperava status='error' mas veio '{resultado4['status']}'")
 
 
 # ---------------------------------------------------------------------------
@@ -242,15 +259,20 @@ async def testar_com_banco_real() -> None:
             max_rows=settings.default_max_result_rows,
             max_size_kb=settings.default_max_result_size_kb,
         )
+        cache_service = CacheService(
+            InMemoryBackend(settings.cache_max_entries, settings.cache_max_size_mb),
+            settings.default_max_result_rows,
+            settings.default_max_result_size_kb,
+        )
 
-        svc = AnalysisService(analysis_repo, data_source_repo, volume_guard)
+        svc = AnalysisService(analysis_repo, data_source_repo, volume_guard, cache_service)
 
         # Lista análises disponíveis
         analyses = await svc.get_all_analyses()
         ok(f"get_all_analyses → {len(analyses)} análise(s) encontrada(s)")
 
         for a in analyses:
-            print(f"    → id={a.id}  name={a.name}")
+            print(f"    → id={a.id}  name={a.name}  cache_frequency={a.cache_frequency}")
 
         if analyses:
             primeira = analyses[0]
@@ -258,21 +280,71 @@ async def testar_com_banco_real() -> None:
             print("  (ajuste os params abaixo para bater com o schema da análise)")
             # ↓ Edite os parâmetros conforme o schema da análise cadastrada
             params_exemplo = {
-                "data_final": "2024-01-01",
-                "data_inicial": "2024-01-31",
+                "data_inicial": "2024-01-01",
+                "data_final": "2024-01-31",
             }
             resultado = await svc.execute(primeira.id, params_exemplo)
             status = resultado.get("status")
             if status == "success":
-                ok(f"Execução bem-sucedida → {len(resultado['data'])} linha(s)")
+                ok(f"Execução bem-sucedida → {len(resultado['data'])} linha(s), cached={resultado['cached']}")
             else:
-                ok(f"Resposta de refinamento → {resultado['mensagem'][:80]}...")
+                ok(f"Resposta de refinamento/erro → {resultado.get('mensagem', '')[:80]}...")
 
-        await disconnect_config_db()
+        # Conexão fica aberta de propósito — Seção 4 reutiliza este mesmo `svc`.
+        # main() é quem desconecta, depois que a Seção 4 também terminar.
+        return svc, analyses
 
     except Exception as exc:
         erro(f"Banco real indisponível ou erro de configuração: {exc}")
         print("  Dica: verifique .env e se o docker-compose está rodando.")
+        return None, []
+
+
+# ---------------------------------------------------------------------------
+# Seção 4 — Validação do Cache Service (F7), contra o banco real
+# ---------------------------------------------------------------------------
+
+async def testar_cache_com_banco_real(svc: AnalysisService | None, analyses: list[Analysis]) -> None:
+    secao("Seção 4: Validação do Cache Service (F7)")
+
+    candidatas = [a for a in analyses if a.cache_frequency != "none"]
+    if svc is None or not candidatas:
+        print("  Pulando — sem AnalysisService/banco real disponível, ou nenhuma")
+        print("  análise com cache_frequency != 'none' cadastrada.")
+        return
+
+    analysis = candidatas[0]
+    print(f"  Usando '{analysis.name}' (cache_frequency='{analysis.cache_frequency}')")
+    print("  (ajuste os params abaixo para bater com o schema da análise)")
+    # ↓ Params DIFERENTES dos usados na Seção 3 — mesmo svc/cache dos dois,
+    # então reusar os mesmos params daria hit já na 1ª chamada aqui (o que só
+    # provaria que o cache "vazou" entre seções, não o ciclo miss→hit em si)
+    params = {"data_inicial": "2025-01-01", "data_final": "2025-01-31"}
+
+    inicio_1 = time.perf_counter()
+    resultado_1 = await svc.execute(analysis.id, params)
+    duracao_1_ms = (time.perf_counter() - inicio_1) * 1000
+
+    inicio_2 = time.perf_counter()
+    resultado_2 = await svc.execute(analysis.id, params)
+    duracao_2_ms = (time.perf_counter() - inicio_2) * 1000
+
+    print(f"    1ª chamada → status={resultado_1.get('status')} cached={resultado_1.get('cached')} ({duracao_1_ms:.1f}ms)")
+    print(f"    2ª chamada → status={resultado_2.get('status')} cached={resultado_2.get('cached')} ({duracao_2_ms:.1f}ms)")
+
+    if resultado_1.get("status") != "success":
+        erro("1ª chamada não retornou 'success' — ajuste params_exemplo e rode de novo")
+        return
+
+    if resultado_1.get("cached") is False and resultado_2.get("cached") is True:
+        ok("Cache confirmado: 1ª chamada tocou o BD (cached=false), 2ª veio do cache (cached=true)")
+    else:
+        erro("Cache NÃO se comportou como esperado — ver checklist de causas comuns na resposta do assistente")
+
+    if duracao_2_ms < duracao_1_ms:
+        ok(f"2ª chamada mais rápida que a 1ª ({duracao_2_ms:.1f}ms vs {duracao_1_ms:.1f}ms)")
+    else:
+        erro(f"2ª chamada não ficou mais rápida ({duracao_2_ms:.1f}ms vs {duracao_1_ms:.1f}ms) — investigar")
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +354,15 @@ async def testar_com_banco_real() -> None:
 async def main() -> None:
     await testar_volume_guard()
     await testar_analysis_service_mocks()
-    await testar_com_banco_real()
+    svc, analyses = await testar_com_banco_real()
+    try:
+        await testar_cache_com_banco_real(svc, analyses)
+    finally:
+        if svc is not None:
+            from database.connection import disconnect_config_db
+
+            await svc.aclose()  # fecha pools de data source cacheados (mesma ordem do main.py)
+            await disconnect_config_db()
     print(f"\n{'=' * 60}\n  Testes manuais concluídos.\n{'=' * 60}\n")
 
 

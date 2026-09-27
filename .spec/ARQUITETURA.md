@@ -162,9 +162,13 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │  │  ├─ check_row_count(sql, params)                │   │
 │  │  │  ├─ check_serialized_size(result)                │   │
 │  │  │  └─ build_refinement_response(estimate, limit)   │   │
-│  │  ├─ CacheService                                   │   │
-│  │  │  ├─ get_or_execute(analysis_id, params)         │   │
-│  │  │  └─ invalidate_by_source(source_id)             │   │
+│  │  ├─ CacheService (usado dentro de AnalysisService.execute() —│   │
+│  │  │  │  F7_CACHE_SERVICE.md §3; CacheBackend abstrai troca    │   │
+│  │  │  │  futura por Redis — só InMemoryBackend em V1.0)        │   │
+│  │  │  ├─ build_key(analysis_id, updated_at, params) -> str    │   │
+│  │  │  ├─ resolve_ttl(cache_frequency) -> int | None           │   │
+│  │  │  └─ get_or_execute(key, ttl, confirmar_volume_alto, executor) │   │
+│  │  │     (invalidate_by_source fora do F7 — backlog futuro)   │   │
 │  │  ├─ VersionService                                 │   │
 │  │  │  ├─ get_history(analysis_id)                    │   │
 │  │  │  ├─ rollback(analysis_id, version)              │   │
@@ -372,6 +376,13 @@ schemas/analysis_parameters.py
 
 ### 3.2 Fluxo: Execução de Análise
 
+> Atualizado pelo F7 (Cache Service) — o cache fica **dentro de
+> `AnalysisService.execute()`**, não em `call_tool()` (decisão registrada em
+> F7_CACHE_SERVICE.md §3): `execute()` já carrega a análise (id, `updated_at`,
+> `cache_frequency`) e atende qualquer chamador (`call_tool` hoje, Celery no
+> futuro). `CacheService`/`InMemoryBackend` são instanciados em
+> `mcp_transport/tools.py`, no mesmo padrão hoje usado por `VolumeGuardService`.
+
 ```
 ┌──────────────────────────┐
 │   Cliente MCP            │
@@ -383,33 +394,40 @@ schemas/analysis_parameters.py
 ┌─────────▼──────────────────────────────────┐
 │  FastAPI MCP Server                        │
 │  call_tool(name, arguments)                │
-│  ├─ 1. Parse arguments                    │
-│  ├─ 2. CacheService.get_or_execute()      │
-│  │    ├─ Cache hit? Retorna cached       │
-│  │    ├─ Cache miss → continua            │
-│  │    └─ Check TTL                        │
-│  ├─ 3. AnalysisService.execute()         │
-│  │    ├─ Load analysis definition        │
-│  │    ├─ Get DataSource config           │
-│  │    ├─ Select Adapter                  │
+│  └─ 1. Resolve análise pelo nome, chama   │
+│       AnalysisService.execute() — sem     │
+│       lógica de cache aqui                │
+│                                             │
+│  AnalysisService.execute()                 │
+│  ├─ 1. Load analysis (id, updated_at,     │
+│  │      cache_frequency)                   │
+│  ├─ 2. Valida params (Pydantic)           │
+│  ├─ 3. CacheService.resolve_ttl()         │
+│  │      └─ inválido → status:error, PARA aqui (nenhuma query) │
+│  ├─ 4. cache_frequency="none" → pula direto para o passo 6    │
+│  ├─ 5. CacheService.get_or_execute(chave, ttl, confirmar_volume_alto, executor) │
+│  │    ├─ Hit dentro do limite → devolve, cached=true, BD intocado │
+│  │    ├─ Hit grande sem confirmação → devolve volume_exceeded, cached=false, BD intocado │
+│  │    ├─ Hit grande com confirmação → devolve, cached=true + aviso, BD intocado │
+│  │    └─ Miss → roda o passo 6 (executor); só grava no cache se "success" │
+│  ├─ 6. _run_query() [executor — chamado direto se cache_frequency="none", ou pelo passo 5 em um miss] │
+│  │    ├─ Get DataSource config            │
+│  │    ├─ Select/reusa Adapter (cacheado por data_source_id) │
 │  │    ├─ VolumeGuardService.check_row_count()          │
 │  │    │    ├─ Adapter.execute_query(SELECT COUNT(*))  │
 │  │    │    └─ Excede limite? → devolve volume_exceeded, PARA aqui │
 │  │    ├─ STEP 1 (query)                  │
-│  │    │    ├─ Adapter.connect()          │
 │  │    │    ├─ Adapter.execute_query()    │
 │  │    │    └─ Result: dataset bruto      │
 │  │    └─ VolumeGuardService.check_serialized_size()    │
 │  │         └─ Excede KB? → devolve volume_exceeded (mesmo com count ok) │
-│  ├─ 4. AuditService.log_execution()      │
-│  ├─ 5. CacheService.set(result, ttl)    │
-│  └─ 6. Return JSON result (dataset bruto)│
+│  └─ 7. (F8, futuro) AuditService.log_execution() — grava também "cached" │
 └─────────┬──────────────────────────────────┘
           │
 ┌─────────▼────────────────────────┐
 │   Cliente MCP                    │
 │   Recebe resultado               │
-│   {status: "success", data: [...]}│
+│   {status: "success", data: [...], cached: false}│
 │   Mostra para o usuário          │
 └──────────────────────────────────┘
 ```
@@ -1123,6 +1141,8 @@ cache_hits = Counter(
 ```
 
 ### 10.2 Logging
+
+> **Estado atual (F7, ajuste retroativo 2026-09-27):** o design abaixo (`structlog`, evento estruturado `analysis_executed`) é o alvo, a formalizar no F8 (Log de Execução) junto de `execution_history`. Hoje existe só um setup mínimo com o `logging` da stdlib — `main.py` chama `logging.basicConfig(level=logging.INFO, ...)`, e `services/cache_service.py`/`services/analysis_service.py`/`mcp_transport/tools.py` emitem `logger.info()`/`logger.warning()` simples (texto, não estruturado) para as decisões de cache (`Cache HIT`/`Cache MISS`/bypass/backend ativo) — ver F7_CACHE_SERVICE.md §8.4. Sem esse `basicConfig`, nenhum desses logs aparecia no console, porque o root logger fica em `WARNING` por padrão e o uvicorn só configura os loggers `uvicorn.*`.
 
 ```python
 import structlog

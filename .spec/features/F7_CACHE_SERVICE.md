@@ -40,11 +40,21 @@ Servir resultados repetidos sem tocar o BD, com TTL por análise (`cache_frequen
 ### 4.1 Componentes Afetados
 ```
 Componentes que serão criados/modificados:
-├─ services/cache_backend.py          (novo)  → CacheBackend (ABC) + InMemoryBackend
-├─ services/cache_service.py          (novo)  → CacheService (chave, TTL, lock, regras de volume no hit)
-├─ services/analysis_service.py       (modif.) → integra CacheService em execute(); adiciona "cached" ao retorno
-├─ config.py                          (modif.) → CACHE_BACKEND, CACHE_MAX_ENTRIES, CACHE_MAX_SIZE_MB
-├─ main.py                            (modif.) → startup: instancia backend conforme CACHE_BACKEND (ARQUITETURA §6.1, passo 4)
+├─ services/cache_backend.py          (novo)  → CacheBackend (ABC) + InMemoryBackend + NullBackend
+│                                                (kill-switch CACHE_BACKEND=none, ajuste retroativo)
+├─ services/cache_service.py          (novo)  → CacheService (chave, TTL, lock, regras de volume no
+│                                                hit, logs de HIT/MISS — ajuste retroativo, ver §8.4)
+├─ services/analysis_service.py       (modif.) → integra CacheService em execute(); adiciona "cached"
+│                                                ao retorno; loga bypass quando cache_frequency="none"
+├─ config.py                          (modif.) → CACHE_BACKEND (memory/none), CACHE_MAX_ENTRIES,
+│                                                CACHE_MAX_SIZE_MB
+├─ mcp_transport/tools.py             (modif.) → instancia o backend conforme CACHE_BACKEND — não
+│                                                main.py; decisão tomada durante a implementação
+│                                                (mesmo padrão já usado para VolumeGuardService)
+├─ main.py                            (modif., ajuste retroativo) → logging.basicConfig() — sem
+│                                                isso os logger.info() de cache_service.py não
+│                                                apareciam no console (root logger em WARNING por
+│                                                padrão; uvicorn só configura os loggers dele mesmo)
 └─ tests/test_cache_service.py        (novo)
 ```
 Os nomes exatos de método e assinatura em `analysis_service.py` devem ser alinhados ao código real de F4/F5 já implementado.
@@ -315,11 +325,13 @@ class TestAnalysisServiceCache:
 ## 7. Mudanças na Configuração
 **Variáveis de Environment (.env):**
 ```
-CACHE_BACKEND=memory        # único valor válido no F7; outro valor falha no startup
+CACHE_BACKEND=memory        # memory ou none; outro valor falha no startup
 CACHE_MAX_ENTRIES=200       # pior caso normal ~30MB (200 x 150KB, limite padrão do Volume Guard)
 CACHE_MAX_SIZE_MB=100       # ~20% do orçamento de 500MB (RNF3); cobre resultados de confirmar_volume_alto=true
 ```
 `CACHE_MAX_ENTRIES` e `CACHE_MAX_SIZE_MB` valem apenas para o `InMemoryBackend`. No Redis (futuro), o limite fica com o `maxmemory-policy` do próprio Redis.
+
+**Ajuste retroativo (2026-09-27) — `CACHE_BACKEND=none`:** kill-switch global de cache, além de `memory`. Implementado como `NullBackend` (`services/cache_backend.py`) — `get()` sempre `None`, `set()`/`delete()` no-op — instanciado em `mcp_transport/tools.py` quando `CACHE_BACKEND=none`. Desliga o cache para **todas** as análises de uma vez, sem precisar editar `cache_frequency` de cada uma no banco (que continua sendo o mecanismo de desligar por análise individual). `CACHE_MAX_ENTRIES`/`CACHE_MAX_SIZE_MB` são ignorados nesse modo.
 
 Reutiliza `DEFAULT_MAX_RESULT_ROWS` e `DEFAULT_MAX_RESULT_SIZE_KB` (F3) para decidir o comportamento em hit grande.
 
@@ -333,6 +345,15 @@ Transparente: repetir a mesma análise com os mesmos parâmetros retorna mais r�
 ### 8.3 Como outros desenvolvedores estenderão isso
 - Novo backend (Redis): implementar `CacheBackend` (`get`/`set`/`delete`, valores JSON-serializáveis, `SETEX` para TTL) e registrá-lo no startup sob um novo valor de `CACHE_BACKEND`. Requer lock distribuído para o cenário com réplicas.
 - Invalidação por fonte (`invalidate_by_source`): fora do F7; a chave com prefixo `analysis:<id>:` foi pensada para isso.
+
+### 8.4 Observabilidade (ajuste retroativo, 2026-09-27)
+Cada decisão de cache emite um log `INFO` em `services/cache_service.py`, correlacionável pela chave (`analysis:<id>:<hash>`):
+- **`Cache MISS`** — antes de rodar o executor (query real).
+- **`Cache HIT`** — com linhas/KB/quando foi gravado; diferencia hit normal, hit grande com `confirmar_volume_alto=true`, e hit grande sem confirmação (que devolve `volume_exceeded` sem tocar o BD).
+
+`services/analysis_service.py` loga o bypass quando `cache_frequency="none"`. `mcp_transport/tools.py` loga uma vez no startup qual backend está ativo (`memory` com os limites, ou `none` como `WARNING`, já que desliga o cache globalmente).
+
+Pré-requisito: `main.py` chama `logging.basicConfig(level=logging.INFO, ...)` — antes disso nenhum desses logs aparecia no console (root logger ficava em `WARNING`, e o uvicorn só configura os loggers `uvicorn.*`). Esse setup é mínimo/provisório; o design "alvo" de logging estruturado (ex.: `structlog`, formato `analysis_executed` com `analysis_id`/`status`/`cached`) continua sendo o do ARQUITETURA.md §10.2, a formalizar no F8 (Log de Execução).
 
 ## 9. Checklist de Implementação
 **Código:**

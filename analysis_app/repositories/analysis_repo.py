@@ -4,10 +4,16 @@ F4_EXECUTION_ENGINE.md §4.4.
 O asyncpg não decodifica colunas JSONB automaticamente (nenhum type codec
 registrado em adapters/postgresql.py) — chegam como `str`, daí o
 `_load_json` defensivo abaixo.
+
+F7 (ajuste retroativo): Analysis passa a trazer updated_at e cache_frequency,
+consumidos por CacheService (chave e TTL) — ver F7_CACHE_SERVICE.md §4.2.
+TIMESTAMP é decodificado nativamente pelo asyncpg como datetime, sem passar
+por _load_json.
 """
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +32,8 @@ class Analysis:
     data_source_id: UUID
     parameters: dict[str, Any]
     is_active: bool
+    updated_at: datetime
+    cache_frequency: str
 
 
 @dataclass
@@ -45,6 +53,8 @@ def _to_analysis(row: dict) -> Analysis:
         data_source_id=row["data_source_id"],
         parameters=_load_json(row["parameters"]) or {},
         is_active=row["is_active"],
+        updated_at=row["updated_at"],
+        cache_frequency=row["cache_frequency"],
     )
 
 
@@ -66,7 +76,8 @@ class AnalysisRepository:
         """Retorna None se a análise não existir ou estiver inativa
         (AnalysisService converte isso em AnalysisNotFoundError)."""
         rows = await self._db.execute_query(
-            "SELECT id, name, description, data_source_id, parameters, is_active "
+            "SELECT id, name, description, data_source_id, parameters, is_active, "
+            "updated_at, cache_frequency "
             "FROM analyses WHERE id = $1 AND is_active = true",
             {"id": analysis_id},
         )
@@ -80,7 +91,8 @@ class AnalysisRepository:
         chama precisa distinguir "não encontrada" de "inativa" (F5_MCP_TOOLS_
         INTEGRATION.md §4.2 Fluxo B, passo 4)."""
         rows = await self._db.execute_query(
-            "SELECT id, name, description, data_source_id, parameters, is_active "
+            "SELECT id, name, description, data_source_id, parameters, is_active, "
+            "updated_at, cache_frequency "
             "FROM analyses WHERE name = $1",
             {"name": name},
         )
@@ -88,7 +100,8 @@ class AnalysisRepository:
 
     async def get_all(self) -> list[Analysis]:
         rows = await self._db.execute_query(
-            "SELECT id, name, description, data_source_id, parameters, is_active "
+            "SELECT id, name, description, data_source_id, parameters, is_active, "
+            "updated_at, cache_frequency "
             "FROM analyses WHERE is_active = true"
         )
         return [_to_analysis(row) for row in rows]

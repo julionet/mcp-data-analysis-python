@@ -111,7 +111,11 @@ step_definition = {
     "sql": (
         "SELECT data, valor, pago FROM vendas "
         "WHERE data BETWEEN :data_inicial AND :data_final "
-        "AND (:pago IS NULL OR pago = :pago) "
+        # cast explícito (:pago::boolean) — sem ele, "$3 IS NULL" isolado não dá
+        # ao Postgres/asyncpg contexto suficiente pra inferir o tipo de $3, e
+        # toda chamada sem o parâmetro "pago" falha com AmbiguousParameterError
+        # (mesmo padrão já usado em "produto" na análise vendas_por_produtos)
+        "AND (:pago::boolean IS NULL OR pago = :pago) "
         "ORDER BY data"
     ),
     "params": ["data_inicial", "data_final", "pago"],

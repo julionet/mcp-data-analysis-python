@@ -1,5 +1,6 @@
 """Testes unitários da F5 — ver F5_MCP_TOOLS_INTEGRATION.md §6.1 (TestMcpTools)."""
 
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -19,6 +20,8 @@ def _make_analysis(name: str, is_active: bool = True, parameters: dict | None = 
         data_source_id=uuid4(),
         parameters=VENDAS_PARAMETERS if parameters is None else parameters,
         is_active=is_active,
+        updated_at=datetime(2026, 1, 1, 12, 0, 0),
+        cache_frequency="daily",
     )
 
 

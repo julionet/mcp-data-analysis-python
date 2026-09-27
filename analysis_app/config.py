@@ -6,9 +6,16 @@ F3: limites do Controle de Volume — ver F3_CONTROLE_VOLUME.md §7.
 F4 (ajuste retroativo, 2026-09-26): query_timeout_seconds — timeout de query no
     Postgres (RNF2/§8.1 ARQUITETURA.md), antes ausente — ver F4_EXECUTION_ENGINE.md.
 F4: FERNET_KEY passa a ser efetivamente usada por security/crypto.py — ver F4_EXECUTION_ENGINE.md §7.
+F7: CACHE_BACKEND, CACHE_MAX_ENTRIES, CACHE_MAX_SIZE_MB — ver F7_CACHE_SERVICE.md §7.
+    CACHE_BACKEND só aceita "memory" ou "none" em V1.0; outro valor falha no
+    startup (validado aqui, não pelo pydantic-settings, para dar uma mensagem
+    clara). "none" (ajuste retroativo, 2026-09-27) é o kill-switch global de
+    cache — desliga para todas as análises sem tocar em cache_frequency.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_VALID_CACHE_BACKENDS = {"memory", "none"}
 
 
 class Settings(BaseSettings):
@@ -30,6 +37,17 @@ class Settings(BaseSettings):
     query_timeout_seconds: int = 30
 
     fernet_key: str
+
+    cache_backend: str = "memory"
+    cache_max_entries: int = 200
+    cache_max_size_mb: int = 100
+
+    def model_post_init(self, __context) -> None:
+        if self.cache_backend not in _VALID_CACHE_BACKENDS:
+            raise ValueError(
+                f"CACHE_BACKEND '{self.cache_backend}' inválido — "
+                f"valores aceitos: {', '.join(_VALID_CACHE_BACKENDS)}"
+            )
 
 
 settings = Settings()
