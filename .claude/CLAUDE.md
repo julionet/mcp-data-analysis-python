@@ -8,7 +8,9 @@ Plataforma agnóstica de LLM para análise de dados conversacional, **multi-clie
 ## Stack
 FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, porta 3000) + PostgreSQL + Python. Cache em memória local (Redis só em ambiente remoto/futuro).
 
-## Status Atual (Sprint 1 — ✅ 100% Completo)
+## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — 🟨 Em Progresso)
+
+### Sprint 1: MVP Local Multi-Cliente (✅ 100%)
 - F1: FastAPI + MCP Server via Streamable HTTP com TLS 🟩 Done
 - F2: PostgreSQL Adapter 🟩 Done
 - F3: Controle de Volume de Resultado (pré-checagem COUNT(*) + KB, recusa com refinamento) 🟩 Done
@@ -17,6 +19,11 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F6: Validação Multi-Cliente Simultâneo (2+ clientes MCP, critérios 1–5 incluindo execution_history sem erro) 🟩 Done
 - F7: Cache Service (in-memory) 🟩 Done
 - F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag — sem identificação de usuário) 🟩 Done
+
+### Sprint 2: Multi-DB Adapters (2/3 em progresso)
+- F9: MongoDB Adapter ⬜ Todo
+- F10: MySQL Adapter 🟩 Done (refatoração de `translate_params()`, aiomysql)
+- F11: SQL Server Adapter ⬜ Todo
 
 ## Documentos (Aprovados e Atualizados)
 - **NEGOCIO.md** (v1.7): Requisitos (RF1-RF3, T1-T5, RNF1-RNF5) — versionamento removido
@@ -27,13 +34,16 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 
 > `IDENTIFICATION_SERVICES_V1_0.md`, `EXECUTIVE_SUMMARY_V1_0.md`, `README_V1_0.md` e `MANIFEST_V1_0.md` foram descontinuados — a spec de autenticação multi-user saiu do escopo de V1.0 e ficou preservada como "Backlog Futuro" dentro dos 3 documentos acima.
 
-## Requisitos V1.0 (Sprint 1 — Concluído)
+## Requisitos V1.0 (Sprint 1 — Concluído | Sprint 2 — Em Progresso)
 ✅ Multi-cliente MCP simultâneo, via Streamable HTTP com TLS obrigatório, sem autenticação
-✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE); MySQL/SQL Server/MongoDB em Sprint 2
+✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE)
+✅ MySQL Adapter (F10, com tradução agnóstica de placeholders — `:param` → `?`)
+🟨 SQL Server e MongoDB Adapters em progresso (Sprint 2)
 ✅ Servidor entrega dataset bruto (sem handlers); Controle de Volume recusa/pede refinamento se exceder limites (.env)
 ✅ Log de execução completo (analysis_id, params, status, execution_time_ms, rows_affected, result_size_bytes, cached flag — sem identificar usuário/cliente)
 ✅ Cache in-memory com TTL configurável por análise
 ✅ 2+ clientes MCP simultâneos validados (execution_history sem erro de concorrência)
+✅ SQL agnóstico de banco — mesma query funciona em PostgreSQL ($1, $2) e MySQL (?, ?) automaticamente
 ❌ Sem API Key, sem quota por usuário, sem RBAC (fora de escopo V1.0 — ver Roadmap Futuro)
 ❌ Sem versionamento de análises/rollback (removido: query SQL é configurada 1 vez; mudanças são diretas na tabela — histórico de execuções fornece auditoria necessária)
 

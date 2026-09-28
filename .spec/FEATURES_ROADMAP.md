@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.9 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-27
+**Versão:** 1.10 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-27 (atualizado 2026-09-27 com F10 implementado)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.9 → v1.10):** F10 (MySQL Adapter) implementado com sucesso (2026-09-27). DatabaseAdapter.translate_params() adicionado como método abstrato; PostgreSQLAdapter implementa tradução $1/$2/...; MySQLAdapter implementa tradução ?/?/... Refatoração de analysis_service.py completa — _translate_named_params() removida, adapter.translate_params() chamado em _run_query(). Todos os testes passando (22/22). MySQL agora suportado como data_source type. SQL permanece agnóstico — mesma query com :param funciona em ambos os bancos. Próximas: F9 (MongoDB), F11 (SQL Server).
 
 > **Nota de revisão (v1.8 → v1.9):** documento aprovado. Removidas F9 (Version Management) e F10 (Rollback Mechanism) inteiramente da Sprint 2: como a plataforma não implementa Handlers (apenas dataset bruto via servidor), não há necessidade de versionamento de análises nem de rollback — essas features eram um resquício da arquitetura anterior (v1.5 e antes). O requisito O3 (Objetivo Terciário) do NEGOCIO.md foi revisado: "histórico de execuções" (F8, já implementado) é o registro de auditoria necessário; "versionamento de análises" sai do escopo V1.0 e pode ser reintroduzido futuro como FB6/FB7 se a gestão de mudanças em análises se tornar crítica. Total Sprint 2 cai de ~7 dias para ~5d (F11→F21 conservam esforço, mas 3d de F9+F10 desaparecem). Todas as features de Sprint 2 em diante foram renumeradas em -2 (F11→F9, F12→F10, ..., F23→F21).
 
@@ -112,10 +114,10 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
 | F9 | MongoDB Adapter | 🟠 Alta | 1.5d | F2 | ⬜ Todo |
-| F10 | MySQL Adapter | 🟡 Média | 1d | F2 | ⬜ Todo |
+| F10 | MySQL Adapter | 🟡 Média | 1d | F2 | 🟩 Done |
 | F11 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | ⬜ Todo |
 
-**Total Sprint 2:** ~4 dias
+**Total Sprint 2:** ~3 dias (F10 concluído em 2026-09-27)
 
 **F11 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
 
@@ -342,7 +344,7 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 21/21 | 8/21 🟩 |
+| **Features Implementadas** | 21/21 | 9/21 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, MongoDB) | 1 (PostgreSQL) ✅ |
