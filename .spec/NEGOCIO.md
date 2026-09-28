@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.6 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
-**Data:** 2026-09-23
+**Versão:** 1.7 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-27
 **Autor:** Jose
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.6 → v1.7):** documento aprovado. Removidos RF3 (Versionamento de Análises) e correspondente UC3 (Versionar e Rollback) — como a plataforma não implementa Handlers, o servidor não transforma dados, apenas entrega dataset bruto. Não há, portanto, "análise" mutável no servidor para versionar (a "análise" é apenas a query SQL parametrizada configurada 1 vez, que não muda). Histórico de execuções (F8, já implementado) fornece auditoria completa (qual análise foi executada, quando, com qual resultado, por quem implicitamente — sem identificação de usuário em V1.0). Versionamento de análises pode ser reintroduzido futuro (FB6/FB7) se a gestão de mudanças em análises SQL se tornar crítica; schema `analysis_versions` já existe no BD para suportar isso. Total de requisitos funcionais cai de RF1-RF4 para RF1-RF3. Ver ARQUITETURA.md revisão correspondente.
 
 > **Nota de revisão (v1.5 → v1.6):** documento aprovado. Removida a camada de **Handlers Python** do servidor (RF4 e UC4 inteiros) — o espaço de análises possíveis é grande demais para pré-programar um handler por tipo de análise. O servidor passa a devolver o **dataset bruto** (resultado da query parametrizada) e é o **LLM do lado do cliente MCP** quem interpreta, calcula e agrega os dados, a cada pedido. Para não estourar o cliente com volumes grandes, RF2 ganha uma checagem de volume (linhas + KB, limites globais via `.env`) que recusa a execução com mensagem de refinamento, a menos que o cliente confirme explicitamente o custo alto de tokens. RF5 (Suporte a Múltiplos Bancos) renumerada para RF4, sem buraco na numeração. Ver `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md` e ARQUITETURA.md (nova seção de Controle de Volume) para detalhes técnicos.
 
@@ -104,12 +106,17 @@ Métrica de Sucesso:
 
 ```
 Métrica de Sucesso:
-├─ Histórico: 100% das análises versionadas
-├─ Log de execução: 100% das execuções registradas (análise, parâmetros, status, tempo)
-└─ Rollback: voltar para versão anterior em segundos
+├─ Log de execução: 100% das execuções registradas (análise, parâmetros, status, tempo, cached)
+└─ Histórico consultável para auditoria e debugging
 
 Nota: em V1.0 o log de execução NÃO identifica usuário nem cliente MCP
 (ver seção 9, Restrição T5, e seção 12, Roadmap Futuro).
+
+Versionamento de análises (mudanças na query SQL) não é necessário em V1.0 porque:
+├─ A "análise" é apenas a query SQL parametrizada, configurada 1 vez no BD
+├─ Mudanças nessa query são alterações diretas na tabela `analyses` (rastreadas via git/schema)
+├─ O servidor não transforma dados — é o LLM cliente quem agrega/interpreta
+└─ Pode ser reintroduzido futuro (FB6/FB7) se necessário rastrear histórico de mudanças em SQL
 ```
 
 ---
@@ -125,7 +132,7 @@ Nota: em V1.0 o log de execução NÃO identifica usuário nem cliente MCP
 - [x] Execução de análises contra SQL Server (adapter)
 - [x] Execução de análises contra MongoDB (adapter)
 - [x] Controle de volume do resultado (limites de linhas/KB via `.env`, com recusa e refinamento)
-- [x] Versionamento de análises com histórico
+- [x] Log de execução com histórico completo (análise, parâmetros, status, tempo, cached flag)
 - [x] Cache de resultados (memória local, Redis remoto)
 - [x] Servidor MCP via **Streamable HTTP**, acessível por múltiplos clientes simultaneamente na rede local
 - [x] Protocolo MCP padrão (sem customizações proprietárias)
@@ -279,23 +286,6 @@ Scenario: Usuario B quer a mesma análise (com Gemini Desktop), ao mesmo tempo
 
 ---
 
-### UC3: Versionar e Rollback
-
-```gherkin
-Feature: Manter histórico de análises
-
-Scenario: Jose quer voltar para versão anterior
-  Given Análise "vendas_por_regiao" está na v2
-  When Jose descobre que v2 tem erro nos filtros
-  And Jose acessa histórico de versões
-  Then Sistema mostra v1, v2, v3, etc
-  And Jose clica em "Rollback para v1"
-  Then Análise volta ao estado anterior
-  And Histórico registra a mudança
-```
-
-**Esforço:** ~30 segundos
-
 ---
 
 ## 7. Requisitos Funcionais
@@ -349,28 +339,7 @@ Então:
 
 ---
 
-### RF3: Versionamento de Análises
-
-```
-Dado: Análise "vendas_por_regiao" v1 está em uso
-Quando: Jose modifica a análise
-Então:
-├─ Sistema cria v2 automaticamente
-├─ v1 continua disponível
-├─ Histórico mostra: quem mudou, o quê, quando
-├─ Possível rollback para v1 em 1 clique
-└─ Execuções listam qual versão foi usada
-```
-
-**Critério de Aceitação:**
-- ✅ Cada mudança cria versão nova
-- ✅ Diff entre versões é legível
-- ✅ Rollback não deleta histórico
-- ✅ Suporta comentários ("por que mudou")
-
----
-
-### RF4: Suporte a Múltiplos Bancos de Dados
+### RF3: Suporte a Múltiplos Bancos de Dados
 
 ```
 Dado: 4 data sources (PostgreSQL + MySQL + SQL Server + MongoDB)
@@ -384,9 +353,12 @@ Então:
 
 **Critério de Aceitação:**
 - ✅ Suporta mínimo: PostgreSQL, MySQL, SQL Server, MongoDB
-- ✅ Adaptador para API REST (opcional)
+- ✅ Adaptador para API REST (opcional, futuro)
 - ✅ Novo adapter = 1 classe Python
 - ✅ Query validation por tipo de BD
+- ✅ Log de execução funciona com todos os adapters
+
+**Nota:** Versionamento de análises (mudanças na query SQL) foi removido de V1.0 (ver O3 na seção 3). O log de execução (F8) fornece auditoria completa — qual análise foi executada, quando, com qual resultado. Mudanças na SQL são operações diretas na tabela `analyses`, rastreadas via schema versionamento (git + migration histórico).
 
 ---
 

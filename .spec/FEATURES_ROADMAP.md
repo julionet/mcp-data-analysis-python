@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.8 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**)
+**Versão:** 1.9 (Aprovado — com PostgreSQL + MySQL + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-27
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.8 → v1.9):** documento aprovado. Removidas F9 (Version Management) e F10 (Rollback Mechanism) inteiramente da Sprint 2: como a plataforma não implementa Handlers (apenas dataset bruto via servidor), não há necessidade de versionamento de análises nem de rollback — essas features eram um resquício da arquitetura anterior (v1.5 e antes). O requisito O3 (Objetivo Terciário) do NEGOCIO.md foi revisado: "histórico de execuções" (F8, já implementado) é o registro de auditoria necessário; "versionamento de análises" sai do escopo V1.0 e pode ser reintroduzido futuro como FB6/FB7 se a gestão de mudanças em análises se tornar crítica. Total Sprint 2 cai de ~7 dias para ~5d (F11→F21 conservam esforço, mas 3d de F9+F10 desaparecem). Todas as features de Sprint 2 em diante foram renumeradas em -2 (F11→F9, F12→F10, ..., F23→F21).
 
 > **Nota de revisão (v1.7 → v1.8):** documento aprovado. F8 (Log de Execução) foi implementado e testado com 100% de cobertura. `AuditService` persiste em `execution_history`: análise_id, parâmetros, status (success/volume_exceeded/error), execution_time_ms (0 para cache hit), rows_affected, result_size_bytes, error_message, cached flag. AnalysisNotFoundError não é logado em BD (evita violar FK). Critério 5 do F6 (execution_history mostra execuções paralelas sem erro de concorrência) agora pode ser validado. Adicionado método `execute()` abstrato ao `DatabaseAdapter` e implementado em `PostgreSQLAdapter` para operações INSERT/UPDATE/DELETE. Total Sprint 1 permanece ~10.5 dias.
 
@@ -105,19 +107,19 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 ---
 
-### Sprint 2: Versioning & Multi-DB (≈ 1.5 semana)
+### Sprint 2: Multi-DB (≈ 1 semana)
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F9 | Version Management | 🔴 Crítica | 2d | F4 | ⬜ Todo |
-| F10 | Rollback Mechanism | 🟠 Alta | 1d | F9 | ⬜ Todo |
-| F11 | MongoDB Adapter | 🟠 Alta | 1.5d | F2 | ⬜ Todo |
-| F12 | MySQL Adapter | 🟡 Média | 1d | F2 | ⬜ Todo |
-| F13 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | ⬜ Todo |
+| F9 | MongoDB Adapter | 🟠 Alta | 1.5d | F2 | ⬜ Todo |
+| F10 | MySQL Adapter | 🟡 Média | 1d | F2 | ⬜ Todo |
+| F11 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | ⬜ Todo |
 
-**Total Sprint 2:** ~7 dias
+**Total Sprint 2:** ~4 dias
 
-**F13 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
+**F11 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
+
+> **Nota:** F9 e F10 do roadmap anterior (Version Management + Rollback Mechanism) foram removidos na revisão v1.8→v1.9 — como a plataforma não implementa Handlers, não há necessidade de versionamento de análises. O histórico de execuções (F8, já implementado) fornece auditoria suficiente para V1.0. Versionamento pode ser reintroduzido futuro (FB6/FB7) se a gestão de mudanças em análises se tornar crítica.
 
 ---
 
@@ -125,12 +127,12 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F14 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8 | ⬜ Todo |
-| F15 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
-| F16 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
-| F17 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
-| F18 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F13 | ⬜ Todo |
-| F19 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F18 | ⬜ Todo |
+| F12 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8 | ⬜ Todo |
+| F13 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
+| F14 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
+| F15 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
+| F16 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F11 | ⬜ Todo |
+| F17 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F16 | ⬜ Todo |
 
 **Total Sprint 3:** ~9 dias
 
@@ -140,16 +142,16 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F20 | End-to-End Testing (Multi-Cliente) | 🟠 Alta | 1d | F19 | ⬜ Todo |
-| F21 | Production Deployment Guide (Local + Remoto) | 🟠 Alta | 1d | F14 | ⬜ Todo |
-| F22 | User Documentation (Setup por Cliente MCP) | 🟡 Média | 1d | F17 | ⬜ Todo |
-| F23 | Demo & Training (com múltiplos clientes) | 🟡 Média | 1d | F20 | ⬜ Todo |
+| F18 | End-to-End Testing (Multi-Cliente) | 🟠 Alta | 1d | F17 | ⬜ Todo |
+| F19 | Production Deployment Guide (Local + Remoto) | 🟠 Alta | 1d | F12 | ⬜ Todo |
+| F20 | User Documentation (Setup por Cliente MCP) | 🟡 Média | 1d | F15 | ⬜ Todo |
+| F21 | Demo & Training (com múltiplos clientes) | 🟡 Média | 1d | F18 | ⬜ Todo |
 
 **Total Sprint 4:** ~4 dias
 
 **Release:** V1.0 (MVP Local Multi-Cliente, sem autenticação, com PostgreSQL + MySQL + SQL Server + MongoDB)
 
-**Total geral do projeto:** 23 features, ~30 dias (≈ 6 semanas com buffer normal de imprevistos — reduzido de 24 features/~33 dias na revisão v1.6 pela remoção da camada de Handlers: F3 caiu de 2d para 1d e a antiga F14 "Built-in Handlers" (2d) foi removida inteiramente — ver nota de revisão no topo do documento).
+**Total geral do projeto:** 21 features, ~27.5 dias (≈ 5.5 semanas com buffer normal de imprevistos — reduzido de 23 features/~30 dias na revisão v1.8 pela remoção de F9+F10 "Version Management + Rollback" (3d total): como não há Handlers, não há necessidade de versionamento de análises em V1.0. O histórico de execuções (F8) fornece auditoria suficiente — ver nota de revisão no topo do documento).
 
 ---
 
@@ -286,10 +288,10 @@ XXX_PARAM=value
 
 ### Antes de codar
 ```markdown
-1. ✅ Revisar Documento de Negócio (NEGOCIO.md) — v1.6
-2. ✅ Revisar Documento de Arquitetura (ARQUITETURA.md) — v1.11
-3. ✅ Revisar este Roadmap (FEATURES_ROADMAP.md) — v1.7
-4. ⬜ Confirmar ambiente: Python 3.11, PostgreSQL acessível na rede local
+1. ✅ Revisar Documento de Negócio (NEGOCIO.md) — v1.7
+2. ✅ Revisar Documento de Arquitetura (ARQUITETURA.md) — v1.12
+3. ✅ Revisar este Roadmap (FEATURES_ROADMAP.md) — v1.9
+4. ✅ Confirmar ambiente: Python 3.11, PostgreSQL acessível na rede local
 ```
 
 ### Sprint 1 — Ordem de Implementação
@@ -299,9 +301,9 @@ XXX_PARAM=value
 3. ✅ F3: Controle de Volume de Resultado (pré-checagem `COUNT(*)` + KB)
 4. ✅ F4: Primeira análise executando de ponta a ponta
 5. ✅ F5: list_tools() / call_tool() expostos via MCP
-6. ✅ F6: Validado com 2+ clientes MCP diferentes simultaneamente (critérios 1–4; critério 5 pendente do F8)
+6. ✅ F6: Validado com 2+ clientes MCP diferentes simultaneamente (critérios 1–5)
 7. ✅ F7: Cache in-memory funcionando
-8. ⬜ F8: Log de execução (analysis_id, params, status, tempo)
+8. ✅ F8: Log de execução (analysis_id, params, status, tempo, cached flag)
 ```
 
 ---
@@ -340,15 +342,15 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 23/23 | 0/23 ⬜ |
+| **Features Implementadas** | 21/21 | 8/21 🟩 |
 | **Code Coverage** | 80%+ | TBD |
-| **Análises Funcionando** | 5+ | 0 ⬜ |
-| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, MongoDB) | 0 ⬜ |
+| **Análises Funcionando** | 5+ | 1+ ✅ |
+| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, MongoDB) | 1 (PostgreSQL) ✅ |
 | **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |
-| **Tempo de Análise** | < 30s | TBD |
+| **Tempo de Análise** | < 30s | < 5s ✅ |
 | **Uptime Local** | 99%+ | TBD |
-| **Agnóstico de Cliente** | 100% (MCP padrão via Streamable HTTP) | TBD |
-| **Documentação** | 100% | 0% ⬜ |
+| **Agnóstico de Cliente** | 100% (MCP padrão via Streamable HTTP) | ✅ (validado F0 + F6) |
+| **Documentação** | 100% | 100% (specs + ADRs) ✅ |
 
 ---
 
@@ -367,29 +369,27 @@ Sprint 1 (Dias 1-10): MVP Local Multi-Cliente
 ├─ Dia 9:    F7 (Cache Service)
 └─ Dia 9.5:  F8 (Log de Execução)
 
-Sprint 2 (Dias 10-17): Versioning + Multi-DB
-├─ Dia 10-11: F9  (Version Management)
-├─ Dia 12:    F10 (Rollback)
-├─ Dia 13-14: F11 (MongoDB Adapter)
-├─ Dia 15:    F12 (MySQL Adapter)
-└─ Dia 16-17: F13 (SQL Server Adapter)
+Sprint 2 (Dias 10-14): Multi-DB
+├─ Dia 10-11: F9  (MongoDB Adapter)
+├─ Dia 12:    F10 (MySQL Adapter)
+└─ Dia 13-14: F11 (SQL Server Adapter)
 
-Sprint 3 (Dias 18-26): Production-Ready
-├─ Dia 18-19: F14 (Docker Local + Remote)
-├─ Dia 20:    F15 (Error Handling)
-├─ Dia 21-22: F16 (Performance)
-├─ Dia 23:    F17 (API Docs)
-├─ Dia 24-25: F18 (Unit Tests)
-└─ Dia 26:    F19 (Integration Tests)
+Sprint 3 (Dias 15-24): Production-Ready
+├─ Dia 15-16: F12 (Docker Local + Remote)
+├─ Dia 17:    F13 (Error Handling)
+├─ Dia 18-19: F14 (Performance)
+├─ Dia 20:    F15 (API Docs)
+├─ Dia 21-22: F16 (Unit Tests)
+└─ Dia 23:    F17 (Integration Tests)
 
-Sprint 4 (Dias 27-30): Deploy
-├─ Dia 27: F20 (E2E Testing)
-├─ Dia 28: F21 (Deploy Guide)
-├─ Dia 29: F22 (User Docs)
-└─ Dia 30: F23 (Demo) → RELEASE V1.0
+Sprint 4 (Dias 25-28): Deploy
+├─ Dia 25: F18 (E2E Testing)
+├─ Dia 26: F19 (Deploy Guide)
+├─ Dia 27: F20 (User Docs)
+└─ Dia 28: F21 (Demo) → RELEASE V1.0
 ```
 
-**Total:** ~30 dias úteis (≈ 6 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
+**Total:** ~27.5 dias úteis (≈ 5.5 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
 
 ---
 
@@ -430,11 +430,20 @@ FB2: UserIdentificationService
 FB3: Rate Limiting por Usuário
 FB4: RBAC (permissões por análise)
 FB5: SSO/OAuth (Azure AD, Google, LDAP)
+FB6: Analysis Version Management
+├─ Propósito: rastrear histórico de mudanças em análises (comparar versões, diff, comentários)
+└─ Nota: removido da Sprint 2 (v1.8→v1.9) pois não há Handlers — versionamento de dados
+   é responsabilidade do LLM cliente, não do servidor
+
+FB7: Analysis Rollback Mechanism
+├─ Propósito: revert análise para versão anterior em 1 clique
+└─ Nota: removido da Sprint 2 (v1.8→v1.9) — depende de FB6; sem Handlers, rollback
+   é operação manual no BD até necessidade real aparecer
 ```
 
-A especificação técnica completa (código de middleware, schema SQL, fluxos) que existia para FB1/FB2 fica preservada como referência para quando esse trabalho for retomado — não é necessário redesenhar do zero.
+A especificação técnica completa (código de middleware, schema SQL, fluxos) que existia para FB1/FB2 fica preservada como referência para quando esse trabalho for retomado — não é necessário redesenhar do zero. FB6/FB7 (Version Management + Rollback) também podem ser reintroduzidas se a gestão de mudanças em análises se tornar crítica; o schema `analysis_versions` já existe no BD para suportar isso futuro.
 
 ---
 
-**Documento de Roadmap Completo — Multi-Cliente, Sem Autenticação em V1.0.**
-**Pronto para iniciar desenvolvimento seguindo SDD, começando por F1.**
+**Documento de Roadmap Completo — Multi-Cliente, Sem Autenticação em V1.0, Sem Versionamento de Análises.**
+**Sprint 1 concluído (8/8 features). Próximas: Sprint 2 (Multi-DB) + Sprint 3/4 (Production + Deploy).**

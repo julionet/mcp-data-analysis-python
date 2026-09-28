@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.13 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**)
+**Versão:** 1.14 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-27
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.13 → v1.14):** Removidas `VersionService` e `VersionRepository` inteiramente (F9 e F10 foram removidos da Sprint 2 — ver FEATURES_ROADMAP.md v1.9). Justificativa: como a plataforma não implementa Handlers (apenas dataset bruto via servidor), a "análise" é apenas uma query SQL parametrizada configurada 1 vez no BD, sem necessidade de versionar. Mudanças em SQL são alterações diretas na tabela `analyses`, rastreadas via schema versionamento (git + migration histórico). Tabela `analysis_versions` e índice `idx_versions_analysis` removidas do schema (§2.2). Coluna `analysis_version_id` mantida em `execution_history` como NULL por agora — se FB6/FB7 forem reintroduzidos futuro, a coluna FK já existe. Referências removidas de §2.1, §2.2, §3.3, §5.2. Nenhuma outra alteração arquitetural.
 
 > **Nota de revisão (v1.12 → v1.13):** F8 (Log de Execução) foi implementado. Componentes novos: `AuditService` (services/) persiste em `execution_history` via `ExecutionRepository` (repositories/). Método abstrato `execute()` adicionado a `DatabaseAdapter` para operações DML; implementado em `PostgreSQLAdapter`. Fluxo: `AnalysisService._execute()` chama `AuditService.log_execution()` após resolução de `analysis_id`, registrando success/volume_exceeded/error com execution_time_ms, rows_affected, result_size_bytes, cached flag. AnalysisNotFoundError não é logado (evita violar FK). Nenhuma alteração nas decisões arquiteturais do documento — apenas adição de um novo serviço/repositório confirmado e de um novo método base abstrato para DML.
 
@@ -171,10 +173,6 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │  │  ├─ resolve_ttl(cache_frequency) -> int | None           │   │
 │  │  │  └─ get_or_execute(key, ttl, confirmar_volume_alto, executor) │   │
 │  │  │     (invalidate_by_source fora do F7 — backlog futuro)   │   │
-│  │  ├─ VersionService                                 │   │
-│  │  │  ├─ get_history(analysis_id)                    │   │
-│  │  │  ├─ rollback(analysis_id, version)              │   │
-│  │  │  └─ diff_versions(v1, v2)                       │   │
 │  │  └─ AuditService (Simplificado — sem usuário/cliente)│  │
 │  │     ├─ log_execution(analysis_id, params, result)  │   │
 │  │     └─ get_execution_history()                     │   │
@@ -194,7 +192,6 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │         Data Access (Repository)                   │   │
 │  │  ├─ AnalysisRepository                             │   │
 │  │  ├─ DataSourceRepository                           │   │
-│  │  ├─ VersionRepository                              │   │
 │  │  └─ ExecutionRepository                            │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -246,24 +243,11 @@ CREATE TABLE analysis_steps (
     UNIQUE(analysis_id, step_order)
 );
 
--- Tabela 4: Versões de Análises
-CREATE TABLE analysis_versions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    analysis_id UUID NOT NULL REFERENCES analyses(id),
-    version_number INT NOT NULL,
-    full_definition JSONB NOT NULL,  -- snapshot completo
-    changes_summary TEXT,
-    changed_by VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(analysis_id, version_number)
-);
-
--- Tabela 5: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
+-- Tabela 4: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),
-    analysis_version_id UUID REFERENCES analysis_versions(id),
+    analysis_version_id UUID,  -- mantida para compatibilidade futura se FB6/FB7 forem implementadas
 
     parameters JSONB,
     status VARCHAR(50),  -- success, failed, timeout
@@ -280,7 +264,6 @@ CREATE TABLE execution_history (
 CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
-CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
 ```
 
 > As tabelas `mcp_clients`, `users` e `user_api_keys`, e as colunas `user_id`, `username`, `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history`, foram removidas de V1.0. A especificação completa delas (com código de middleware, repositórios etc.) fica preservada como referência para quando esse requisito voltar ao escopo — ver §12 Roadmap Arquitetural.
@@ -438,56 +421,6 @@ schemas/analysis_parameters.py
 - Leve (< 1s query): 2-5s
 - Média (1-5s query): 5-15s
 - Pesada (> 5s): async (remoto)
-
----
-
-### 3.3 Fluxo: Versionamento
-
-```
-┌──────────────────┐
-│  Jose insere SQL │
-│  em analysis_steps│
-└────────┬─────────┘
-         │
-┌────────▼───────────────────────────┐
-│  VersionService.create_version()   │
-│  ├─ 1. Load análise atual (v1)    │
-│  ├─ 2. Load nova definição        │
-│  ├─ 3. Compare (diff)             │
-│  ├─ 4. Create análise_versions    │
-│  │    ├─ version_number = 2       │
-│  │    ├─ full_definition = snapshot│
-│  │    └─ changes_summary = diff    │
-│  ├─ 5. Update analyses table      │
-│  │    └─ version_id = v2          │
-│  └─ 6. Log no histórico           │
-└────────┬───────────────────────────┘
-         │
-┌────────▼──────────────────────┐
-│  Análise agora em v2          │
-│  V1 permanece acessível       │
-│  Histórico completo           │
-└───────────────────────────────┘
-
-Rollback (se necessário):
-┌──────────────────┐
-│  Jose clica      │
-│  "Rollback v1"   │
-└────────┬─────────┘
-         │
-┌────────▼──────────────────────────┐
-│ VersionService.rollback()         │
-│ ├─ Load v1 definition            │
-│ ├─ Restore analysis steps        │
-│ ├─ Update version_id = v1        │
-│ └─ Log: "Rollback por Jose"      │
-└────────┬──────────────────────────┘
-         │
-┌────────▼────────────────────┐
-│ Análise restaurada para v1  │
-│ V2 continua no histórico    │
-└─────────────────────────────┘
-```
 
 ---
 
@@ -746,7 +679,6 @@ analysis_app/
 │   ├── analysis_service.py   # Core execution logic
 │   ├── volume_guard_service.py  # Pré-checagem de linhas/KB (ver §3.4, §4.3)
 │   ├── cache_service.py      # Caching logic
-│   ├── version_service.py    # Versioning & rollback
 │   └── audit_service.py      # Logging (simplificado)
 │
 ├── repositories/
@@ -754,7 +686,6 @@ analysis_app/
 │   ├── base.py
 │   ├── analysis_repo.py
 │   ├── data_source_repo.py
-│   ├── version_repo.py
 │   └── execution_repo.py
 │
 ├── schemas/
