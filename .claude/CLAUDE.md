@@ -3,37 +3,39 @@
 # Análise de Dados Genérica com MCP - V1.0
 
 ## Projeto
-Plataforma agnóstica de LLM para análise de dados conversacional, **multi-cliente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. — todos via Streamable HTTP com TLS obrigatório), multi-database, com versionamento. **Sem autenticação/identificação de usuário ou cliente em V1.0** (rede interna confiável). **Servidor não transforma dados** (sem handlers) — executa a query parametrizada e devolve o dataset bruto; é o LLM do cliente MCP quem interpreta/agrega, com um Controle de Volume (COUNT(*) + KB) protegendo contra resultados grandes demais.
+Plataforma agnóstica de LLM para análise de dados conversacional, **multi-cliente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. — todos via Streamable HTTP com TLS obrigatório), multi-database. **Sem autenticação/identificação de usuário ou cliente em V1.0** (rede interna confiável). **Servidor não transforma dados** (sem handlers) — executa a query parametrizada e devolve o dataset bruto; é o LLM do cliente MCP quem interpreta/agrega, com um Controle de Volume (COUNT(*) + KB) protegendo contra resultados grandes demais. Log de execução completo para auditoria (sem identificação de usuário/cliente).
 
 ## Stack
 FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, porta 3000) + PostgreSQL + Python. Cache em memória local (Redis só em ambiente remoto/futuro).
 
-## Foco Atual (Sprint 1 — ~10.5 dias)
+## Status Atual (Sprint 1 — ✅ 100% Completo)
 - F1: FastAPI + MCP Server via Streamable HTTP com TLS 🟩 Done
 - F2: PostgreSQL Adapter 🟩 Done
-- F3: Controle de Volume de Resultado (era HandlerRegistry e Discovery — ver ARQUITETURA.md §3.4/§4.3) 🟩 Done
+- F3: Controle de Volume de Resultado (pré-checagem COUNT(*) + KB, recusa com refinamento) 🟩 Done
 - F4: Analysis Execution Engine 🟩 Done
 - F5: MCP Tools Integration (`list_tools`/`call_tool`) 🟩 Done
-- F6: Validação Multi-Cliente Simultâneo (2+ clientes MCP diferentes) 🟩 Done (critérios 1–4; critério 5 pendente do F8)
-- F7: Cache Service (in-memory) ⬜ Todo
-- F8: Log de Execução (simplificado, sem identificação de usuário/cliente) ⬜ Todo
+- F6: Validação Multi-Cliente Simultâneo (2+ clientes MCP, critérios 1–5 incluindo execution_history sem erro) 🟩 Done
+- F7: Cache Service (in-memory) 🟩 Done
+- F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag — sem identificação de usuário) 🟩 Done
 
-## Documentos (Aprovados)
-- **NEGOCIO.md** (v1.6): Requisitos (RF1-RF4, T1-T5, RNF1-RNF5)
-- **ARQUITETURA.md** (v1.11): Design técnico (componentes, schema, ADRs, fluxos)
-- **FEATURES_ROADMAP.md** (v1.7): Timeline (23 features, ~30 dias, Sprint 1-4)
+## Documentos (Aprovados e Atualizados)
+- **NEGOCIO.md** (v1.7): Requisitos (RF1-RF3, T1-T5, RNF1-RNF5) — versionamento removido
+- **ARQUITETURA.md** (v1.14): Design técnico (componentes, schema, ADRs, fluxos) — VersionService/Repository removidas
+- **FEATURES_ROADMAP.md** (v1.9): Timeline (21 features, ~27.5 dias, Sprint 1-4) — F9/F10 removidas, F11-F23 renumeradas → F9-F21
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
-- **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional completo da remoção de Handlers e do Controle de Volume (aplicado aos 3 documentos acima)
+- **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional da remoção de Handlers e Controle de Volume
 
 > `IDENTIFICATION_SERVICES_V1_0.md`, `EXECUTIVE_SUMMARY_V1_0.md`, `README_V1_0.md` e `MANIFEST_V1_0.md` foram descontinuados — a spec de autenticação multi-user saiu do escopo de V1.0 e ficou preservada como "Backlog Futuro" dentro dos 3 documentos acima.
 
-## Requisitos V1.0
+## Requisitos V1.0 (Sprint 1 — Concluído)
 ✅ Multi-cliente MCP simultâneo, via Streamable HTTP com TLS obrigatório, sem autenticação
-✅ 4 bancos de dados suportados: PostgreSQL, MySQL, SQL Server, MongoDB
-✅ Versionamento de análises + rollback
+✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE); MySQL/SQL Server/MongoDB em Sprint 2
 ✅ Servidor entrega dataset bruto (sem handlers); Controle de Volume recusa/pede refinamento se exceder limites (.env)
-✅ Log de execução simples (análise, parâmetros, status, tempo — sem identificar quem/qual cliente)
+✅ Log de execução completo (analysis_id, params, status, execution_time_ms, rows_affected, result_size_bytes, cached flag — sem identificar usuário/cliente)
+✅ Cache in-memory com TTL configurável por análise
+✅ 2+ clientes MCP simultâneos validados (execution_history sem erro de concorrência)
 ❌ Sem API Key, sem quota por usuário, sem RBAC (fora de escopo V1.0 — ver Roadmap Futuro)
+❌ Sem versionamento de análises/rollback (removido: query SQL é configurada 1 vez; mudanças são diretas na tabela — histórico de execuções fornece auditoria necessária)
 
 ## Como Ajudar
 1. Especificação/design técnico → Cite **ARQUITETURA.md**
