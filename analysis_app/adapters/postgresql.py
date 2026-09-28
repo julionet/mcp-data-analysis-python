@@ -1,5 +1,6 @@
 """Adapter PostgreSQL (asyncpg) — F2_POSTGRESQL_ADAPTER.md §4.4."""
 
+import re
 import asyncpg
 
 from adapters.base import DatabaseAdapter
@@ -40,3 +41,10 @@ class PostgreSQLAdapter(DatabaseAdapter):
             return True
         except Exception:
             return False
+
+    def translate_params(self, sql: str, param_names: list[str]) -> str:
+        """Traduz placeholders nomeados (:param) para PostgreSQL ($1, $2, ...)."""
+        translated = sql
+        for index, name in enumerate(param_names, start=1):
+            translated = re.sub(rf":{re.escape(name)}\b", f"${index}", translated)
+        return translated

@@ -4,4 +4,5 @@ pydantic
 pydantic-settings
 mcp>=1.9.0,<2.0.0
 asyncpg
+aiomysql
 cryptography

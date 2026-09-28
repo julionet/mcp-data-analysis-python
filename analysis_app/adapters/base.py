@@ -35,3 +35,12 @@ class DatabaseAdapter(ABC):
     @abstractmethod
     async def test_connection(self) -> bool:
         """Usado pelo /health e por validações de data_source."""
+
+    @abstractmethod
+    def translate_params(self, sql: str, param_names: list[str]) -> str:
+        """Traduz placeholders nomeados (:param) para o formato posicional do banco.
+
+        Exemplos:
+        - PostgreSQL: :data_inicial → $1, :data_final → $2
+        - MySQL: :data_inicial → ?, :data_final → ?
+        """

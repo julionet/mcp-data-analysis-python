@@ -5,12 +5,13 @@ from typing import Type
 
 from adapters.base import DatabaseAdapter
 from adapters.postgresql import PostgreSQLAdapter
+from adapters.mysql import MySQLAdapter
 
 
 class AdapterFactory:
     _adapters: dict[str, Type[DatabaseAdapter]] = {
         "postgresql": PostgreSQLAdapter,
-        # demais tipos entram no Sprint 2 (F11 MongoDB, F12 MySQL, F13 SQL Server)
+        "mysql": MySQLAdapter,
     }
 
     @classmethod

@@ -23,7 +23,6 @@ CacheService.get_or_execute(). Todo retorno de execute() ganha o campo
 
 import asyncio
 import logging
-import re
 import time
 from uuid import UUID
 
@@ -48,16 +47,6 @@ from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
 
 logger = logging.getLogger(__name__)
-
-
-def _translate_named_params(sql: str, param_names: list[str]) -> str:
-    """Traduz placeholders nomeados (":nome") para posicionais ($1, $2, ...)
-    do asyncpg, na ordem de definition["params"] — decisão registrada em
-    F4_EXECUTION_ENGINE.md §4.2."""
-    translated = sql
-    for index, name in enumerate(param_names, start=1):
-        translated = re.sub(rf":{re.escape(name)}\b", f"${index}", translated)
-    return translated
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -216,7 +205,7 @@ class AnalysisService:
         steps = await self.analysis_repo.get_steps(analysis.id)
         step = steps[0]  # step_order=1, type='query' — único tipo em uso em V1.0
         param_names = step.definition["params"]
-        translated_sql = _translate_named_params(step.definition["sql"], param_names)
+        translated_sql = adapter.translate_params(step.definition["sql"], param_names)
         count_sql = f"SELECT COUNT(*) FROM ({translated_sql}) AS sub"
 
         values = validated_params.model_dump()
