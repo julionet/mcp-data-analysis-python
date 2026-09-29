@@ -17,7 +17,7 @@ class AdapterFactory:
     @classmethod
     def create_adapter(cls, source_type: str, config: dict) -> DatabaseAdapter:
         """Levanta ValueError com mensagem clara se source_type não estiver
-        registrado (ex.: 'mongodb' antes do F11)."""
+        registrado (ex.: 'oracle' antes do F9)."""
         adapter_cls = cls._adapters.get(source_type)
         if adapter_cls is None:
             raise ValueError(

@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.7 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-27
+**Versão:** 1.8 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-28
 **Autor:** Jose
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.7 → v1.8):** documento aprovado. O adapter de **MongoDB** foi removido do escopo de V1.0 e substituído por **Oracle** (Oracle Database 12.1+, via `python-oracledb` em modo thin — sem Oracle Client no SO). MongoDB não entra no Backlog Futuro: sai de vez. Com isso, todos os data sources de V1.0 são relacionais/SQL (PostgreSQL, MySQL, SQL Server, Oracle). Atualizados: escopo (§4), RF2/RF3 (§7), dependências externas (§10), critérios de sucesso da Sprint 2 (§11) e glossário (§14). Ver FEATURES_ROADMAP.md v1.11 e ARQUITETURA.md v1.15.
 
 > **Nota de revisão (v1.6 → v1.7):** documento aprovado. Removidos RF3 (Versionamento de Análises) e correspondente UC3 (Versionar e Rollback) — como a plataforma não implementa Handlers, o servidor não transforma dados, apenas entrega dataset bruto. Não há, portanto, "análise" mutável no servidor para versionar (a "análise" é apenas a query SQL parametrizada configurada 1 vez, que não muda). Histórico de execuções (F8, já implementado) fornece auditoria completa (qual análise foi executada, quando, com qual resultado, por quem implicitamente — sem identificação de usuário em V1.0). Versionamento de análises pode ser reintroduzido futuro (FB6/FB7) se a gestão de mudanças em análises SQL se tornar crítica; schema `analysis_versions` já existe no BD para suportar isso. Total de requisitos funcionais cai de RF1-RF4 para RF1-RF3. Ver ARQUITETURA.md revisão correspondente.
 
@@ -95,7 +97,7 @@ Métrica de Sucesso:
 ```
 Métrica de Sucesso:
 ├─ Taxa de acerto de análises: > 95% (independente do cliente)
-├─ Adaptabilidade: suportar qualquer BD (PostgreSQL, MongoDB, API, etc)
+├─ Adaptabilidade: suportar qualquer BD (PostgreSQL, MySQL, SQL Server, Oracle, etc)
 ├─ Agnóstico de cliente: funcionar com qualquer app MCP via Streamable HTTP
 ├─ Multi-cliente simultâneo: 2+ clientes MCP diferentes conectados à mesma instância
 └─ Escalabilidade: suportar transição local → remoto sem mudanças de código
@@ -130,7 +132,7 @@ Versionamento de análises (mudanças na query SQL) não é necessário em V1.0 
 - [x] Execução de análises contra PostgreSQL
 - [x] Execução de análises contra MySQL (adapter)
 - [x] Execução de análises contra SQL Server (adapter)
-- [x] Execução de análises contra MongoDB (adapter)
+- [x] Execução de análises contra Oracle (adapter)
 - [x] Controle de volume do resultado (limites de linhas/KB via `.env`, com recusa e refinamento)
 - [x] Log de execução com histórico completo (análise, parâmetros, status, tempo, cached flag)
 - [x] Cache de resultados (memória local, Redis remoto)
@@ -329,7 +331,7 @@ Então:
 ```
 
 **Critério de Aceitação:**
-- ✅ Suporta PostgreSQL, MongoDB, API
+- ✅ Suporta PostgreSQL, MySQL, SQL Server, Oracle (API REST opcional, futuro)
 - ✅ Timeout máximo 60s (remoto) / 30s (local)
 - ✅ Parâmetros são validados antes de executar
 - ✅ Erro contém mensagem clara (não stack trace)
@@ -342,7 +344,7 @@ Então:
 ### RF3: Suporte a Múltiplos Bancos de Dados
 
 ```
-Dado: 4 data sources (PostgreSQL + MySQL + SQL Server + MongoDB)
+Dado: 4 data sources (PostgreSQL + MySQL + SQL Server + Oracle)
 Quando: Análises usam sources diferentes
 Então:
 ├─ Sistema seleciona adapter correto
@@ -352,7 +354,7 @@ Então:
 ```
 
 **Critério de Aceitação:**
-- ✅ Suporta mínimo: PostgreSQL, MySQL, SQL Server, MongoDB
+- ✅ Suporta mínimo: PostgreSQL, MySQL, SQL Server, Oracle
 - ✅ Adaptador para API REST (opcional, futuro)
 - ✅ Novo adapter = 1 classe Python
 - ✅ Query validation por tipo de BD
@@ -461,7 +463,7 @@ Então:
 ├─ PostgreSQL 13+ (BD de config + data source)
 ├─ MySQL 8+ (data source opcional)
 ├─ SQL Server 2019+ (data source opcional, via ODBC)
-├─ MongoDB 5+ (data source opcional)
+├─ Oracle Database 12.1+ (data source opcional, via python-oracledb em modo thin — sem Oracle Client no SO)
 ├─ Python 3.11+ (FastAPI runtime)
 ├─ Cliente(s) MCP compatíveis com Streamable HTTP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 ├─ Certificado TLS (mkcert para desenvolvimento; em produção interna, nginx + Certbot —
@@ -481,7 +483,7 @@ Então:
 - ✅ Execução retornando dados corretos para ambos os clientes
 
 ### Sprint 2 (Multi-DB + Versioning)
-- ✅ PostgreSQL + MySQL + SQL Server + MongoDB adapters
+- ✅ PostgreSQL + MySQL + SQL Server + Oracle adapters
 - ✅ Versionamento funcional
 - ✅ 5+ análises diferentes funcionando
 - ✅ Rollback testado
@@ -576,7 +578,7 @@ Nossa Plataforma: Funciona com QUALQUER cliente MCP (protocolo padrão, via Stre
 | Termo | Definição |
 |-------|-----------|
 | **Análise** | Especificação de como extrair e retornar dados (query parametrizada) |
-| **Data Source** | Conexão a um BD externo (PostgreSQL, MongoDB, etc.) |
+| **Data Source** | Conexão a um BD externo (PostgreSQL, MySQL, SQL Server, Oracle, etc.) |
 | **Step** | Uma etapa da análise (em V1.0, sempre do tipo `query`) |
 | **Controle de Volume** | Checagem de linhas/KB do resultado antes de devolver ao cliente MCP; recusa com pedido de refinamento se exceder o limite configurável |
 | **MCP** | Model Context Protocol — protocolo padrão de comunicação com LLMs |

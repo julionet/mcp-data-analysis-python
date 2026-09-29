@@ -6,7 +6,7 @@
 **Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
 **Data:** 2026-09-27
 
-> Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, versões, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/MongoDB dos clientes) não têm schema fixo — são externos e arbitrários.
+> Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, versões, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
 ---
 
@@ -40,7 +40,7 @@ Representa uma conexão a um banco de dados externo (o "de onde" os dados de neg
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único, gerado automaticamente |
 | `name` | VARCHAR(255) | ✅ (UNIQUE) | Nome único da fonte de dados (ex.: `"vendas_db"`) |
-| `type` | VARCHAR(50) | ✅ | Tipo do banco: `postgresql`, `mysql`, `sqlserver`, `mongodb`, `api` |
+| `type` | VARCHAR(50) | ✅ | Tipo do banco: `postgresql`, `mysql`, `sqlserver`, `oracle`, `api` |
 | `connection_config` | JSONB | ✅ | `{host, port, database, user, password (cifrado com Fernet), sslmode}` — ver §3 |
 | `is_active` | BOOLEAN | — | Default `true`. Fontes inativas não podem ser usadas em novas análises |
 | `created_by` | VARCHAR(255) | — | Quem criou o registro |

@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.10 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server + MongoDB, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-27 (atualizado 2026-09-27 com F10 implementado)
+**Versão:** 1.11 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server + Oracle, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-28 (atualizado 2026-09-28 — F9 passa de MongoDB para Oracle)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.10 → v1.11):** F9 deixa de ser "MongoDB Adapter" e passa a ser **"Oracle Adapter"** (Oracle Database 12.1+, `python-oracledb` em modo thin, sem dependência de SO). MongoDB removido de vez do escopo de V1.0 (não vai para o Backlog Futuro). F9 rebaixada de 🟠 Alta para 🟡 Média — não há instância Oracle para teste no momento e a validação manual fica pendente (F9 pode ser dada como Done sem validação manual). Esforço mantido em 1.5d; dependência passa a `F2, F11` (reutiliza `tests/test_adapter_contract.py`, criado no F11). Ordem de implementação da Sprint 2: F10 ✅ → F11 → F9. O F9 também altera `analysis_service.py` (alias do wrapper `COUNT(*)`: `AS sub` → `sub`). Specs: `features/F11_SQLSERVER_ADAPTER.md` e `features/F9_ORACLE_ADAPTER.md`.
 
 > **Nota de revisão (v1.9 → v1.10):** F10 (MySQL Adapter) implementado com sucesso (2026-09-28). Três correções críticas realizadas durante testes: (1) aiomysql usa `%s` não `?`, corrigido em translate_params(); (2) parâmetros reutilizados em query (ex: `:exame` 2 vezes) falhava com `%s` posicional, resolvido com named parameters `%(name)s` (como PostgreSQL $1, $1); (3) conversão de dict em lista quebrava named parameters, corrigido passando dict diretamente. DatabaseAdapter.translate_params() adicionado como método abstrato; PostgreSQLAdapter: `:param` → `$1, $2, ...`; MySQLAdapter: `:param` → `%(param)s`. Refatoração de analysis_service.py completa — _translate_named_params() removida, adapter.translate_params() chamado em _run_query(). Todos os testes passando (23/23). MySQL suportado como data_source type com SQL agnóstico (mesma query funciona em PostgreSQL e MySQL). Script encrypt_credential.py adicionado para criptografar credenciais com Fernet. Próximas: F9 (MongoDB), F11 (SQL Server).
 
@@ -113,13 +115,17 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F9 | MongoDB Adapter | 🟠 Alta | 1.5d | F2 | ⬜ Todo |
+| F9 | Oracle Adapter (via `oracledb`, thin mode) | 🟡 Média | 1.5d | F2, F11 | ⬜ Todo |
 | F10 | MySQL Adapter | 🟡 Média | 1d | F2 | 🟩 Done |
 | F11 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | ⬜ Todo |
 
 **Total Sprint 2:** ~3 dias (F10 concluído em 2026-09-27)
 
+**Ordem de implementação:** F10 ✅ → F11 → F9 (o F9 reutiliza `tests/test_adapter_contract.py`, criado no F11).
+
 **F11 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
+
+**F9 em detalhe (Oracle Adapter):** `python-oracledb` em modo thin (async nativo, sem Oracle Client no SO), Oracle Database 12.1+. Conexão por DSN montado a partir de `host`/`port`/`service_name` (ou `sid` para bancos antigos); parâmetros `:x` → `:pN` por índice de `param_names` (como o `$n` do PostgreSQL); chaves de coluna normalizadas para minúsculas; `SELECT 1 FROM DUAL` no `test_connection`. `sslmode`/TCPS fora do escopo. Sem instância Oracle no momento — validação manual pendente. Ver `features/F9_ORACLE_ADAPTER.md`.
 
 > **Nota:** F9 e F10 do roadmap anterior (Version Management + Rollback Mechanism) foram removidos na revisão v1.8→v1.9 — como a plataforma não implementa Handlers, não há necessidade de versionamento de análises. O histórico de execuções (F8, já implementado) fornece auditoria suficiente para V1.0. Versionamento pode ser reintroduzido futuro (FB6/FB7) se a gestão de mudanças em análises se tornar crítica.
 
@@ -151,7 +157,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 **Total Sprint 4:** ~4 dias
 
-**Release:** V1.0 (MVP Local Multi-Cliente, sem autenticação, com PostgreSQL + MySQL + SQL Server + MongoDB)
+**Release:** V1.0 (MVP Local Multi-Cliente, sem autenticação, com PostgreSQL + MySQL + SQL Server + Oracle)
 
 **Total geral do projeto:** 21 features, ~27.5 dias (≈ 5.5 semanas com buffer normal de imprevistos — reduzido de 23 features/~30 dias na revisão v1.8 pela remoção de F9+F10 "Version Management + Rollback" (3d total): como não há Handlers, não há necessidade de versionamento de análises em V1.0. O histórico de execuções (F8) fornece auditoria suficiente — ver nota de revisão no topo do documento).
 
@@ -347,7 +353,7 @@ Para cada feature, siga este workflow:
 | **Features Implementadas** | 21/21 | 9/21 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
-| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, MongoDB) | 1 (PostgreSQL) ✅ |
+| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 2 (PostgreSQL, MySQL) ✅ |
 | **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |
 | **Tempo de Análise** | < 30s | < 5s ✅ |
 | **Uptime Local** | 99%+ | TBD |
@@ -372,9 +378,9 @@ Sprint 1 (Dias 1-10): MVP Local Multi-Cliente
 └─ Dia 9.5:  F8 (Log de Execução)
 
 Sprint 2 (Dias 10-14): Multi-DB
-├─ Dia 10-11: F9  (MongoDB Adapter)
-├─ Dia 12:    F10 (MySQL Adapter)
-└─ Dia 13-14: F11 (SQL Server Adapter)
+├─ Dia 10:    F10 (MySQL Adapter) ✅
+├─ Dia 11-12: F11 (SQL Server Adapter)
+└─ Dia 13-14: F9  (Oracle Adapter)
 
 Sprint 3 (Dias 15-24): Production-Ready
 ├─ Dia 15-16: F12 (Docker Local + Remote)

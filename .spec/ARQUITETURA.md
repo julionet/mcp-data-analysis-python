@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.14 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + MongoDB, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-27
+**Versão:** 1.15 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-28
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.14 → v1.15):** MongoDB removido de V1.0 e substituído por **Oracle** (F9 — ver `features/F9_ORACLE_ADAPTER.md`). Atualizados: diagrama de contexto (§1.1), componentes (§2.1), comentário do schema (§2.2), Factory (§4.2), dependências (§5.1: `motor` → `oracledb>=2.0.0`; `aioodbc`/`pyodbc` sem pin exato — `pyodbc==5.0.1` não tem wheel para Python 3.13; validado com `aioodbc 0.5.0`/`pyodbc 5.3.0`), estrutura de pastas (§5.2), startup (§6.1), exemplo de `.env` (§8.2, sem `MONGODB_CONNECTION_STRING` — credenciais de data source vêm de `connection_config`) e tabela de tecnologias (§13). Com o MongoDB fora, todos os adapters são SQL e o wrapper de `COUNT(*)` do Volume Guard vale para todos. Regras do subconjunto comum de SQL (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único, todo parâmetro declarado presente no SQL) registradas em F11 §8.4 e F9 §8.4. Oracle usa `oracledb` em thin mode (sem dependência de SO — só o SQL Server exige driver ODBC no `Dockerfile` do F12). O alias do wrapper passa de `AS sub` para `sub` (Oracle rejeita `AS` em alias de tabela; PostgreSQL, MySQL e SQL Server aceitam) — F9 §4.1. Ordem de implementação da Sprint 2: F10 ✅ → F11 → F9.
 
 > **Nota de revisão (v1.13 → v1.14):** Removidas `VersionService` e `VersionRepository` inteiramente (F9 e F10 foram removidos da Sprint 2 — ver FEATURES_ROADMAP.md v1.9). Justificativa: como a plataforma não implementa Handlers (apenas dataset bruto via servidor), a "análise" é apenas uma query SQL parametrizada configurada 1 vez no BD, sem necessidade de versionar. Mudanças em SQL são alterações diretas na tabela `analyses`, rastreadas via schema versionamento (git + migration histórico). Tabela `analysis_versions` e índice `idx_versions_analysis` removidas do schema (§2.2). Coluna `analysis_version_id` mantida em `execution_history` como NULL por agora — se FB6/FB7 forem reintroduzidos futuro, a coluna FK já existe. Referências removidas de §2.1, §2.2, §3.3, §5.2. Nenhuma outra alteração arquitetural.
 
@@ -55,7 +57,7 @@
 └─────────────────────────────────────────────────────────┘
             ↓              ↓              ↓              ↓
       ┌───────────┐  ┌──────────┐  ┌───────────┐  ┌──────────────┐
-      │PostgreSQL │  │  MySQL   │  │SQL Server │  │   MongoDB    │
+      │PostgreSQL │  │  MySQL   │  │SQL Server │  │   Oracle     │
       │(Config+DB)│  │(Data Src)│  │(Data Src) │  │ (Data Source)│
       └───────────┘  └──────────┘  └───────────┘  └──────────────┘
 ```
@@ -182,7 +184,7 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │         Adapters (Database Access)                 │   │
 │  │  ├─ DatabaseAdapter (Abstract)                     │   │
 │  │  ├─ PostgreSQLAdapter                              │   │
-│  │  ├─ MongoDBAdapter                                 │   │
+│  │  ├─ OracleAdapter                                  │   │
 │  │  ├─ MySQLAdapter                                   │   │
 │  │  ├─ SQLServerAdapter                               │   │
 │  │  └─ APIAdapter                                     │   │
@@ -208,7 +210,7 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 CREATE TABLE data_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) UNIQUE NOT NULL,
-    type VARCHAR(50) NOT NULL,  -- postgresql, mysql, sqlserver, mongodb, api
+    type VARCHAR(50) NOT NULL,  -- postgresql, mysql, sqlserver, oracle, api
     connection_config JSONB NOT NULL,  -- {host, port, database, user, password (Fernet), sslmode} — ver §8.2
     is_active BOOLEAN DEFAULT true,
     created_by VARCHAR(255),
@@ -523,7 +525,7 @@ class PostgreSQLAnalysisRepository(AnalysisRepository):
 class AdapterFactory:
     _adapters = {
         'postgresql': PostgreSQLAdapter,
-        'mongodb': MongoDBAdapter,
+        'oracle': OracleAdapter,
         'mysql': MySQLAdapter,
         'sqlserver': SQLServerAdapter,
         'api': APIAdapter
@@ -620,10 +622,10 @@ mcp>=1.9.0,<2.0.0  # teto obrigatório: a v2.0.0 remove os decorators list_tools
 
 # Database
 asyncpg==0.29.0  # PostgreSQL async driver
-motor==3.3.2     # MongoDB async driver
+oracledb>=2.0.0  # Oracle async driver (thin mode — sem Oracle Client no SO)
 aiomysql==0.2.0  # MySQL async driver
-aioodbc==0.4.0   # SQL Server async driver (via ODBC)
-pyodbc==5.0.1    # Driver ODBC nativo, dependência do aioodbc para SQL Server
+aioodbc>=0.4.0   # SQL Server async driver (via ODBC)
+pyodbc>=5.2.0    # Driver ODBC nativo, dependência do aioodbc para SQL Server (5.0.1 não tem wheel p/ Python 3.13)
 sqlalchemy==2.0.23
 alembic==1.13.0
 
@@ -653,7 +655,7 @@ python-dotenv==1.0.0
 uuid6==1.0.3
 ```
 
-> ⚠️ **Dependência de SO para SQL Server:** `pyodbc`/`aioodbc` precisam do driver ODBC nativo instalado no sistema (não é só `pip install`) — no Linux/Docker, isso significa instalar o pacote `msodbcsql17` (ou `18`) da Microsoft via `apt` antes de instalar os pacotes Python. Isso entra no `Dockerfile` na F14 (Docker Setup) e é um pré-requisito manual se rodar fora de container.
+> ⚠️ **Dependência de SO para SQL Server:** `pyodbc`/`aioodbc` precisam do driver ODBC nativo instalado no sistema (não é só `pip install`) — no Linux/Docker, isso significa instalar o pacote `msodbcsql17` (ou `18`) da Microsoft via `apt` antes de instalar os pacotes Python. Isso entra no `Dockerfile` na F12 (Docker Setup) e é um pré-requisito manual se rodar fora de container.
 
 ### 5.2 Python Structure
 
@@ -669,7 +671,7 @@ analysis_app/
 │   ├── __init__.py
 │   ├── base.py               # DatabaseAdapter (abstract)
 │   ├── postgresql.py
-│   ├── mongodb.py
+│   ├── oracle.py             # via python-oracledb (thin mode) — sem dependência de SO
 │   ├── mysql.py
 │   ├── sqlserver.py          # via aioodbc/pyodbc — requer driver ODBC do SO (ver nota abaixo)
 │   └── api_adapter.py
@@ -734,7 +736,7 @@ FastAPI Startup (processo uvicorn persistente):
 │    └─ Inclui DEFAULT_MAX_RESULT_ROWS, DEFAULT_MAX_RESULT_SIZE_KB (VolumeGuardService)
 ├─ 2. Connect to PostgreSQL (config DB)
 ├─ 3. Setup connection pools
-│    └─ PostgreSQL, MongoDB, Redis (se ativado)
+│    └─ PostgreSQL, MySQL, SQL Server, Oracle, Redis (se ativado)
 ├─ 4. Initialize CacheService
 │    └─ Decide: memory (local) ou Redis (remoto)
 ├─ 5. Verify all data_sources are reachable
@@ -917,7 +919,6 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 
 Exemplo .env:
 POSTGRES_CONFIG_PASSWORD=secure_password
-MONGODB_CONNECTION_STRING=mongodb+srv://...
 FERNET_KEY=<chave gerada com Fernet.generate_key(), fora do repositório>
 ```
 
@@ -1179,7 +1180,7 @@ V2.0 (Ecosystem):
 |-----------|-----------|---------------|
 | **Web Framework** | FastAPI | Async nativo, MCP SDK support, Streamable HTTP |
 | **Config DB** | PostgreSQL | JSONB, ACID, versionamento |
-| **Data Sources** | PostgreSQL, MySQL, SQL Server, MongoDB, API | Adaptadores agnósticos |
+| **Data Sources** | PostgreSQL, MySQL, SQL Server, Oracle, API | Adaptadores agnósticos |
 | **Cache (Local)** | Memória + Dict | Zero overhead, suficiente |
 | **Cache (Remoto)** | Redis | Distributed, cluster-ready |
 | **Task Queue** | Celery | Escala horizontal, remoto |
