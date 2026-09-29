@@ -33,6 +33,7 @@ from adapters.factory import AdapterFactory
 from repositories.analysis_repo import Analysis, AnalysisRepository
 from repositories.data_source_repo import DataSource, DataSourceRepository
 from schemas.analysis_parameters import to_pydantic_model, validate_schema
+from schemas.sql_validation import validate_select_only
 from schemas.exceptions import (
     AnalysisNotFoundError,
     DataSourceConnectionError,
@@ -192,6 +193,15 @@ class AnalysisService:
                 f"Data source da análise '{analysis.name}' não encontrado ou inativo"
             )
 
+        steps = await self.analysis_repo.get_steps(analysis.id)
+        if not steps:
+            raise InvalidAnalysisSchemaError(
+                f"A análise '{analysis.name}' não possui nenhum step cadastrado."
+            )
+        step = steps[0]  # step_order=1, type='query' — único tipo em uso em V1.0
+        # Antes de abrir/reutilizar o pool: configuração inválida falha sem tocar o data source.
+        validate_select_only(step.definition["sql"])
+
         try:
             adapter = await self._get_adapter(data_source)
         except Exception as exc:
@@ -202,8 +212,6 @@ class AnalysisService:
                 f"Não foi possível conectar ao data source '{data_source.name}'"
             ) from exc
 
-        steps = await self.analysis_repo.get_steps(analysis.id)
-        step = steps[0]  # step_order=1, type='query' — único tipo em uso em V1.0
         param_names = step.definition["params"]
         translated_sql = adapter.translate_params(step.definition["sql"], param_names)
         count_sql = f"SELECT COUNT(*) FROM ({translated_sql}) AS sub"

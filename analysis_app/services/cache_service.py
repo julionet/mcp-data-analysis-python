@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -28,12 +29,22 @@ _TTL_BY_FREQUENCY: dict[str, int | None] = {
 }
 
 
+@dataclass
+class _KeyLock:
+    """Lock por chave com contagem de usuários (quem espera ou executa) — a
+    entrada sai de CacheService._locks quando o último usuário termina, para
+    o dict não crescer uma Lock por chave para sempre."""
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
+
+
 class CacheService:
     def __init__(self, backend: CacheBackend, max_rows: int, max_size_kb: int) -> None:
         self.backend = backend
         self.max_rows = max_rows
         self.max_size_kb = max_size_kb
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, _KeyLock] = {}
 
     def build_key(self, analysis_id: UUID, updated_at: datetime, params: dict) -> str:
         """analysis:<id>:<sha256(updated_at|params normalizados)> —
@@ -66,17 +77,23 @@ class CacheService:
         if entry is not None:
             return self._handle_hit(key, entry, confirmar_volume_alto)
 
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            entry = await self.backend.get(key)  # double-check
-            if entry is not None:
-                return self._handle_hit(key, entry, confirmar_volume_alto)
+        key_lock = self._locks.setdefault(key, _KeyLock())
+        key_lock.users += 1
+        try:
+            async with key_lock.lock:
+                entry = await self.backend.get(key)  # double-check
+                if entry is not None:
+                    return self._handle_hit(key, entry, confirmar_volume_alto)
 
-            logger.info("Cache MISS - executando a query (chave=%s)", key)
-            result = await executor()
-            if result.get("status") == "success":
-                await self._store(key, result, ttl_seconds)
-            return {**result, "cached": False}
+                logger.info("Cache MISS - executando a query (chave=%s)", key)
+                result = await executor()
+                if result.get("status") == "success":
+                    await self._store(key, result, ttl_seconds)
+                return {**result, "cached": False}
+        finally:
+            key_lock.users -= 1
+            if key_lock.users == 0:
+                del self._locks[key]
 
     async def _store(self, key: str, result: dict, ttl_seconds: int) -> None:
         dataset = result.get("data", [])

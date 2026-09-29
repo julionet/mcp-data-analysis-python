@@ -133,7 +133,6 @@ class AuditService:
         try:
             await self.execution_repo.create(
                 analysis_id=analysis_id,
-                analysis_version_id=None,  # até F9 existir
                 parameters=parameters,
                 status=status,
                 execution_time_ms=execution_time_ms,
@@ -164,7 +163,6 @@ class ExecutionRepository:
     async def create(
         self,
         analysis_id: UUID,
-        analysis_version_id: UUID | None,
         parameters: dict,
         status: str,
         execution_time_ms: int,
@@ -177,12 +175,12 @@ class ExecutionRepository:
         await self.db.execute(
             """
             INSERT INTO execution_history
-                (analysis_id, analysis_version_id, parameters, status,
+                (analysis_id, parameters, status,
                  execution_time_ms, rows_affected, result_size_bytes,
                  error_message, result_location, cached)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
-            analysis_id, analysis_version_id, parameters, status,
+            analysis_id, parameters, status,
             execution_time_ms, rows_affected, result_size_bytes,
             error_message, result_location, cached,
         )
@@ -408,7 +406,7 @@ Transparente para o usuário/cliente MCP; consulta ao histórico fica restrita a
 
 ### 8.3 Como outros desenvolvedores estenderão isso
 
-`AuditService.log_execution()` é o único ponto de escrita em `execution_history` — qualquer novo caminho de execução (ex.: futuro executor assíncrono/Celery) deve chamá-lo com os mesmos parâmetros. `analysis_version_id=None` até F9 popular versionamento; nesse ponto, passar o id real vira o único ajuste necessário aqui.
+`AuditService.log_execution()` é o único ponto de escrita em `execution_history` — qualquer novo caminho de execução (ex.: futuro executor assíncrono/Celery) deve chamá-lo com os mesmos parâmetros.
 
 ## 9. Checklist de Implementação
 
@@ -485,4 +483,3 @@ Transparente para o usuário/cliente MCP; consulta ao histórico fica restrita a
 ### Próximas Features Desbloqueadas
 
 - ✅ **F6 Critério 5**: Validação multi-cliente com logging confirmado
-- ⏳ **F9**: Versionamento pode referenciar `analysis_version_id` (hoje NULL)

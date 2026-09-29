@@ -431,3 +431,29 @@ class TestAnalysisServiceCache:
         assert result_1["cached"] is False
         assert result_2["cached"] is True
         assert fake_adapter.execute_query.await_count == 2  # 2ª chamada não tocou o BD
+
+
+class TestCacheServiceLockCleanup:
+    @pytest.mark.asyncio
+    async def test_locks_dict_is_empty_after_execution(self):
+        service = CacheService(InMemoryBackend(max_entries=100, max_size_mb=10), 500, 150)
+
+        async def executor():
+            return {"status": "success", "data": [1]}
+
+        await service.get_or_execute("k1", 3600, False, executor)
+        await service.get_or_execute("k2", 3600, False, executor)
+
+        assert service._locks == {}
+
+    @pytest.mark.asyncio
+    async def test_locks_dict_is_empty_after_executor_exception(self):
+        service = CacheService(InMemoryBackend(max_entries=100, max_size_mb=10), 500, 150)
+
+        async def failing_executor():
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            await service.get_or_execute("k", 3600, False, failing_executor)
+
+        assert service._locks == {}

@@ -13,6 +13,7 @@ from services.audit_service import AuditService
 from services.cache_backend import InMemoryBackend
 from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
+from tests.helpers import make_fake_adapter
 
 VENDAS_PARAMETERS = {
     "data_inicial": {"type": "date", "required": True, "description": "..."},
@@ -204,7 +205,7 @@ class TestAnalysisServiceAudit:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         expected_dataset = [{"data": "2026-01-05", "valor": 100}]
 
         async def mock_execute_query(sql, params, scalar=False):
@@ -278,7 +279,7 @@ class TestAnalysisServiceAudit:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         expected_dataset = [{"valor": 100}]
 
         async def mock_execute_query(sql, params, scalar=False):

@@ -6,12 +6,14 @@ from typing import Type
 from adapters.base import DatabaseAdapter
 from adapters.postgresql import PostgreSQLAdapter
 from adapters.mysql import MySQLAdapter
+from adapters.sqlserver import SQLServerAdapter
 
 
 class AdapterFactory:
     _adapters: dict[str, Type[DatabaseAdapter]] = {
         "postgresql": PostgreSQLAdapter,
         "mysql": MySQLAdapter,
+        "sqlserver": SQLServerAdapter,
     }
 
     @classmethod

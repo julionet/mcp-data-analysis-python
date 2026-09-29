@@ -22,6 +22,7 @@ from services.analysis_service import AnalysisService
 from services.cache_backend import InMemoryBackend
 from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
+from tests.helpers import make_fake_adapter
 
 VENDAS_PARAMETERS = {
     "data_inicial": {"type": "date", "required": True, "description": "..."},
@@ -103,7 +104,7 @@ class TestAnalysisService:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         expected_dataset = [{"data": "2026-01-05", "valor": 100.0, "pago": True}]
         fake_adapter.execute_query.side_effect = [1, expected_dataset]
 
@@ -168,7 +169,7 @@ class TestAnalysisService:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         fake_adapter.execute_query.return_value = 8400  # COUNT(*) já excede o limite
 
         service = _service(analysis_repo, data_source_repo)
@@ -197,7 +198,7 @@ class TestAnalysisService:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         fake_adapter.connect.side_effect = Exception("connection refused: password=Senha123")
 
         service = _service(analysis_repo, data_source_repo)
@@ -227,7 +228,7 @@ class TestAnalysisService:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         expected_dataset = [{"data": "2026-01-05", "valor": 100.0, "pago": True}] * 5000
         fake_adapter.execute_query.return_value = expected_dataset  # sem COUNT(*) — bypass
 
@@ -275,7 +276,7 @@ class TestAnalysisService:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         fake_adapter.execute_query.side_effect = [1, []]
 
         service = _service(analysis_repo, data_source_repo)
@@ -314,7 +315,7 @@ class TestAnalysisServiceAdapterCache:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         fake_adapter.execute_query.side_effect = [1, [], 1, []]  # 2 execuções, COUNT + SELECT cada
 
         service = _service(analysis_repo, data_source_repo)
@@ -348,7 +349,7 @@ class TestAnalysisServiceAdapterCache:
         data_source_repo = AsyncMock()
         data_source_repo.get_by_id.return_value = data_source
 
-        fake_adapter = AsyncMock()
+        fake_adapter = make_fake_adapter()
         fake_adapter.execute_query.side_effect = [1, []]
 
         service = _service(analysis_repo, data_source_repo)
@@ -365,3 +366,108 @@ class TestAnalysisServiceAdapterCache:
 
         fake_adapter.disconnect.assert_awaited_once()
         assert service._adapters == {}
+
+
+class TestAnalysisServiceStepValidation:
+    """Steps ausentes e SQL que não é SELECT viram erro de configuração
+    claro, sem abrir conexão com o data source."""
+
+    async def _execute_with_steps(self, steps):
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = steps(analysis)
+
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = data_source
+
+        audit_service = AsyncMock()
+        service = _service(analysis_repo, data_source_repo, audit_service=audit_service)
+
+        with patch("services.analysis_service.AdapterFactory.create_adapter") as mock_create_adapter:
+            result = await service.execute(analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"})
+
+        mock_create_adapter.assert_not_called()
+        return result, audit_service
+
+    @pytest.mark.asyncio
+    async def test_execute_without_steps_returns_clear_error(self):
+        result, audit_service = await self._execute_with_steps(lambda analysis: [])
+
+        assert result["status"] == "error"
+        assert "nenhum step" in result["mensagem"]
+        assert result["mensagem"] != "Erro interno ao executar a análise."
+        assert audit_service.log_execution.await_args.kwargs["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_non_select_sql(self):
+        def steps(analysis):
+            step = _make_step(analysis)
+            step.definition = {"sql": "DELETE FROM vendas WHERE data < :data_inicial", "params": ["data_inicial"]}
+            return [step]
+
+        result, audit_service = await self._execute_with_steps(steps)
+
+        assert result["status"] == "error"
+        assert "SELECT" in result["mensagem"]
+        assert result["cached"] is False
+        assert audit_service.log_execution.await_args.kwargs["status"] == "error"
+
+
+class TestAnalysisServiceSQLServer:
+    """F11 — AnalysisService com data_source sqlserver (adapter real, driver mockado)."""
+
+    @pytest.mark.asyncio
+    async def test_execute_runs_volume_guard_and_query_with_positional_values(self):
+        from unittest.mock import MagicMock
+
+        from adapters.sqlserver import SQLServerAdapter
+
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+        data_source.type = "sqlserver"
+        step = _make_step(analysis)
+        step.definition["sql"] = VENDAS_SQL.replace(" ORDER BY data", "")  # subconjunto comum (F11 §8.4)
+
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = [step]
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = data_source
+
+        cursor = MagicMock()
+        cursor.execute = AsyncMock()
+        cursor.fetchone = AsyncMock(return_value=(1,))
+        cursor.fetchall = AsyncMock(return_value=[("2026-01-05", 100.0, True)])
+        cursor.description = [("data",), ("valor",), ("pago",)]
+        conn = MagicMock()
+        conn.cursor.return_value.__aenter__.return_value = cursor
+        pool = MagicMock()
+        pool.acquire.return_value.__aenter__.return_value = conn
+
+        async def fake_connect(self):
+            self._pool = pool
+
+        service = _service(analysis_repo, data_source_repo)
+
+        with (
+            patch.object(SQLServerAdapter, "connect", fake_connect),
+            patch("services.analysis_service.decrypt_password", return_value="senha_decifrada"),
+        ):
+            result = await service.execute(
+                analysis.id, {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+            )
+
+        assert result == {
+            "status": "success",
+            "data": [{"data": "2026-01-05", "valor": 100.0, "pago": True}],
+            "cached": False,
+        }
+        count_call, query_call = cursor.execute.await_args_list
+        assert count_call.args[0].startswith("SELECT COUNT(*) FROM (SELECT data, valor, pago FROM vendas")
+        assert "?" in count_call.args[0] and "@" not in count_call.args[0]
+        # data_inicial, data_final, pago, pago (parâmetro repetido → valor repetido)
+        assert len(query_call.args) == 1 + 4
+        assert query_call.args[-2:] == (None, None)

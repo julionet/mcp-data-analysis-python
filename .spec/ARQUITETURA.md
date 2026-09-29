@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.16 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Versão:** 1.17 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-29
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.16 → v1.17):** limpeza pós-Sprint 1/2 (sem mudança de decisão arquitetural). (1) `analysis_version_id` removida de `execution_history` (§2.2) — a coluna era mantida "para compatibilidade futura" com FB6/FB7, mas a tabela `analysis_versions` já tinha saído do schema; se o versionamento voltar, a coluna volta junto com a tabela, via migration. `ExecutionRepository.create()` e `AuditService.log_execution()` deixam de passar esse parâmetro. (2) `docker-compose.local.yml` e `docker-compose.remote.yml` (arquivos vazios) removidos do repositório e de §5.2/§9.1 — voltam com a **F13 (Docker Setup)**. (3) Lições técnicas do protótipo F0 consolidadas na nova §14.1, para que `mcp_prototype/README.md` deixe de ser a única fonte. (4) **O engine só executa `SELECT`**: `AnalysisService` valida o SQL do step (`schemas/sql_validation.py`) antes de tocar o data source — recusa INSERT/UPDATE/DELETE/DDL, `SELECT ... INTO`, `;` e CTE (`WITH`, já fora do subconjunto comum de SQL); é rede de segurança contra erro de cadastro, não fronteira de segurança — o usuário do data source deve ter permissão somente de leitura (§8.2). Análise sem step também passa a devolver erro claro. (5) MySQL passa a ter timeout de query via `SET SESSION max_execution_time` (`init_command` do pool; exige MySQL ≥ 5.7.8, MariaDB usa `max_statement_time`). (6) `CacheService` libera o lock de cada chave ao final (antes o dict `_locks` crescia sem limite) e `ExecutionRepository.get_all()` deixa de chamar um `fetch()` inexistente no adapter.
 
 > **Nota de revisão (v1.15 → v1.16):** documento aprovado. Adicionada autenticação (**F12** — ver FEATURES_ROADMAP.md v1.12 e NEGOCIO.md v1.9 RF5): novo **ADR-007** (reintroduzido com um desenho diferente do ADR-007 original removido na v1.2 — token opaco em vez de API Key simples, com perfis N:N) decide token opaco (hash SHA-256) em vez de JWT ou OAuth2, com o racional completo das 3 alternativas comparadas. Novas tabelas no schema (§2.2): `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id` (nullable). Novos componentes (§2.1): `AuthService` na camada de Services, `UserRepository`/`ProfileRepository`/`AccessTokenRepository` na camada de Data Access. Nova seção **§3.5** (Fluxo de Autenticação e Autorização). `mcp_transport/tools.py` (`list_tools`/`call_tool`) passa a exigir um `AuthenticatedUser` resolvido a partir do header `Authorization: Bearer <token>`. Atualizados: §1.2 (topologia — exemplo de config de cliente com header), §2.1, §2.2, nova §3.5, §5.2 (estrutura de pastas — `security/token_auth.py`, novos repos, `scripts/generate_access_token.py`), §8.1 (autenticação sai de "❌ Não implementar" para "✅ Implementar"), §9.1 (exemplo de config de cliente), §12 (Roadmap Arquitetural), §13 (tabela de tecnologias). Nenhuma dependência nova em `requirements.txt` — o mecanismo usa só `secrets`/`hashlib` da stdlib. Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
 
@@ -318,7 +320,6 @@ CREATE TABLE access_tokens (
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),
-    analysis_version_id UUID,  -- mantida para compatibilidade futura se FB6/FB7 forem implementadas
     user_id UUID REFERENCES users(id),  -- nullable: quem executou (F12); NULL para execuções pré-F12
 
     parameters JSONB,
@@ -844,8 +845,6 @@ analysis_app/
 ├── main.py                    # FastAPI app entry point (Streamable HTTP)
 ├── config.py                  # Configuration (pydantic)
 ├── requirements.txt
-├── docker-compose.local.yml
-├── docker-compose.remote.yml
 │
 ├── adapters/
 │   ├── __init__.py
@@ -1064,6 +1063,8 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 - O endpoint `/mcp`, se montado via `app.mount("/mcp", ...)` do Starlette/FastAPI, responde com redirect `307` para `/mcp/` quando a requisição bate exatamente em `/mcp` sem barra final — o padrão de URL usado por clientes reais. É necessário registrar também uma rota exata (`app.add_route("/mcp", ...)`) para esse caso, evitando o redirect. O próprio `FastMCP` (wrapper de alto nível do SDK, não usado aqui) resolve isso da mesma forma — registrando uma `Route` exata em vez de um `Mount`.
 - CORS precisa ser habilitado mesmo sem um navegador tradicional envolvido — clientes desktop (Electron) podem validar o conector via `fetch()` no processo de renderer, sujeito à mesma política de CORS de um browser.
 
+Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
+
 **Substitui:** o antigo ADR-008 (Autenticação Multi-User via API Key), removido junto com o serviço correspondente, e revisa a própria decisão de transporte deste ADR-006 (v1.0-1.3: HTTP+SSE → v1.4: Streamable HTTP → v1.5: Streamable HTTP com TLS obrigatório). O número **ADR-007** (antes "Client Identification Automática", removido na v1.2) é reutilizado na revisão v1.16 para uma decisão diferente — **autenticação por token opaco (F12)** — ver a seguir; a decisão de client identification automática (FB1) segue sem ADR, por seguir fora de escopo.
 
 ---
@@ -1185,8 +1186,11 @@ cp .env.example .env
 brew install mkcert && mkcert -install
 mkcert -cert-file certs/server.pem -key-file certs/server-key.pem localhost 127.0.0.1 <ip-da-maquina>
 
-# Docker compose local
-docker-compose -f docker-compose.local.yml up
+# Config DB: PostgreSQL rodando e com database/schema.sql aplicado.
+# (docker-compose local/remoto entra com a F13 — Docker Setup.)
+
+# Subir o servidor (HTTPS com ALPN — ver aviso ao final desta seção):
+python run_https.py
 
 # Verificar
 curl https://localhost:3000/health
@@ -1450,6 +1454,40 @@ V2.0 (Ecosystem):
 ```
 
 **Sucesso:** pedir "Mostre vendas de setembro" em dois clientes MCP diferentes (ex.: Claude Desktop e Gemini Desktop), ao mesmo tempo, e receber dados reais do BD local em ambos.
+
+### 14.1 Lições Técnicas do Protótipo F0
+
+Consolidadas a partir do antigo `mcp_prototype/README.md` (o protótipo continua no repositório como referência executável; a análise de "por quê" mora aqui). Resumo das decisões: ADR-006 (§7).
+
+**1. ALPN: por que existe `run_https.py` e não `uvicorn --ssl-keyfile/--ssl-certfile`**
+- Sintoma: certificado válido, `curl` e o SDK cliente do `mcp` funcionavam, mas o Claude Desktop reportava "nenhum servidor respondeu" e **nenhuma requisição aparecia no log** — a conexão TLS era abandonada antes da camada HTTP.
+- Diagnóstico: `openssl s_client -alpn h2,http/1.1 -connect 127.0.0.1:3000` retornava "No ALPN negotiated" — a CLI do uvicorn não negocia ALPN.
+- Correção: subir o uvicorn programaticamente com `ssl_context_factory` chamando `context.set_alpn_protocols(["http/1.1"])` (implementado em `run_https.py`).
+- Escopo: o workaround é específico do cenário "uvicorn falando TLS direto" (dev/mkcert). Atrás de nginx (§9.2) o OpenSSL do nginx já negocia ALPN.
+
+**2. Rota exata `/mcp` (`_MCPExactPathASGI`) além do `app.mount("/mcp", ...)`**
+- O `Mount` do Starlette só casa com `/mcp/<algo>`. Uma requisição em `/mcp` exato (sem barra final) recebe `307 Temporary Redirect` para `/mcp/`.
+- O Claude Desktop configura e usa a URL **sem barra final**, e não há garantia de que o cliente siga redirect em `POST`/`DELETE`. Com a rota exata (`app.add_route("/mcp", ...)`, registrada antes do `mount`), 100% do tráfego de uma sessão real (11 `POST`, 3 `GET`, 3 `DELETE`) bateu em `/mcp` sem nenhum `307`.
+- Por que uma classe com `__call__` e não uma função: o Starlette trata funções passadas a `add_route` como `func(request) -> Response`; `handle_request` é ASGI puro `(scope, receive, send)`. Um objeto chamável escapa dessa checagem.
+- O próprio `FastMCP` (não usado aqui — ADR-006) resolve o mesmo problema registrando uma `Route` exata, não um `Mount`.
+
+**3. Versão do SDK `mcp`**
+- `mcp>=1.9.0,<2.0.0`: a partir da 2.0.0 o SDK removeu os decorators `@server.list_tools()`/`@server.call_tool()` da classe de baixo nível `Server`. O protótipo fixou `mcp==1.30.0` (última 1.x com essa API). Ver §5.1.
+
+**4. Certificado TLS (mkcert)**
+- Máquina única: `mkcert -install` + `mkcert localhost 127.0.0.1 ::1`. Nunca versionar a chave privada (`certs/` no `.gitignore`).
+- Cliente em outra máquina: gerar o certificado também para o IP/hostname do servidor (`mkcert <ip> <hostname>`) e instalar a CA (`mkcert -CAROOT`) na máquina do cliente.
+
+**5. Como cada tipo de cliente/teste confia na CA**
+- Claude Desktop/ChatGPT Desktop: usam o armazenamento do SO (após `mkcert -install`).
+- Claude Code (CLI Node.js): pode não confiar no armazenamento do SO como o `curl` — usar `export NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem"` em vez de desabilitar a validação TLS.
+- Script Python (httpx/certifi): `SSL_CERT_FILE="$(mkcert -CAROOT)/rootCA.pem" python seu_script.py`. O `curl` não precisa (usa o armazenamento do SO).
+
+**6. Registrar o servidor no Claude Code**
+- `claude mcp add --transport http <nome> https://<host>:3000/mcp` — `http` é o transporte genérico para conexões remotas (cobre HTTP/HTTPS e Streamable HTTP); não existe um valor `streamable-http` separado. Escopos: `--scope local` (padrão), `project` (`.mcp.json` versionado) e `user`. Verificação: `claude mcp list`, `claude mcp get <nome>`, `/mcp`.
+
+**7. Validar multi-cliente sem clientes desktop**
+- Abrir duas sessões independentes com `mcp.client.streamable_http` contra o mesmo `/mcp`, chamando `list_tools()`/`call_tool()` em cada uma — foi assim que o protótipo foi validado durante o desenvolvimento (base do F6).
 
 ---
 

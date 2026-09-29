@@ -48,7 +48,6 @@ class AuditService:
         try:
             await self.execution_repo.create(
                 analysis_id=analysis_id,
-                analysis_version_id=None,  # até F9 (versionamento)
                 parameters=parameters,
                 status=status,
                 execution_time_ms=execution_time_ms,

@@ -38,24 +38,10 @@ CREATE TABLE analysis_steps (
     UNIQUE(analysis_id, step_order)
 );
 
--- Tabela 4: Versões de Análises
-CREATE TABLE analysis_versions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    analysis_id UUID NOT NULL REFERENCES analyses(id),
-    version_number INT NOT NULL,
-    full_definition JSONB NOT NULL,  -- snapshot completo
-    changes_summary TEXT,
-    changed_by VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(analysis_id, version_number)
-);
-
--- Tabela 5: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
+-- Tabela 4: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),
-    analysis_version_id UUID REFERENCES analysis_versions(id),
 
     parameters JSONB,
     status VARCHAR(50),  -- success, failed, timeout
@@ -72,4 +58,3 @@ CREATE TABLE execution_history (
 CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
-CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);

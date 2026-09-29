@@ -19,7 +19,8 @@ class AnalysisNotFoundError(Exception):
 
 
 class InvalidAnalysisSchemaError(Exception):
-    """Erro de configuração — quem cadastrou analyses.parameters errou, não o cliente."""
+    """Erro de configuração — quem cadastrou a análise errou (analyses.parameters, steps
+    ausentes ou SQL que não é um SELECT), não o cliente."""
 
 
 class InvalidParametersError(Exception):

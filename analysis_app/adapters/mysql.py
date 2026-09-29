@@ -18,6 +18,11 @@ class MySQLAdapter(DatabaseAdapter):
             db=self.config["database"],
             connect_timeout=settings.query_timeout_seconds,
             autocommit=True,
+            # aiomysql não tem timeout por query (só connect_timeout, que vale para o
+            # handshake). max_execution_time (ms) faz o servidor abortar SELECTs lentos
+            # — RNF2/§8.1, equivalente ao command_timeout do asyncpg. Exige MySQL >= 5.7.8;
+            # MariaDB usa max_statement_time e recusaria esta variável.
+            init_command=f"SET SESSION max_execution_time={settings.query_timeout_seconds * 1000}",
         )
 
     async def disconnect(self) -> None:

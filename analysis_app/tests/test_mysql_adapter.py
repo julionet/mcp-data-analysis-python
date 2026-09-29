@@ -100,3 +100,17 @@ class TestMySQLAdapter:
         adapter = MySQLAdapter(CONFIG)
         assert adapter.config == CONFIG
         assert adapter._pool is None
+
+
+class TestMySQLAdapterQueryTimeout:
+    @pytest.mark.asyncio
+    async def test_connect_sets_max_execution_time_from_settings(self):
+        from unittest.mock import AsyncMock, patch
+
+        from config import settings
+
+        with patch("adapters.mysql.aiomysql.create_pool", new=AsyncMock()) as mock_create_pool:
+            await MySQLAdapter(CONFIG).connect()
+
+        init_command = mock_create_pool.await_args.kwargs["init_command"]
+        assert init_command == f"SET SESSION max_execution_time={settings.query_timeout_seconds * 1000}"

@@ -13,7 +13,6 @@ class ExecutionRepository:
     async def create(
         self,
         analysis_id: UUID,
-        analysis_version_id: UUID | None,
         parameters: dict,
         status: str,
         execution_time_ms: int,
@@ -27,13 +26,12 @@ class ExecutionRepository:
         await self.db.execute(
             """
             INSERT INTO execution_history
-                (analysis_id, analysis_version_id, parameters, status,
+                (analysis_id, parameters, status,
                  execution_time_ms, rows_affected, result_size_bytes,
                  error_message, result_location, cached)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
             analysis_id,
-            analysis_version_id,
             json.dumps(parameters, default=str),
             status,
             execution_time_ms,
@@ -46,8 +44,8 @@ class ExecutionRepository:
 
     async def get_all(self, limit: int = 100) -> list[dict]:
         """Retorna histórico de execuções (sem exposição via MCP nesta feature)."""
-        rows = await self.db.fetch(
+        # execute_query() do adapter já devolve list[dict] — não há fetch() no adapter.
+        return await self.db.execute_query(
             "SELECT * FROM execution_history ORDER BY executed_at DESC LIMIT $1",
-            limit,
+            {"limit": limit},
         )
-        return [dict(row) for row in rows]

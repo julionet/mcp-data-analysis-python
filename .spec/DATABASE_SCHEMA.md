@@ -2,11 +2,11 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.16)
+**Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.17)
 **Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
 **Data:** 2026-09-29 (atualizado — F12: tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
-> Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, versões, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
+> Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
 ---
 
@@ -17,10 +17,7 @@ data_sources (1) ──────< (N) analyses
                               │
                               ├──────< (N) analysis_steps
                               │
-                              ├──────< (N) analysis_versions
-                              │                │
-                              │                │ (opcional)
-                              ├──────< (N) execution_history >──── (0..1) analysis_versions
+                              ├──────< (N) execution_history
                               │                        │
                               │                        │ (0..1, F12)
                               │                        ▼
@@ -35,8 +32,7 @@ data_sources (1) ──────< (N) analyses
 
 - Uma **análise** pertence a exatamente uma **fonte de dados** (`data_sources`).
 - Uma **análise** tem N **etapas** (`analysis_steps`) — em V1.0, sempre uma etapa do tipo `query`.
-- Uma **análise** acumula N **versões** (`analysis_versions`) ao longo do tempo.
-- Cada **execução** (`execution_history`) referencia a análise executada, opcionalmente qual versão foi usada e, desde F12, opcionalmente qual **usuário** (`user_id`) a executou.
+- Cada **execução** (`execution_history`) referencia a análise executada e, desde F12, opcionalmente qual **usuário** (`user_id`) a executou.
 - Um **usuário** (`users`, F12) tem N **tokens de acesso** (`access_tokens`) e está vinculado a N **perfis** (`profiles`) via `user_profiles`.
 - Um **perfil** está vinculado a N **analyses** via `profile_analyses` — a permissão efetiva de um usuário é a união das analyses ativas de todos os seus perfis ativos (ver ARQUITETURA.md §3.5).
 
@@ -82,7 +78,7 @@ A definição de "o que" uma análise faz — nome, descrição, de onde vêm os
 
 **Relacionamentos:**
 - N:1 com `data_sources` (uma análise pertence a uma fonte)
-- 1:N com `analysis_steps`, `analysis_versions`, `execution_history`
+- 1:N com `analysis_steps`, `execution_history`
 
 ---
 
@@ -106,24 +102,9 @@ O SQL efetivo que a análise executa. Em V1.0, toda análise tem exatamente 1 st
 
 ---
 
-### 2.4 `analysis_versions` — Versões de Análises
+### 2.4 *(removida)*
 
-Snapshot completo de uma análise em um ponto no tempo, para permitir histórico e rollback (F9/F10).
-
-| Campo | Tipo | Obrigatório | Descrição |
-|---|---|---|---|
-| `id` | UUID (PK) | ✅ | Identificador único |
-| `analysis_id` | UUID (FK → `analyses.id`) | ✅ | A qual análise essa versão pertence |
-| `version_number` | INT | ✅ | Número sequencial da versão (1, 2, 3...) |
-| `full_definition` | JSONB | ✅ | Snapshot completo da análise + steps naquele momento |
-| `changes_summary` | TEXT | — | Descrição textual do que mudou ("por que mudou") |
-| `changed_by` | VARCHAR(255) | — | Quem fez a mudança |
-| `is_active` | BOOLEAN | — | Default `true`. Marca qual versão está "em uso" no momento |
-| `created_at` | TIMESTAMP | — | Default `NOW()` |
-
-**Constraint:** `UNIQUE(analysis_id, version_number)`.
-
-**Relacionamentos:** N:1 com `analyses`. Referenciada por `execution_history.analysis_version_id` (para saber qual versão específica gerou cada execução).
+A tabela `analysis_versions` saiu do schema na v1.17 (ver §6). A numeração foi mantida para não quebrar as referências a §2.5-§2.10.
 
 ---
 
@@ -135,7 +116,6 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `analysis_id` | UUID (FK → `analyses.id`) | ✅ | Qual análise foi executada |
-| `analysis_version_id` | UUID (FK → `analysis_versions.id`) | — | Qual versão específica foi usada (pode ser nulo) |
 | `user_id` | UUID (FK → `users.id`) | — | Quem executou (F12). `NULL` para execuções anteriores a F12 |
 | `parameters` | JSONB | — | Parâmetros com que a análise foi chamada |
 | `status` | VARCHAR(50) | — | `success`, `failed`, `timeout` (também usado para o caso `volume_exceeded`, ver ARQUITETURA.md §3.4) |
@@ -147,7 +127,7 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 | `executed_at` | TIMESTAMP | — | Default `NOW()` |
 | `cached` | BOOLEAN | — | Default `false`. Indica se o resultado veio do cache (F7) |
 
-**Relacionamentos:** N:1 com `analyses`, opcionalmente N:1 com `analysis_versions` e, desde F12, opcionalmente N:1 com `users`.
+**Relacionamentos:** N:1 com `analyses`, e, desde F12, opcionalmente N:1 com `users`.
 
 ---
 
@@ -284,7 +264,6 @@ CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
 CREATE INDEX idx_execution_history_user ON execution_history(user_id);
-CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
 CREATE INDEX idx_access_tokens_hash ON access_tokens(token_hash);
 CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 ```
@@ -296,10 +275,11 @@ CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 Para não haver confusão ao ler versões antigas de código/specs:
 
 - ❌ `custom_handlers` — removida na revisão v1.9 do ARQUITETURA.md, junto com toda a camada de Handlers Python (ADR-005 reescrito — servidor entrega dataset bruto).
+- ❌ `analysis_versions` e `execution_history.analysis_version_id` — removidas na v1.17 (a coluna era mantida como NULL "para compatibilidade futura"; sem a tabela, não fazia sentido). Se o versionamento (FB6/FB7) for reintroduzido, volta com uma migration. Bancos já criados com o schema antigo precisam de: `ALTER TABLE execution_history DROP COLUMN analysis_version_id; DROP TABLE analysis_versions;`.
 - ❌ `mcp_clients` — removida na v1.2 junto com as colunas `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history`; segue fora de escopo (FB1, identificação de cliente MCP/software — diferente de identificação de usuário, já implementada via F12).
 - ❌ `user_api_keys` — desenho original de FB2 (v1.2), API Key direta por usuário sem perfis; **não voltou** — F12 usa `access_tokens` (token opaco com hash) em vez disso.
 - ✅ `users` e `execution_history.user_id`, removidas na v1.2, **voltaram na revisão de 2026-09-29 (F12)** com um desenho revisado: perfis N:N (`profiles`, `user_profiles`, `profile_analyses`) em vez de API Key + quota direta — ver ARQUITETURA.md ADR-007 e §2.6-§2.10 acima.
 
 ---
 
-**Fonte:** ARQUITETURA.md v1.16, §2.2, §2.3 e §3.5.
+**Fonte:** ARQUITETURA.md v1.17, §2.2, §2.3 e §3.5.

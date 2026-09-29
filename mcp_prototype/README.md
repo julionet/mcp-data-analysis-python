@@ -59,19 +59,11 @@ python3 run_https.py
 Endpoint MCP único: `https://127.0.0.1:3000/mcp`
 Smoke test manual: `curl https://127.0.0.1:3000/health` (deve responder sem aviso de certificado)
 
-> ⚠️ **Por que `run_https.py` e não `uvicorn --ssl-keyfile=... --ssl-certfile=...` direto pela CLI:** a CLI do uvicorn não negocia ALPN (confirmado com `openssl s_client -alpn h2,http/1.1 -connect 127.0.0.1:3000`, que retornava "No ALPN negotiated"). O certificado era válido e o servidor respondia normalmente a `curl` e ao SDK cliente do `mcp`, mas o Claude Desktop reportava "nenhum servidor respondeu" e nenhuma requisição sequer chegava a aparecer no log — a própria conexão TLS era abandonada antes da camada HTTP. `run_https.py` usa `ssl_context_factory` para forçar `http/1.1` via ALPN, o que resolveu o problema.
->
-> Isso só serve para Claude Desktop **na mesma máquina** que roda o servidor. Se o cliente estiver em outra máquina da rede, gere o certificado também para o IP/hostname do servidor (`mkcert <ip> <hostname>`), ajuste os nomes de arquivo em `run_https.py`, e instale a mesma CA (`~/Library/Application Support/mkcert/rootCA.pem`) na máquina do cliente antes de confiar nele.
+> ⚠️ Use `run_https.py`, não `uvicorn --ssl-keyfile=... --ssl-certfile=...` direto pela CLI: a CLI não negocia ALPN e o Claude Desktop abandona a conexão TLS. Racional, diagnóstico e escopo (cliente em outra máquina): `../.spec/ARQUITETURA.md` §14.1.
 
 ## Por que existe `_MCPExactPathASGI` em `main.py`
 
-`app.mount("/mcp", session_manager.handle_request)` só responde a `/mcp/algumacoisa` — o `Mount` do Starlette exige uma barra e algo depois dela para casar. Uma requisição batendo exatamente em `/mcp` (sem barra final) não é reconhecida pelo `Mount`, e o Starlette responde com um `307 Temporary Redirect` para `/mcp/` (dava pra ver isso mudando a URL sozinha ao abrir `https://127.0.0.1:3000/mcp` no Safari).
-
-Claude Desktop configura e usa a URL **sem barra final**. `_MCPExactPathASGI` é uma rota exata (`app.add_route("/mcp", ...)`, registrada antes do `mount`) que encaminha direto para `session_manager.handle_request`, sem nunca gerar esse redirect. Conferindo o log de uma sessão real do Claude Desktop depois da correção, **100% do tráfego** (11 `POST`, 3 `GET`, 3 `DELETE` numa sessão de exemplo) bateu em `/mcp` exato, sem nenhum `307` — ou seja, essa classe está servindo toda a comunicação real, não é uma correção teórica.
-
-Removê-la reintroduziria o redirect em toda mensagem da sessão (um round-trip a mais por chamada JSON-RPC), e não há garantia de que o cliente de sessão do Claude Desktop segue redirect em `POST`/`DELETE` — não é uma aposta que vale a pena, já que o `Mount` já causou ambiguidade suficiente durante o diagnóstico deste protótipo (ver histórico de depuração de HTTPS acima).
-
-Vale notar que essa não é uma solução isolada: o próprio `FastMCP` (o wrapper de alto nível do SDK oficial, que não usamos aqui por decisão do ADR-006) resolve o mesmo problema do mesmo jeito — registra o endpoint MCP como uma `Route` exata, não como um `Mount`.
+Rota exata `/mcp` para evitar o `307` do `Mount` do Starlette quando o cliente usa a URL sem barra final. Racional completo e evidências: `../.spec/ARQUITETURA.md` §14.1 (item 2).
 
 ## Testar com Claude Desktop / ChatGPT Desktop
 

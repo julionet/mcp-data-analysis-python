@@ -486,7 +486,7 @@ FB7: Analysis Rollback Mechanism
 
 ~~FB2: UserIdentificationService~~ e ~~FB4: RBAC (permissões por análise)~~ — implementadas nesta versão como **F12** (Autenticação e Controle de Acesso via Perfis), com um desenho revisado: perfis N:N (usuário↔perfil↔analyses) em vez de API Key direta + quota, e token opaco em vez de simplesmente "API Key" — ver ARQUITETURA.md ADR-007 e `features/F12_AUTENTICACAO_PERFIS.md`.
 
-A especificação técnica completa (código de middleware, schema SQL, fluxos) que existia para FB1 fica preservada como referência para quando esse trabalho for retomado — não é necessário redesenhar do zero. FB6/FB7 (Version Management + Rollback) também podem ser reintroduzidas se a gestão de mudanças em análises se tornar crítica; o schema `analysis_versions` já existe no BD para suportar isso futuro.
+A especificação técnica completa (código de middleware, schema SQL, fluxos) que existia para FB1 fica preservada como referência para quando esse trabalho for retomado — não é necessário redesenhar do zero. FB6/FB7 (Version Management + Rollback) também podem ser reintroduzidas se a gestão de mudanças em análises se tornar crítica; a tabela `analysis_versions` foi removida do schema (ARQUITETURA.md v1.17) e voltaria via migration.
 
 ---
 
