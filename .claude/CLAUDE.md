@@ -20,9 +20,9 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F7: Cache Service (in-memory) 🟩 Done
 - F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag — sem identificação de usuário) 🟩 Done
 
-### Sprint 2: Multi-DB Adapters (2/3 em progresso)
+### Sprint 2: Multi-DB Adapters (1/3 concluído)
 - F9: MongoDB Adapter ⬜ Todo
-- F10: MySQL Adapter 🟩 Done (refatoração de `translate_params()`, aiomysql)
+- F10: MySQL Adapter 🟩 Done (named parameters `%(name)s`, 3 correções, 23/23 testes ✅)
 - F11: SQL Server Adapter ⬜ Todo
 
 ## Documentos (Aprovados e Atualizados)

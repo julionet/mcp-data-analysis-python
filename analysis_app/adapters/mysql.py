@@ -26,15 +26,15 @@ class MySQLAdapter(DatabaseAdapter):
             await self._pool.wait_closed()
 
     async def execute_query(self, query: str, params: dict | None = None, scalar: bool = False):
-        """Executa query parametrizada com placeholders ? (MySQL).
+        """Executa query parametrizada com placeholders %(name)s (MySQL named params).
 
         scalar=True retorna um valor escalar (ex: COUNT(*)); scalar=False
         (padrão) retorna list[dict], uma linha por dict.
         """
         async with self._pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cursor:
-                ordered_values = list((params or {}).values())
-                await cursor.execute(query, ordered_values)
+                # aiomysql usa %(name)s placeholders e espera um dict como parâmetro
+                await cursor.execute(query, params or {})
                 if scalar:
                     row = await cursor.fetchone()
                     return row[list(row.keys())[0]] if row else None
@@ -56,13 +56,16 @@ class MySQLAdapter(DatabaseAdapter):
             return False
 
     def translate_params(self, sql: str, param_names: list[str]) -> str:
-        """Traduz placeholders nomeados (:param) para MySQL (?).
+        """Traduz placeholders nomeados (:param) para MySQL (%(param)s).
+
+        aiomysql suporta named placeholders %(name)s, permitindo que um mesmo
+        parâmetro seja usado múltiplas vezes na query (como PostgreSQL com $1, $1, etc).
 
         Exemplo:
-            input:  "SELECT * FROM t WHERE x = :x AND y = :y", ["x", "y"]
-            output: "SELECT * FROM t WHERE x = ? AND y = ?"
+            input:  "SELECT * FROM t WHERE x = :x AND (y = :y OR z = :y)", ["x", "y"]
+            output: "SELECT * FROM t WHERE x = %(x)s AND (y = %(y)s OR z = %(y)s)"
         """
         translated = sql
         for name in param_names:
-            translated = re.sub(rf":{re.escape(name)}\b", "?", translated)
+            translated = re.sub(rf":{re.escape(name)}\b", f"%({name})s", translated)
         return translated

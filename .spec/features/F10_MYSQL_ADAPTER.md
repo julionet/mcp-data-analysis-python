@@ -488,33 +488,85 @@ Não aparece diretamente. MySQL é um tipo de data_source interno. As análises 
 
 ## 10. Histórico de Implementação
 
-### ✅ Implementação Completada (2026-09-27)
+### ✅ Implementação Completada (2026-09-28)
 
 **Arquivos criados:**
-- ✅ `analysis_app/adapters/mysql.py` (72 linhas) — MySQLAdapter completo com pool aiomysql
-- ✅ `analysis_app/tests/test_mysql_adapter.py` (81 linhas) — 8 testes unitários
+- ✅ `analysis_app/adapters/mysql.py` (44 linhas) — MySQLAdapter com named parameters `%(name)s`
+- ✅ `analysis_app/tests/test_mysql_adapter.py` (93 linhas) — 9 testes unitários + test de reutilização de parâmetros
+- ✅ `analysis_app/scripts/encrypt_credential.py` (44 linhas) — Script para criptografar credenciais
+- ✅ `analysis_app/scripts/README_SCRIPTS.md` (66 linhas) — Documentação de scripts
 
 **Arquivos modificados:**
 - ✅ `analysis_app/adapters/base.py` — `translate_params()` abstrato adicionado
 - ✅ `analysis_app/adapters/postgresql.py` — `translate_params()` implementado (migração de função global)
-- ✅ `analysis_app/adapters/factory.py` — MySQLAdapter registrado
+- ✅ `analysis_app/adapters/factory.py` — MySQLAdapter registrado (comentário sobre Sprint 2 atualizado)
 - ✅ `analysis_app/services/analysis_service.py` — refatorado para usar `adapter.translate_params()`
 - ✅ `analysis_app/tests/test_adapter_factory.py` — teste de MySQL adicionado
 - ✅ `analysis_app/requirements.txt` — `aiomysql>=0.2.0` adicionado
 
 **Testes:**
-- ✅ 22/22 testes passando (MySQL + Factory + Parameters)
-- ✅ translate_params: 5 variações testadas (single, multiple, order, word_boundary, empty)
+- ✅ 23/23 testes passando (MySQL + Factory + Parameters)
+- ✅ translate_params: 6 variações testadas (single, multiple, order, word_boundary, empty, reuse_same_param)
 - ✅ Adapter factory: PostgreSQL + MySQL + error handling
+- ✅ Connection tests: invalid credentials, no connection
 
-**Notas técnicas:**
-- Refatoração de `_translate_named_params()` como método abstrato `translate_params()` permite agnóstico de banco
-- PostgreSQL: `:param` → `$1, $2, ...` (posicional numerado)
-- MySQL: `:param` → `?, ?, ...` (posicional anônimo)
-- MongoDB e SQL Server seguirão o mesmo padrão em F9/F11
-- SQL armazenado com placeholders nomeados `:param` é usado por todos os bancos
+---
+
+### 🔧 Correções Realizadas Durante Implementação
+
+#### Correção 1: Placeholder Incorreto (Erro 1)
+**Problema:** aiomysql usa `%s` como placeholder (não `?`)
+```python
+# Antes:  translate_params() retornava :param → ?
+# Depois: translate_params() retorna :param → %s
+```
+**Impacto:** Resolveu `TypeError: not all arguments converted during string formatting`
+
+#### Correção 2: Parâmetros Reutilizados (Erro 2)
+**Problema:** Query com parâmetro repetido (ex: `:exame` aparecendo 2 vezes) falhava
+```python
+# Antes:  :param → %s (placeholder posicional simples)
+# Depois: :param → %(param)s (named parameters)
+```
+**Benefício:** Permite SQL agnóstico como PostgreSQL:
+```sql
+WHERE ... AND (desc LIKE %(termo)s OR %(termo)s IS NULL)
+```
+**Impacto:** Resolveu `TypeError: not enough arguments for format string`
+
+#### Correção 3: Tipo de Parâmetro (Erro 3)
+**Problema:** Convertendo dict em lista, mas named parameters precisam de dict
+```python
+# Antes:  ordered_values = list((params or {}).values())
+# Depois: await cursor.execute(query, params or {})
+```
+**Impacto:** Resolveu `TypeError: format requires a mapping`
+
+---
+
+### 📊 Comparação Final: PostgreSQL vs MySQL
+
+| Aspecto | PostgreSQL | MySQL (Novo) |
+|---------|-----------|-------------|
+| Driver | asyncpg | aiomysql |
+| Placeholder | `$1, $2, ...` | `%(name)s` |
+| Reutilização | ✅ $1 pode aparecer 2+ vezes | ✅ %(name)s pode aparecer 2+ vezes |
+| SQL Original | `:param` (nomeado) | `:param` (nomeado) |
+| Agnóstico | ✅ Sim | ✅ Sim |
+
+---
+
+### ✨ Características Finais
+
+- ✅ **Agnóstico de Banco** — SQL com `:param` funciona em PostgreSQL e MySQL
+- ✅ **Named Parameters** — Permite reutilização automática (como PostgreSQL $1, $1)
+- ✅ **Pool de Conexões** — Reutilizado entre execuções (aiomysql.create_pool)
+- ✅ **DictCursor** — Retorna resultados como `list[dict]`
+- ✅ **Testes Completos** — 23/23 passando (MySQL + Factory + Parameters + Analysis)
+- ✅ **Compatível com F4** — Execution Engine funciona sem modificações
+- ✅ **Script de Criptografia** — `encrypt_credential.py` para registrar credenciais
 
 ---
 
 **Documento de Especificação F10 — MySQL Adapter.**
-**Sprint 2 — Multi-DB Adapters (1/3 concluído).**
+**Sprint 2 — Multi-DB Adapters (1/3 concluído — 2026-09-28).**

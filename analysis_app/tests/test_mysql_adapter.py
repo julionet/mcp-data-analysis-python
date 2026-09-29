@@ -16,28 +16,29 @@ CONFIG = {
 
 class TestMySQLAdapter:
     def test_translate_params_single(self):
-        """Traduz um placeholder nomeado."""
+        """Traduz um placeholder nomeado para %(name)s (aiomysql named params)."""
         adapter = MySQLAdapter({})
         sql = "SELECT * FROM t WHERE x = :x"
         result = adapter.translate_params(sql, ["x"])
-        assert result == "SELECT * FROM t WHERE x = ?"
+        assert result == "SELECT * FROM t WHERE x = %(x)s"
 
     def test_translate_params_multiple(self):
         """Traduz múltiplos placeholders nomeados na ordem correta."""
         adapter = MySQLAdapter({})
         sql = "SELECT * FROM t WHERE x = :x AND y = :y AND z = :z"
         result = adapter.translate_params(sql, ["x", "y", "z"])
-        assert result == "SELECT * FROM t WHERE x = ? AND y = ? AND z = ?"
+        assert result == "SELECT * FROM t WHERE x = %(x)s AND y = %(y)s AND z = %(z)s"
 
     def test_translate_params_preserves_order(self):
-        """Ordem de ? segue param_names, não ordem de aparição no SQL."""
+        """Placeholders nomeados permitem reutilização do mesmo parâmetro."""
         adapter = MySQLAdapter({})
         sql = "SELECT * FROM t WHERE y = :y AND x = :x"
         result = adapter.translate_params(sql, ["x", "y"])
-        # Deve substituir em ordem de param_names: :x → ?, :y → ?
-        # Resultado será "SELECT * FROM t WHERE y = ? AND x = ?"
-        assert result.count("?") == 2
-        # Verificar que ambos foram substituídos (sem :x ou :y restantes)
+        # Deve substituir: :x → %(x)s, :y → %(y)s
+        # Resultado será "SELECT * FROM t WHERE y = %(y)s AND x = %(x)s"
+        assert "%(x)s" in result
+        assert "%(y)s" in result
+        # Verificar que foram substituídos (sem :x ou :y restantes)
         assert ":x" not in result
         assert ":y" not in result
 
@@ -47,7 +48,7 @@ class TestMySQLAdapter:
         sql = "SELECT :x_val, :x FROM t WHERE col = :x"
         result = adapter.translate_params(sql, ["x"])
         # Deve substituir apenas :x (com boundary), não :x_val
-        assert result.count("?") == 2  # :x_val e :x final
+        assert result.count("%(x)s") == 2  # Dois usos de :x
         assert ":x_val" in result  # :x_val não foi substituído (certo!)
 
     def test_translate_params_empty_list(self):
@@ -84,6 +85,15 @@ class TestMySQLAdapter:
         adapter = MySQLAdapter(bad_config)
         result = await adapter.test_connection()
         assert result is False
+
+    def test_translate_params_reuse_same_param(self):
+        """Permite reutilizar o mesmo parâmetro múltiplas vezes (como PostgreSQL)."""
+        adapter = MySQLAdapter({})
+        sql = "SELECT * FROM t WHERE (descricao LIKE CONCAT('%', :termo, '%') OR :termo IS NULL)"
+        result = adapter.translate_params(sql, ["termo"])
+        # :termo aparece 2 vezes, mas ambas viram %(termo)s
+        assert result.count("%(termo)s") == 2
+        assert ":termo" not in result
 
     def test_adapter_init_config(self):
         """Adapter armazena config corretamente."""
