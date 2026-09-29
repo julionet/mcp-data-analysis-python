@@ -35,7 +35,7 @@ Ter um `SQLServerAdapter` funcional — conecta via ODBC, executa queries parame
 - F10 (MySQL Adapter) — `translate_params()` abstrato já existe no `DatabaseAdapter` ✅
 
 **É dependência de:**
-- F12 (Docker Setup) — instalação do driver ODBC no `Dockerfile` (ver §7.2)
+- F13 (Docker Setup) — instalação do driver ODBC no `Dockerfile` (ver §7.2; renumerado de F12→F13 na revisão v1.12 de FEATURES_ROADMAP.md, que inseriu F12 "Autenticação")
 - F9 (Oracle Adapter) — reutiliza `tests/test_adapter_contract.py`, criado aqui
 - F16 (Unit Tests) — cobertura dos adapters
 
@@ -399,8 +399,8 @@ Windows (dev):
   Ambiente atual (verificado em 2026-09-28): ODBC Driver 17 for SQL Server (64-bit) instalado;
   Driver 18 NÃO instalado → usar "driver": "ODBC Driver 17 for SQL Server" na data_source local.
 
-Linux/Docker (F12): instalar msodbcsql17 ou msodbcsql18 via apt antes do pip install
-                     (ARQUITETURA.md §5.1) — entra no Dockerfile do F12.
+Linux/Docker (F13): instalar msodbcsql17 ou msodbcsql18 via apt antes do pip install
+                     (ARQUITETURA.md §5.1) — entra no Dockerfile do F13.
 ```
 
 ### 7.3 Schema de `connection_config` (SQL Server)

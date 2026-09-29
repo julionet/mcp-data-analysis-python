@@ -87,7 +87,8 @@ Sem mudança:
 ├─ adapters/base.py (contrato), postgresql.py, mysql.py, sqlserver.py
 ├─ volume_guard_service.py, cache_service.py, audit_service.py
 ├─ Schema do Config DB (data_sources.type é texto livre, sem CHECK/enum — verificado)
-└─ Dockerfile do F12 (thin mode não tem dependência de SO)
+└─ Dockerfile do F13 (thin mode não tem dependência de SO; renumerado de F12→F13
+   na revisão v1.12 de FEATURES_ROADMAP.md, que inseriu F12 "Autenticação")
 ```
 
 ### 4.2 Fluxo de Dados
@@ -371,7 +372,7 @@ oracledb>=2.0.0
 ```
 > Verificado em 2026-09-28 (venv de teste, Python 3.13.2): `oracledb 26.0.1` instala como wheel binário, roda em modo thin por padrão e expõe `create_pool_async`, `connect_async`, `makedsn(service_name=|sid=)`, `AsyncConnection.call_timeout` e o parâmetro `fetch_lobs`/`fetch_decimals` em `cursor.execute`. O piso `>=2.0.0` (primeira versão com asyncio, a confirmar) deve ser validado no `pip install`.
 
-**Sem dependência de sistema operacional:** thin mode dispensa Oracle Client/Instant Client — o `Dockerfile` do F12 não muda por causa do Oracle.
+**Sem dependência de sistema operacional:** thin mode dispensa Oracle Client/Instant Client — o `Dockerfile` do F13 não muda por causa do Oracle.
 
 ### 7.3 Schema de `connection_config` (Oracle)
 ```json

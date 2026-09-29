@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.11 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server + Oracle, TLS obrigatório, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-28 (atualizado 2026-09-28 — F9 passa de MongoDB para Oracle)
+**Versão:** 1.12 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-29 (atualizado 2026-09-29 — nova F12: Autenticação e Controle de Acesso via Perfis)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.11 → v1.12):** documento aprovado. Adicionada **F12: Autenticação e Controle de Acesso via Perfis**, retomando e revisando FB2 (UserIdentificationService) e FB4 (RBAC) do Backlog Futuro (§9) — a diferença para o desenho original de FB2/FB4 é a camada intermediária de **perfis** (N:N usuário↔perfil↔analyses) e o mecanismo de token **opaco** (hash SHA-256, não JWT nem OAuth2 — ver ARQUITETURA.md ADR-007 para o racional completo da escolha). F12 entra na Sprint 3, antes do antigo F12 (Docker Setup) — decisão: autenticação é pré-requisito para expor o servidor em produção interna (ARQUITETURA.md §9.2), então precisa existir antes do deploy, mesmo ainda dentro da rede confiável. Todas as features de F12 em diante foram renumeradas em +1 (F12→F13, ..., F21→F22). `execution_history` (F8) ganha `user_id` (nullable, FK → `users.id`) — decisão desta revisão: já que agora existe identificação de usuário, o histórico de execução passa a registrar quem executou cada análise. NEGOCIO.md revisado: nova RF5, RNF5, Restrição T5 e §12 (Roadmap Futuro) — autenticação sai do "Fora de Escopo V1.0"/Roadmap Futuro (V1.1) e entra nesta mesma versão, como F12. ARQUITETURA.md revisado: novo ADR-007, novas tabelas no schema (§2.2), novos componentes (AuthService, UserRepository/ProfileRepository/AccessTokenRepository), nova seção de fluxo (§3.5). DATABASE_SCHEMA.md ganha as tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`. Spec completa em `features/F12_AUTENTICACAO_PERFIS.md`.
 
 > **Nota de revisão (v1.10 → v1.11):** F9 deixa de ser "MongoDB Adapter" e passa a ser **"Oracle Adapter"** (Oracle Database 12.1+, `python-oracledb` em modo thin, sem dependência de SO). MongoDB removido de vez do escopo de V1.0 (não vai para o Backlog Futuro). F9 rebaixada de 🟠 Alta para 🟡 Média — não há instância Oracle para teste no momento e a validação manual fica pendente (F9 pode ser dada como Done sem validação manual). Esforço mantido em 1.5d; dependência passa a `F2, F11` (reutiliza `tests/test_adapter_contract.py`, criado no F11). Ordem de implementação da Sprint 2: F10 ✅ → F11 → F9. O F9 também altera `analysis_service.py` (alias do wrapper `COUNT(*)`: `AS sub` → `sub`). Specs: `features/F11_SQLSERVER_ADAPTER.md` e `features/F9_ORACLE_ADAPTER.md`.
 
@@ -135,14 +137,47 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F12 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8 | ⬜ Todo |
-| F13 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
-| F14 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
-| F15 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
-| F16 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F11 | ⬜ Todo |
-| F17 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F16 | ⬜ Todo |
+| F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 2.5d | F5 | ⬜ Todo |
+| F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | ⬜ Todo |
+| F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
+| F15 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
+| F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
+| F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
+| F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
 
-**Total Sprint 3:** ~9 dias
+**Total Sprint 3:** ~11.5 dias
+
+**F12 em detalhe (Autenticação e Controle de Acesso via Perfis):**
+```
+Objetivo: restringir list_tools()/call_tool() por usuário autenticado, sem
+depender de OAuth2 nem JWT — ver ARQUITETURA.md ADR-007 para o racional
+completo da escolha de token opaco.
+
+Modelo de dados: usuário (N:N) perfil (N:N) analyses — um usuário só vê/executa
+uma analysis se ela estiver ativa E vinculada a um perfil ativo vinculado a ele.
+
+Escopo:
+├─ Tabelas novas: users, profiles, user_profiles, profile_analyses, access_tokens
+│  (ver DATABASE_SCHEMA.md §2.6-2.10 e ARQUITETURA.md §2.2)
+├─ Token opaco (secrets.token_urlsafe(32)), hash SHA-256 persistido — nunca o
+│  token bruto
+├─ Emissão administrativa via script (scripts/generate_access_token.py),
+│  sem endpoint de login/senha no servidor
+├─ N tokens por usuário (1 por cliente MCP, com `label` identificando qual)
+├─ Expiração padrão 90 dias (ACCESS_TOKEN_EXPIRATION_DAYS via .env), renovação
+│  manual pelo admin (reemissão do script)
+├─ list_tools() filtra analyses pela permissão efetiva do usuário autenticado
+│  (JOIN profile_analyses + user_profiles, is_active em analyses E profiles)
+├─ call_tool() revalida a permissão (não confia só no que list_tools() já mostrou)
+├─ Usuário bloqueado (is_blocked=true) perde acesso imediatamente — checagem
+│  sempre contra o BD, nunca contra claim armazenada no token
+└─ execution_history ganha user_id (nullable) — quem executou cada análise
+
+Sem JWT, sem OAuth2, sem endpoint de login — ver ADR-007 (ARQUITETURA.md §7)
+para as 3 alternativas comparadas e por que token opaco venceu para este
+projeto (multi-cliente heterogêneo, rede interna confiável, bloqueio precisa
+ter efeito imediato). Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
+```
 
 ---
 
@@ -150,16 +185,16 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F18 | End-to-End Testing (Multi-Cliente) | 🟠 Alta | 1d | F17 | ⬜ Todo |
-| F19 | Production Deployment Guide (Local + Remoto) | 🟠 Alta | 1d | F12 | ⬜ Todo |
-| F20 | User Documentation (Setup por Cliente MCP) | 🟡 Média | 1d | F15 | ⬜ Todo |
-| F21 | Demo & Training (com múltiplos clientes) | 🟡 Média | 1d | F18 | ⬜ Todo |
+| F19 | End-to-End Testing (Multi-Cliente) | 🟠 Alta | 1d | F18 | ⬜ Todo |
+| F20 | Production Deployment Guide (Local + Remoto) | 🟠 Alta | 1d | F13 | ⬜ Todo |
+| F21 | User Documentation (Setup por Cliente MCP) | 🟡 Média | 1d | F16 | ⬜ Todo |
+| F22 | Demo & Training (com múltiplos clientes) | 🟡 Média | 1d | F19 | ⬜ Todo |
 
 **Total Sprint 4:** ~4 dias
 
-**Release:** V1.0 (MVP Local Multi-Cliente, sem autenticação, com PostgreSQL + MySQL + SQL Server + Oracle)
+**Release:** V1.0 (MVP Local Multi-Cliente, com autenticação por token + perfis, com PostgreSQL + MySQL + SQL Server + Oracle)
 
-**Total geral do projeto:** 21 features, ~27.5 dias (≈ 5.5 semanas com buffer normal de imprevistos — reduzido de 23 features/~30 dias na revisão v1.8 pela remoção de F9+F10 "Version Management + Rollback" (3d total): como não há Handlers, não há necessidade de versionamento de análises em V1.0. O histórico de execuções (F8) fornece auditoria suficiente — ver nota de revisão no topo do documento).
+**Total geral do projeto:** 22 features, ~30 dias (≈ 6 semanas com buffer normal de imprevistos — acrescida em +1 feature/+2.5d na revisão v1.12 pela adição de F12 "Autenticação e Controle de Acesso via Perfis" — ver nota de revisão no topo do documento).
 
 ---
 
@@ -287,7 +322,7 @@ XXX_PARAM=value
 
 - Todas as features de Sprint 1 compartilham o mesmo processo `uvicorn` — não há middleware de autenticação a considerar em nenhuma delas.
 - F6 (validação multi-cliente) não é um serviço novo de código: é um passo de teste manual/integração que confirma que a arquitetura Streamable HTTP atende ao requisito de múltiplos clientes simultâneos.
-- Quando o requisito de autenticação voltar ao escopo (ver NEGOCIO.md §12 e ARQUITETURA.md §12), as features `ClientIdentificationService` e `UserIdentificationService` podem ser reintroduzidas aqui como novas entradas (numeração F24+, para não conflitar com o que já foi implementado).
+- Autenticação (F12, retomando FB2/FB4 do Backlog Futuro — §9 abaixo) entrou no escopo desta versão, com um desenho revisado (perfis + token opaco) — ver nota de revisão v1.12 no topo do documento. `ClientIdentificationService` (FB1, qual cliente MCP/software está chamando — diferente de "qual usuário") segue fora de escopo, sem requisito de negócio que o justifique até agora.
 - **Lições técnicas do protótipo F0** (`F0_PROTOTIPO_MCP_MEMORIA.md`), a considerar na implementação real de F1 para não serem redescobertas do zero: (1) TLS obrigatório mesmo em rede interna — clientes MCP reais recusam `http://` simples; (2) `mcp` precisa de teto de versão (`<2.0.0`) — a API de baixo nível usada no ADR-006 muda na v2.0.0; (3) a CLI do uvicorn não negocia ALPN, exigindo `ssl_context_factory` programático; (4) montar o endpoint MCP via `app.mount()` sem uma rota exata adicional gera redirect 307 em `/mcp` sem barra final; (5) CORS é necessário mesmo sem navegador tradicional envolvido, por conta de clientes desktop que validam o conector via `fetch()` no processo de renderer. Detalhes e evidências completas no README do protótipo (`mcp_prototype/README.md`).
 
 ---
@@ -350,7 +385,7 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 21/21 | 9/21 🟩 |
+| **Features Implementadas** | 22/22 | 9/22 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 2 (PostgreSQL, MySQL) ✅ |
@@ -382,22 +417,23 @@ Sprint 2 (Dias 10-14): Multi-DB
 ├─ Dia 11-12: F11 (SQL Server Adapter)
 └─ Dia 13-14: F9  (Oracle Adapter)
 
-Sprint 3 (Dias 15-24): Production-Ready
-├─ Dia 15-16: F12 (Docker Local + Remote)
-├─ Dia 17:    F13 (Error Handling)
-├─ Dia 18-19: F14 (Performance)
-├─ Dia 20:    F15 (API Docs)
-├─ Dia 21-22: F16 (Unit Tests)
-└─ Dia 23:    F17 (Integration Tests)
+Sprint 3 (Dias 15-26): Production-Ready
+├─ Dia 15-17: F12 (Autenticação e Controle de Acesso via Perfis)
+├─ Dia 18-19: F13 (Docker Local + Remote)
+├─ Dia 20:    F14 (Error Handling)
+├─ Dia 21-22: F15 (Performance)
+├─ Dia 23:    F16 (API Docs)
+├─ Dia 24-25: F17 (Unit Tests)
+└─ Dia 26:    F18 (Integration Tests)
 
-Sprint 4 (Dias 25-28): Deploy
-├─ Dia 25: F18 (E2E Testing)
-├─ Dia 26: F19 (Deploy Guide)
-├─ Dia 27: F20 (User Docs)
-└─ Dia 28: F21 (Demo) → RELEASE V1.0
+Sprint 4 (Dias 27-30): Deploy
+├─ Dia 27: F19 (E2E Testing)
+├─ Dia 28: F20 (Deploy Guide)
+├─ Dia 29: F21 (User Docs)
+└─ Dia 30: F22 (Demo) → RELEASE V1.0
 ```
 
-**Total:** ~27.5 dias úteis (≈ 5.5 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
+**Total:** ~30 dias úteis (≈ 6 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
 
 ---
 
@@ -430,14 +466,13 @@ FB1: ClientIdentificationService
 ├─ Entrada: headers HTTP (User-Agent, client identifier)
 └─ Armazena: tabela mcp_clients + execution_history.client_llm_name
 
-FB2: UserIdentificationService
-├─ Propósito: rastrear qual pessoa está usando a plataforma, com quota
-├─ Entrada: API Key por usuário (ex.: header Authorization: Bearer <token>)
-└─ Armazena: tabelas users, user_api_keys + execution_history.user_id
-
 FB3: Rate Limiting por Usuário
-FB4: RBAC (permissões por análise)
 FB5: SSO/OAuth (Azure AD, Google, LDAP)
+├─ Nota: avaliado como alternativa a F12 (ver ARQUITETURA.md ADR-007) e descartado
+│  para V1.0 — clientes MCP heterogêneos (nem todo cliente implementa o fluxo de
+│  autorização OAuth do MCP) e rede interna confiável não justificam a complexidade
+│  de um authorization server. Pode voltar se a plataforma sair da rede confiável.
+
 FB6: Analysis Version Management
 ├─ Propósito: rastrear histórico de mudanças em análises (comparar versões, diff, comentários)
 └─ Nota: removido da Sprint 2 (v1.8→v1.9) pois não há Handlers — versionamento de dados
@@ -449,9 +484,11 @@ FB7: Analysis Rollback Mechanism
    é operação manual no BD até necessidade real aparecer
 ```
 
-A especificação técnica completa (código de middleware, schema SQL, fluxos) que existia para FB1/FB2 fica preservada como referência para quando esse trabalho for retomado — não é necessário redesenhar do zero. FB6/FB7 (Version Management + Rollback) também podem ser reintroduzidas se a gestão de mudanças em análises se tornar crítica; o schema `analysis_versions` já existe no BD para suportar isso futuro.
+~~FB2: UserIdentificationService~~ e ~~FB4: RBAC (permissões por análise)~~ — implementadas nesta versão como **F12** (Autenticação e Controle de Acesso via Perfis), com um desenho revisado: perfis N:N (usuário↔perfil↔analyses) em vez de API Key direta + quota, e token opaco em vez de simplesmente "API Key" — ver ARQUITETURA.md ADR-007 e `features/F12_AUTENTICACAO_PERFIS.md`.
+
+A especificação técnica completa (código de middleware, schema SQL, fluxos) que existia para FB1 fica preservada como referência para quando esse trabalho for retomado — não é necessário redesenhar do zero. FB6/FB7 (Version Management + Rollback) também podem ser reintroduzidas se a gestão de mudanças em análises se tornar crítica; o schema `analysis_versions` já existe no BD para suportar isso futuro.
 
 ---
 
-**Documento de Roadmap Completo — Multi-Cliente, Sem Autenticação em V1.0, Sem Versionamento de Análises.**
-**Sprint 1 concluído (8/8 features). Próximas: Sprint 2 (Multi-DB) + Sprint 3/4 (Production + Deploy).**
+**Documento de Roadmap Completo — Multi-Cliente, Com Autenticação por Token + Perfis (F12), Sem Versionamento de Análises.**
+**Sprint 1 concluído (8/8 features). Próximas: Sprint 2 (Multi-DB) + Sprint 3 (Production, incluindo F12 Autenticação) + Sprint 4 (Deploy).**

@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.15 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-28
+**Versão:** 1.16 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-29
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.15 → v1.16):** documento aprovado. Adicionada autenticação (**F12** — ver FEATURES_ROADMAP.md v1.12 e NEGOCIO.md v1.9 RF5): novo **ADR-007** (reintroduzido com um desenho diferente do ADR-007 original removido na v1.2 — token opaco em vez de API Key simples, com perfis N:N) decide token opaco (hash SHA-256) em vez de JWT ou OAuth2, com o racional completo das 3 alternativas comparadas. Novas tabelas no schema (§2.2): `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id` (nullable). Novos componentes (§2.1): `AuthService` na camada de Services, `UserRepository`/`ProfileRepository`/`AccessTokenRepository` na camada de Data Access. Nova seção **§3.5** (Fluxo de Autenticação e Autorização). `mcp_transport/tools.py` (`list_tools`/`call_tool`) passa a exigir um `AuthenticatedUser` resolvido a partir do header `Authorization: Bearer <token>`. Atualizados: §1.2 (topologia — exemplo de config de cliente com header), §2.1, §2.2, nova §3.5, §5.2 (estrutura de pastas — `security/token_auth.py`, novos repos, `scripts/generate_access_token.py`), §8.1 (autenticação sai de "❌ Não implementar" para "✅ Implementar"), §9.1 (exemplo de config de cliente), §12 (Roadmap Arquitetural), §13 (tabela de tecnologias). Nenhuma dependência nova em `requirements.txt` — o mecanismo usa só `secrets`/`hashlib` da stdlib. Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
 
 > **Nota de revisão (v1.14 → v1.15):** MongoDB removido de V1.0 e substituído por **Oracle** (F9 — ver `features/F9_ORACLE_ADAPTER.md`). Atualizados: diagrama de contexto (§1.1), componentes (§2.1), comentário do schema (§2.2), Factory (§4.2), dependências (§5.1: `motor` → `oracledb>=2.0.0`; `aioodbc`/`pyodbc` sem pin exato — `pyodbc==5.0.1` não tem wheel para Python 3.13; validado com `aioodbc 0.5.0`/`pyodbc 5.3.0`), estrutura de pastas (§5.2), startup (§6.1), exemplo de `.env` (§8.2, sem `MONGODB_CONNECTION_STRING` — credenciais de data source vêm de `connection_config`) e tabela de tecnologias (§13). Com o MongoDB fora, todos os adapters são SQL e o wrapper de `COUNT(*)` do Volume Guard vale para todos. Regras do subconjunto comum de SQL (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único, todo parâmetro declarado presente no SQL) registradas em F11 §8.4 e F9 §8.4. Oracle usa `oracledb` em thin mode (sem dependência de SO — só o SQL Server exige driver ODBC no `Dockerfile` do F12). O alias do wrapper passa de `AS sub` para `sub` (Oracle rejeita `AS` em alias de tabela; PostgreSQL, MySQL e SQL Server aceitam) — F9 §4.1. Ordem de implementação da Sprint 2: F10 ✅ → F11 → F9.
 
@@ -66,13 +68,14 @@
 
 ### 1.2 Topologia Local vs Remoto
 
-#### **Local (Rede Interna — Multi-Cliente, Sem Autenticação)**
+#### **Local (Rede Interna — Multi-Cliente, Autenticado por Token)**
 ```
 ┌────────────────────────────────────────┐
 │   Máquina na Rede Interna              │
 │  ├─ Processo uvicorn (porta 3000)     │
 │  │  ├─ FastAPI Server                 │
 │  │  ├─ MCP Interface (Streamable HTTP)       │
+│  │  ├─ AuthService (token opaco)      │
 │  │  └─ Volume Guard (pré-check)       │
 │  ├─ PostgreSQL (config)                │
 │  └─ PostgreSQL (data source)           │
@@ -81,9 +84,11 @@
 Claude Desktop   Gemini Desktop    OpenAI Desktop
 (conector remoto)(conector remoto) (conector remoto)
 (via Streamable HTTP)   (via Streamable HTTP)    (via Streamable HTTP)
+(Bearer token X)        (Bearer token Y)         (Bearer token Z)
 
-Nota: qualquer cliente MCP compatível com Streamable HTTP funciona,
-sem necessidade de headers de autenticação em V1.0.
+Nota: qualquer cliente MCP compatível com Streamable HTTP e capaz de enviar
+um header customizado funciona — cada usuário/cliente usa seu próprio token
+(ver ADR-007, §3.5).
 ```
 
 **Exemplo de configuração no cliente (formato varia por app, mas o conceito é o mesmo):**
@@ -91,14 +96,17 @@ sem necessidade de headers de autenticação em V1.0.
 {
   "mcpServers": {
     "analysis": {
-      "url": "https://192.168.1.50:3000/mcp"
+      "url": "https://192.168.1.50:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer <token gerado por scripts/generate_access_token.py>"
+      }
     }
   }
 }
 ```
 
 > `https://`, não `http://` — TLS é obrigatório mesmo em rede interna (ver ADR-006). Certificado confiável nas máquinas clientes: mkcert (máquina única) ou CA interna instalada em cada cliente (múltiplas máquinas).
-Sem `command`, `args` ou `env` — o servidor já está rodando de forma independente na rede; o cliente só aponta para a URL.
+Sem `command`, `args` ou `env` — o servidor já está rodando de forma independente na rede; o cliente só aponta para a URL. O campo exato para o header de autenticação varia por cliente MCP (alguns usam `headers`, outros um campo dedicado "API Key"/"Token") — o conceito (`Authorization: Bearer <token>`) é o mesmo em todos.
 
 #### **Remoto (Produção — Futuro)**
 ```
@@ -126,8 +134,10 @@ Sem `command`, `args` ou `env` — o servidor já está rodando de forma indepen
 │  └────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────┘
 
-⚠️ Ao expor remotamente (fora da rede confiável), autenticação e
-identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
+⚠️ Ao expor remotamente (fora da rede confiável), autenticação por token
+(já implementada em V1.0, ver ADR-007) deixa de ser suficiente sozinha —
+identificação de cliente MCP, rate limiting e SSO/OAuth DEVEM ser avaliados
+(ver §12).
 ```
 
 ---
@@ -143,15 +153,19 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │    MCP Server Interface (Streamable HTTP, Multi-Cliente)   │   │
 │  │                                                      │   │
 │  │  Aceita de QUALQUER cliente MCP compatível          │   │
-│  │  com Streamable HTTP, simultaneamente, sem autenticação:   │   │
+│  │  com Streamable HTTP, simultaneamente, autenticado  │   │
+│  │  por token (Authorization: Bearer <token>, ver §3.5):│   │
 │  │  ├─ Claude Desktop                                  │   │
 │  │  ├─ Gemini Desktop                                  │   │
 │  │  ├─ OpenAI Desktop                                  │   │
 │  │  └─ Qualquer futuro cliente com MCP padrão          │   │
 │  │                                                      │   │
-│  │  Endpoints Padrão MCP:                             │   │
-│  │  ├─ list_tools()         → todas análises          │   │
-│  │  └─ call_tool()          → executa análise         │   │
+│  │  Endpoints Padrão MCP (ambos exigem token válido    │   │
+│  │  e resolvem AuthenticatedUser antes de prosseguir): │   │
+│  │  ├─ list_tools()         → analyses liberadas       │   │
+│  │  │                          para o usuário (§3.5)   │   │
+│  │  └─ call_tool()          → revalida permissão e     │   │
+│  │                             executa análise         │   │
 │  │  (list_resources()/read_resource() disponíveis no  │   │
 │  │   SDK mas não implementados em V1.0 — decisão do   │   │
 │  │   F5, ver F5_MCP_TOOLS_INTEGRATION.md §3: sem      │   │
@@ -175,9 +189,14 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │  │  ├─ resolve_ttl(cache_frequency) -> int | None           │   │
 │  │  │  └─ get_or_execute(key, ttl, confirmar_volume_alto, executor) │   │
 │  │  │     (invalidate_by_source fora do F7 — backlog futuro)   │   │
-│  │  └─ AuditService (Simplificado — sem usuário/cliente)│  │
-│  │     ├─ log_execution(analysis_id, params, result)  │   │
-│  │     └─ get_execution_history()                     │   │
+│  │  ├─ AuditService (grava execution_history.user_id, │   │
+│  │  │  │  quando disponível — F12)                    │   │
+│  │  │  ├─ log_execution(analysis_id, params, result,  │   │
+│  │  │  │                 user_id)                     │   │
+│  │  │  └─ get_execution_history()                     │   │
+│  │  └─ AuthService (F12 — ver §3.5, ADR-007)           │   │
+│  │     ├─ authenticate(raw_token) -> AuthenticatedUser │   │
+│  │     └─ get_allowed_analysis_ids(user_id) -> set[UUID]│  │
 │  └─────────────────────────────────────────────────────┘   │
 │                           ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -194,7 +213,10 @@ identificação de cliente/usuário DEVEM ser reintroduzidas (ver §12).
 │  │         Data Access (Repository)                   │   │
 │  │  ├─ AnalysisRepository                             │   │
 │  │  ├─ DataSourceRepository                           │   │
-│  │  └─ ExecutionRepository                            │   │
+│  │  ├─ ExecutionRepository                            │   │
+│  │  ├─ UserRepository (F12)                           │   │
+│  │  ├─ ProfileRepository (F12)                        │   │
+│  │  └─ AccessTokenRepository (F12)                    │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -245,11 +267,59 @@ CREATE TABLE analysis_steps (
     UNIQUE(analysis_id, step_order)
 );
 
--- Tabela 4: Histórico de Execuções (Simplificado — sem identificação de usuário/cliente)
+-- Tabela 4: Usuários com acesso à plataforma (F12)
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    external_id VARCHAR(255) UNIQUE,  -- identificador externo (login/e-mail/matrícula), opcional
+    is_blocked BOOLEAN DEFAULT false,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tabela 5: Perfis de acesso (F12)
+CREATE TABLE profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) UNIQUE NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Tabela 6: N:N usuário <-> perfil (F12)
+CREATE TABLE user_profiles (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, profile_id)
+);
+
+-- Tabela 7: N:N perfil <-> analyses (F12)
+CREATE TABLE profile_analyses (
+    profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    analysis_id UUID NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
+    PRIMARY KEY (profile_id, analysis_id)
+);
+
+-- Tabela 8: Tokens de acesso — opacos, só o hash é persistido (F12)
+CREATE TABLE access_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash CHAR(64) NOT NULL UNIQUE,  -- SHA-256 hex do token bruto
+    label VARCHAR(255),                    -- ex.: "Claude Desktop - notebook Julio"
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_used_at TIMESTAMP
+);
+
+-- Tabela 9: Histórico de Execuções (F12 adiciona user_id — quem executou)
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),
     analysis_version_id UUID,  -- mantida para compatibilidade futura se FB6/FB7 forem implementadas
+    user_id UUID REFERENCES users(id),  -- nullable: quem executou (F12); NULL para execuções pré-F12
 
     parameters JSONB,
     status VARCHAR(50),  -- success, failed, timeout
@@ -266,9 +336,12 @@ CREATE TABLE execution_history (
 CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
+CREATE INDEX idx_execution_history_user ON execution_history(user_id);
+CREATE INDEX idx_access_tokens_hash ON access_tokens(token_hash);
+CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 ```
 
-> As tabelas `mcp_clients`, `users` e `user_api_keys`, e as colunas `user_id`, `username`, `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history`, foram removidas de V1.0. A especificação completa delas (com código de middleware, repositórios etc.) fica preservada como referência para quando esse requisito voltar ao escopo — ver §12 Roadmap Arquitetural.
+> As tabelas `mcp_clients` e `user_api_keys` (do desenho original de FB1/FB2, removido em v1.2) seguem fora de V1.0 — `mcp_clients` porque identificação de cliente MCP/software (FB1) continua sem requisito de negócio; `user_api_keys` porque F12 (§2.2 acima) usa um desenho diferente (`access_tokens`, token opaco com hash, sem "API Key" nomeada por serviço externo). As colunas `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history` continuam fora de escopo pelo mesmo motivo (FB1). `users` e `user_id` em `execution_history`, removidas em v1.2, **voltam nesta revisão (F12)** com um desenho revisado (perfis N:N em vez de API Key + quota direta) — ver ADR-007 e nota de revisão v1.16 no topo do documento.
 >
 > A tabela `custom_handlers` também foi removida do schema (revisão v1.9) — a camada de Handlers Python deixou de existir; ver nota de revisão no topo do documento e `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md`.
 
@@ -493,6 +566,70 @@ migration de schema é necessária além da remoção de `custom_handlers` (§2.
 
 ---
 
+### 3.5 Fluxo: Autenticação e Autorização (F12)
+
+Toda chamada MCP (`list_tools()`/`call_tool()`) chega com o header HTTP
+`Authorization: Bearer <token>`, validado antes de qualquer lógica de negócio.
+Diferente de um JWT, o token é **opaco** — a validação sempre consulta o BD
+(ver ADR-007 para o racional completo dessa escolha).
+
+```
+1. Cliente MCP envia Authorization: Bearer <token> em toda requisição ao /mcp
+2. AuthService.authenticate(raw_token):
+   ├─ hash = sha256(raw_token)
+   ├─ AccessTokenRepository.get_by_hash(hash)
+   │    └─ não encontrado, revoked_at != NULL, ou expires_at < now() → 401,
+   │       PARA aqui (nenhuma query de negócio é feita)
+   ├─ UserRepository.get_by_id(token.user_id)
+   │    └─ não encontrado ou is_blocked=true → 401, PARA aqui
+   ├─ AccessTokenRepository.touch_last_used(token.id) — observabilidade,
+   │  não bloqueia o fluxo mesmo se falhar
+   └─ Retorna AuthenticatedUser(id, name)
+
+3. list_tools(current_user):
+   └─ AnalysisService.get_allowed_analyses(current_user.id)
+        └─ SELECT DISTINCT a.* FROM analyses a
+           JOIN profile_analyses pa ON pa.analysis_id = a.id
+           JOIN user_profiles up    ON up.profile_id  = pa.profile_id
+           JOIN profiles p          ON p.id = pa.profile_id
+           WHERE up.user_id = :user_id AND a.is_active = true AND p.is_active = true
+           -- recalculada a cada chamada — nenhuma permissão fica cacheada no token
+
+4. call_tool(name, arguments, current_user):
+   ├─ Resolve a análise pelo nome (igual hoje)
+   ├─ REVALIDA a permissão (mesma query do passo 3, filtrada por analysis_id)
+   │    └─ análise inexistente/inativa/não permitida para o usuário → status
+   │       "error", nunca executa — mesmo se a tool apareceu num list_tools()
+   │       anterior (perfil pode ter mudado, ou o usuário foi bloqueado, entre
+   │       as duas chamadas)
+   └─ AnalysisService.execute(analysis.id, arguments, ..., user_id=current_user.id)
+        └─ AuditService.log_execution(..., user_id=current_user.id) — F8 passa
+           a registrar quem executou (execution_history.user_id)
+```
+
+**Emissão e renovação de token — fora do fluxo MCP, administrativa:**
+```
+scripts/generate_access_token.py --user-id <uuid> --expires-days 90
+  ├─ token = secrets.token_urlsafe(32)  -- gerado 1x, nunca reconstruído
+  ├─ AccessTokenRepository.create(user_id, hash=sha256(token), expires_at, label)
+  └─ Imprime o token bruto 1 única vez — não fica salvo em texto puro em lugar nenhum
+
+Renovação: quando o token expira, o admin roda o script de novo e reenvia o
+novo token para o usuário atualizar a config do cliente MCP. Sem self-service,
+sem endpoint de login (ver ADR-007, "Alternativas Rejeitadas").
+```
+
+> **Nota sobre acesso ao header de autenticação dentro de `list_tools()`/`call_tool()`:**
+> o SDK `mcp` usado neste projeto (`mcp>=1.9.0,<2.0.0`, classe de baixo nível `Server`,
+> ver ADR-006) expõe os decorators `list_tools()`/`call_tool()` sem um parâmetro de
+> `Request` direto — como o F12 depende de extrair e validar o `Authorization` por
+> requisição, a forma exata de passar o `AuthenticatedUser` resolvido (middleware
+> ASGI + `contextvar`, ou outro mecanismo do SDK) é um detalhe a confirmar durante a
+> implementação (ver `features/F12_AUTENTICACAO_PERFIS.md`, §4.1) — não muda nenhuma
+> decisão deste documento, só o "como" de threading do contexto de autenticação.
+
+---
+
 ## 4. Padrões de Design
 
 ### 4.1 Repository Pattern
@@ -596,6 +733,49 @@ executor = InProcessExecutor() if is_light else AsyncExecutor()
 result = await executor.execute(analysis_id, params)
 ```
 
+### 4.5 Token Auth (F12 — ver ADR-007, §3.5)
+
+Sem Registry, sem JWT, sem OAuth client — um módulo leve (`security/token_auth.py`)
+com hashing e uma função de autenticação, consultada pelo `AuthService`:
+
+```python
+import hashlib
+import secrets
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+
+def generate_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+@dataclass
+class AuthenticatedUser:
+    id: str
+    name: str
+
+
+class InvalidTokenError(Exception):
+    pass
+
+
+async def authenticate(raw_token: str, token_repo, user_repo) -> AuthenticatedUser:
+    token = await token_repo.get_by_hash(hash_token(raw_token))
+    if token is None or token.revoked_at is not None or token.expires_at < datetime.now(timezone.utc):
+        raise InvalidTokenError("Token inválido ou expirado")
+
+    user = await user_repo.get_by_id(token.user_id)
+    if user is None or user.is_blocked:
+        raise InvalidTokenError("Usuário bloqueado ou inexistente")
+
+    await token_repo.touch_last_used(token.id)
+    return AuthenticatedUser(id=user.id, name=user.name)
+```
+
 ---
 
 ## 5. Stack Técnico
@@ -655,7 +835,7 @@ python-dotenv==1.0.0
 uuid6==1.0.3
 ```
 
-> ⚠️ **Dependência de SO para SQL Server:** `pyodbc`/`aioodbc` precisam do driver ODBC nativo instalado no sistema (não é só `pip install`) — no Linux/Docker, isso significa instalar o pacote `msodbcsql17` (ou `18`) da Microsoft via `apt` antes de instalar os pacotes Python. Isso entra no `Dockerfile` na F12 (Docker Setup) e é um pré-requisito manual se rodar fora de container.
+> ⚠️ **Dependência de SO para SQL Server:** `pyodbc`/`aioodbc` precisam do driver ODBC nativo instalado no sistema (não é só `pip install`) — no Linux/Docker, isso significa instalar o pacote `msodbcsql17` (ou `18`) da Microsoft via `apt` antes de instalar os pacotes Python. Isso entra no `Dockerfile` na F13 (Docker Setup) e é um pré-requisito manual se rodar fora de container.
 
 ### 5.2 Python Structure
 
@@ -681,28 +861,43 @@ analysis_app/
 │   ├── analysis_service.py   # Core execution logic
 │   ├── volume_guard_service.py  # Pré-checagem de linhas/KB (ver §3.4, §4.3)
 │   ├── cache_service.py      # Caching logic
-│   └── audit_service.py      # Logging (simplificado)
+│   ├── audit_service.py      # Logging (grava user_id — F12)
+│   └── auth_service.py       # F12 — authenticate() + get_allowed_analysis_ids() (§3.5)
+│
+├── security/
+│   ├── __init__.py
+│   ├── crypto.py             # Fernet — cifra connection_config.password (já existente)
+│   └── token_auth.py         # F12 — generate_token()/hash_token()/authenticate() (§4.5)
 │
 ├── repositories/
 │   ├── __init__.py
 │   ├── base.py
 │   ├── analysis_repo.py
 │   ├── data_source_repo.py
-│   └── execution_repo.py
+│   ├── execution_repo.py
+│   ├── user_repo.py          # F12
+│   ├── profile_repo.py       # F12
+│   └── access_token_repo.py  # F12
 │
 ├── schemas/
 │   ├── __init__.py
 │   ├── analysis.py           # Pydantic models
 │   ├── data_source.py
 │   ├── execution.py
-│   └── analysis_parameters.py  # to_json_schema() / to_pydantic_model() — ver proposta §5
+│   ├── analysis_parameters.py  # to_json_schema() / to_pydantic_model() — ver proposta §5
+│   └── auth.py                # F12 — AuthenticatedUser e afins
 │
 ├── mcp_transport/             # nome definitivo — "mcp/" colide com o SDK `mcp` importado
 │   │                          # dentro do próprio pacote (confirmado na implementação de F1)
 │   ├── __init__.py
-│   └── tools.py              # MCP tools (list_tools, call_tool) — resources.py
+│   └── tools.py              # MCP tools (list_tools, call_tool) — exigem
+│                              # AuthenticatedUser desde F12 (§3.5). resources.py
 │                              # (list_resources/read_resource) não existe: fora de
 │                              # escopo em V1.0, ver F5_MCP_TOOLS_INTEGRATION.md §3
+│
+├── scripts/
+│   ├── encrypt_credential.py     # já existente
+│   └── generate_access_token.py  # F12 — emissão administrativa de token (§3.5)
 │
 ├── database/
 │   ├── __init__.py
@@ -734,6 +929,8 @@ analysis_app/
 FastAPI Startup (processo uvicorn persistente):
 ├─ 1. Load config (.env)
 │    └─ Inclui DEFAULT_MAX_RESULT_ROWS, DEFAULT_MAX_RESULT_SIZE_KB (VolumeGuardService)
+│       e ACCESS_TOKEN_EXPIRATION_DAYS (AuthService, F12 — default aplicado só na
+│       emissão de novo token; nenhuma validação de token acontece no startup)
 ├─ 2. Connect to PostgreSQL (config DB)
 ├─ 3. Setup connection pools
 │    └─ PostgreSQL, MySQL, SQL Server, Oracle, Redis (se ativado)
@@ -844,11 +1041,13 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 
 ### ADR-006: MCP via Streamable HTTP com TLS, Agnóstico de Cliente, Sem Autenticação em V1.0
 
-**Decisão:** Servidor MCP roda como serviço Streamable HTTP persistente na rede interna, com TLS (HTTPS), aceitando qualquer cliente MCP padrão, sem autenticação.
+> **Nota (v1.16):** o trecho "sem autenticação" deste ADR-006 descreve a decisão original (V1.0 antes do F12). A partir da revisão v1.16, autenticação por token passou a existir (ver **ADR-007**, a seguir) — o restante da decisão deste ADR-006 (transporte Streamable HTTP, TLS obrigatório, agnóstico de cliente) continua válido sem alteração; só o aspecto "sem autenticação" foi superado.
+
+**Decisão:** Servidor MCP roda como serviço Streamable HTTP persistente na rede interna, com TLS (HTTPS), aceitando qualquer cliente MCP padrão. (Decisão original, V1.0 pré-F12: sem autenticação — ver nota acima.)
 **Razão:**
 - ✅ Funciona com qualquer cliente MCP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.) simultaneamente
 - ✅ Não fica preso a um único cliente
-- ✅ Rede interna é assumida confiável, então autenticação não é necessária em V1.0
+- ✅ Rede interna é assumida confiável, então autenticação não era necessária na decisão original (revisto pelo ADR-007 — rede confiável reduz risco de rede, mas não substitui saber quem está chamando)
 - ✅ Simplifica drasticamente o desenvolvimento inicial
 - ✅ TLS é obrigatório **mesmo assim** — não por política de segurança da arquitetura, mas porque clientes MCP reais recusam se conectar a um conector remoto via `http://` simples (confirmado empiricamente no protótipo F0 com Claude Desktop: a conexão TLS era abandonada antes mesmo de chegar uma requisição HTTP ao servidor)
 
@@ -865,13 +1064,43 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 - O endpoint `/mcp`, se montado via `app.mount("/mcp", ...)` do Starlette/FastAPI, responde com redirect `307` para `/mcp/` quando a requisição bate exatamente em `/mcp` sem barra final — o padrão de URL usado por clientes reais. É necessário registrar também uma rota exata (`app.add_route("/mcp", ...)`) para esse caso, evitando o redirect. O próprio `FastMCP` (wrapper de alto nível do SDK, não usado aqui) resolve isso da mesma forma — registrando uma `Route` exata em vez de um `Mount`.
 - CORS precisa ser habilitado mesmo sem um navegador tradicional envolvido — clientes desktop (Electron) podem validar o conector via `fetch()` no processo de renderer, sujeito à mesma política de CORS de um browser.
 
-**Substitui:** os antigos ADR-007 (Client Identification Automática) e ADR-008 (Autenticação Multi-User via API Key), removidos junto com o serviço correspondente, e revisa a própria decisão de transporte deste ADR-006 (v1.0-1.3: HTTP+SSE → v1.4: Streamable HTTP → v1.5: Streamable HTTP com TLS obrigatório). A especificação técnica dos ADRs de identificação é preservada como referência para reintrodução futura.
+**Substitui:** o antigo ADR-008 (Autenticação Multi-User via API Key), removido junto com o serviço correspondente, e revisa a própria decisão de transporte deste ADR-006 (v1.0-1.3: HTTP+SSE → v1.4: Streamable HTTP → v1.5: Streamable HTTP com TLS obrigatório). O número **ADR-007** (antes "Client Identification Automática", removido na v1.2) é reutilizado na revisão v1.16 para uma decisão diferente — **autenticação por token opaco (F12)** — ver a seguir; a decisão de client identification automática (FB1) segue sem ADR, por seguir fora de escopo.
+
+---
+
+### ADR-007: Autenticação por Token Opaco (F12) — Não JWT, Não OAuth2
+
+**Decisão:** Autenticar cada chamada MCP com um **token de acesso opaco** (segredo aleatório gerado com `secrets.token_urlsafe`, hash SHA-256 persistido — nunca o valor bruto), emitido administrativamente via script, sem login/senha nem fluxo OAuth.
+
+**Contexto:** F12 exige saber "quem" está chamando `list_tools()`/`call_tool()`, para filtrar analyses por perfil e negar acesso a usuário bloqueado. Três mecanismos foram avaliados:
+
+| Critério | JWT (self-contained) | OAuth 2.1 (inclusive extensão de autorização do MCP) | Token opaco (escolhido) |
+|---|---|---|---|
+| Valida sem ir ao BD? | Sim, em teoria — mas ver "Razão" | Não (delegação a authorization server) | Não, sempre consulta o BD |
+| Bloqueio de usuário tem efeito imediato? | Só com blacklist adicional (JWT puro não revoga antes do `exp`) | Sim (authorization server pode negar) | Sim, nativo (`is_blocked` checado a cada chamada) |
+| Funciona em qualquer cliente MCP sem trabalho extra do cliente? | Sim (é só um header) | Não — exige o cliente implementar o fluxo de autorização OAuth (redirect, PKCE, dynamic client registration); suporte confirmado só em parte dos clientes MCP | Sim (é só um header) |
+| Complexidade de implementação no servidor | Média (chave de assinatura, rotação) | Alta (authorization server completo) | Baixa (hash + tabela) |
+| Renovação automática sem tocar no cliente | Não (mesmo problema do opaco) | Sim, quando o cliente suporta | Não |
+
+**Razão:**
+- ✅ A permissão efetiva (quais analyses um usuário pode ver/executar) depende de `user_profiles`/`profile_analyses`, que podem mudar a qualquer momento — e o requisito de negócio exige que bloquear um usuário tenha efeito **imediato**. Isso força uma consulta ao BD em toda chamada de qualquer forma — a vantagem "stateless" de um JWT (evitar ida ao BD) não se realiza neste projeto, então sua complexidade extra (gestão de chave de assinatura, rotação, blacklist para revogar antes do `exp`) não compra nada em troca
+- ✅ OAuth 2.1 resolve delegação de autorização para clientes de terceiros não confiáveis — não é o problema deste projeto (rede interna confiável, ver Restrição T1). Pior: apostar a autenticação nisso acopla o servidor ao cliente MCP mais avançado (confirmado: Claude Desktop suporta a extensão de autorização MCP; não há confirmação equivalente para outros clientes), o que vai contra o pilar "agnóstico de cliente MCP" do projeto (ver NEGOCIO.md §13)
+- ✅ Token opaco funciona em qualquer cliente MCP capaz de enviar um header HTTP customizado — praticamente universal, sem exigir que o cliente implemente autorização nenhuma
+- ✅ Revogação trivial: `UPDATE access_tokens SET revoked_at = NOW()`, sem blacklist
+
+**Alternativas Rejeitadas:**
+- ❌ JWT: complexidade de assinatura/rotação sem ganho real de performance (BD já é consultado por causa do bloqueio imediato e das permissões dinâmicas)
+- ❌ OAuth 2.1 (inclusive a extensão de autorização MCP para Streamable HTTP): overkill para rede interna confiável; quebra o requisito de "qualquer cliente MCP" por depender de suporte desigual entre clientes ao fluxo de autorização
+
+**Consequências:**
+- Emissão e renovação de token são **administrativas** (script local, `scripts/generate_access_token.py`), sem endpoint de login/senha no servidor — reduz superfície de ataque, mas exige um humano no processo de emissão/renovação (aceito: expiração longa de 90 dias torna isso raro)
+- `list_tools()`/`call_tool()` sempre fazem 1+ consultas ao BD por chamada — aceitável para o volume de uso deste projeto (rede interna, sem SLA de alta escala)
 
 ---
 
 ## 8. Considerações de Segurança
 
-### 8.1 Rede Interna, Sem Autenticação (V1.0)
+### 8.1 Rede Interna, Com Autenticação por Token (V1.0 — F12)
 
 ```
 ✅ Implementar em V1.0:
@@ -888,24 +1117,29 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 ├─ CORS habilitado (CORSMiddleware)
 │  └─ Clientes desktop podem validar o conector via fetch() no processo de
 │     renderer, sujeito à mesma política de CORS de um browser (ver ADR-006, §7)
+├─ Autenticação por token de acesso (F12, ADR-007)
+│  └─ Token opaco (hash SHA-256), usuário bloqueado perde acesso imediato,
+│     sem OAuth2/SSO/JWT — ver §3.5
+├─ Controle de acesso via perfis (F12, RBAC básico)
+│  └─ Usuário → perfil → analyses (N:N); permissão recalculada a cada chamada,
+│     nunca cacheada no token
 └─ Log de execução
    ├─ O quê (qual análise) foi executado
    ├─ Quando (timestamp)
+   ├─ Quem (execution_history.user_id, F12)
    └─ Resultado (success/fail)
 
 ❌ Não implementar em V1.0 (rede privada confiável):
-├─ Autenticação/identificação de usuário ou cliente MCP
+├─ Identificação de qual cliente MCP/software está chamando (FB1 — diferente
+│  de identificação de usuário, já implementada via F12)
 ├─ Rate limiting / quotas por usuário
-├─ RBAC avançado (roles complexos)
-└─ SSO/LDAP (complexo para rede local)
+└─ SSO/LDAP/OAuth (avaliado e descartado para V1.0 — ver ADR-007)
 
 ⚠️ Futuro (quando expor remotamente ou sair da rede confiável — V1.1+):
 ├─ Reintroduzir ClientIdentificationService (qual cliente MCP)
-├─ Reintroduzir UserIdentificationService (qual pessoa, API Key, quota)
 ├─ Rate limiting mais rigoroso
 ├─ IP whitelist
-├─ SSO/LDAP/Azure AD
-└─ RBAC granular (quem pode executar qual análise)
+└─ SSO/LDAP/Azure AD (reavaliar OAuth2, descartado só para o contexto de V1.0 — ver ADR-007)
 ```
 
 ### 8.2 Credenciais de BD
@@ -920,6 +1154,7 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 Exemplo .env:
 POSTGRES_CONFIG_PASSWORD=secure_password
 FERNET_KEY=<chave gerada com Fernet.generate_key(), fora do repositório>
+ACCESS_TOKEN_EXPIRATION_DAYS=90  # F12 — validade padrão de novos tokens (scripts/generate_access_token.py)
 ```
 
 **Formato de `data_sources.connection_config`** (ver §2.2, Tabela 1 — antes um placeholder):
@@ -956,18 +1191,25 @@ docker-compose -f docker-compose.local.yml up
 # Verificar
 curl https://localhost:3000/health
 
+# Gerar um token de acesso para o usuário (F12 — ver §3.5, ADR-007):
+python scripts/generate_access_token.py --user-id <uuid> --expires-days 90
+
 # Configuração em cada cliente MCP (exemplo genérico, formato varia por app):
 # {
 #   "mcpServers": {
-#     "analysis": { "url": "https://<ip-da-maquina>:3000/mcp" }
+#     "analysis": {
+#       "url": "https://<ip-da-maquina>:3000/mcp",
+#       "headers": { "Authorization": "Bearer <token gerado acima>" }
+#     }
 #   }
 # }
 #
-# Repita a mesma URL em Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.
-# Não é necessário nenhum header ou API Key em V1.0 — mas HTTPS é obrigatório
-# (ver ADR-006): clientes MCP reais recusam conector remoto via http:// simples,
-# mesmo em rede interna confiável. Se o cliente estiver em outra máquina, instale
-# a CA do mkcert (`mkcert -CAROOT`) nela antes de confiar no certificado.
+# Repita a mesma URL em Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. —
+# cada usuário/cliente com seu próprio token (F12 permite N tokens por usuário).
+# HTTPS é obrigatório (ver ADR-006): clientes MCP reais recusam conector remoto
+# via http:// simples, mesmo em rede interna confiável. Se o cliente estiver em
+# outra máquina, instale a CA do mkcert (`mkcert -CAROOT`) nela antes de confiar
+# no certificado.
 #
 # ⚠️ Subir o servidor apenas com `uvicorn --ssl-certfile=... --ssl-keyfile=...`
 # não basta: a CLI do uvicorn não negocia ALPN, e alguns clientes (Chromium/Electron)
@@ -1027,7 +1269,7 @@ Certbot suporta qualquer servidor compatível com ACME via `--server`, não só 
 
 > **Confiança do cliente: mesma exigência do mkcert (seção 9.1).** Essa CA interna é privada — não está pré-instalada em lugar nenhum, então nenhum cliente confia nela por padrão. É necessário instalar/confiar nessa CA em cada máquina cliente antes de conseguir se conectar via HTTPS (import do certificado raiz no Keychain/Certificate Store/`ca-certificates`, conforme o SO). A vantagem sobre o mkcert é só a renovação centralizada e automática pelo Certbot, em vez de manual por máquina — mas o ônus de confiança client-side é o mesmo.
 
-> **Resumindo a diferença entre as opções:** o que exige (ou não) tocar em cada cliente não é "nginx+Certbot vs. mkcert" — é se o certificado é assinado por uma CA pública já confiável de fábrica (Opção A) ou por uma CA privada que só existe porque você a criou (Opção B e mkcert). Nenhuma das duas opções muda o resto da arquitetura: o app continua servindo em `/mcp` sem autenticação, conforme ADR-006 — só a origem/renovação do certificado, e a necessidade (ou não) de configurar os clientes, mudam.
+> **Resumindo a diferença entre as opções:** o que exige (ou não) tocar em cada cliente não é "nginx+Certbot vs. mkcert" — é se o certificado é assinado por uma CA pública já confiável de fábrica (Opção A) ou por uma CA privada que só existe porque você a criou (Opção B e mkcert). Nenhuma das duas opções muda o resto da arquitetura: o app continua servindo em `/mcp` com autenticação por token (ADR-007) independente da origem do certificado — só a origem/renovação do certificado, e a necessidade (ou não) de configurar os clientes quanto à CA, mudam.
 
 ### 9.3 Remoto (Produção — Futuro)
 
@@ -1149,15 +1391,17 @@ Cliente MCP       FastAPI Server    PostgreSQL              Cache
 
 ```
 V1.0 (MVP Local):
-├─ MCP via Streamable HTTP, sem autenticação
-├─ Multi-cliente simultâneo (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
-└─ Log de execução básico (sem identificação de usuário/cliente)
+├─ MCP via Streamable HTTP, com autenticação por token opaco + perfis (F12, ADR-007)
+├─ Multi-cliente simultâneo (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.),
+│  cada um com seu próprio token
+└─ Log de execução com identificação de usuário (execution_history.user_id)
 
-V1.1 (Reintrodução de Identificação — quando necessário):
-├─ ClientIdentificationService: qual cliente MCP executou
-├─ UserIdentificationService: qual pessoa executou (API Key + quota)
+V1.1 (Identificação de Cliente + Rate Limiting — quando necessário):
+├─ ClientIdentificationService: qual cliente MCP/software executou (FB1)
+├─ Rate limiting / quotas por usuário (FB3)
+├─ SSO/OAuth (Azure AD, Google, LDAP — FB5), se a plataforma sair da rede confiável
 ├─ Necessário antes de expor além da rede confiável
-└─ Especificação técnica detalhada já existe e pode ser retomada
+└─ Especificação técnica de FB1 já existe e pode ser retomada
 
 V1.2 (Production Remoto):
 ├─ Redundância e failover
@@ -1185,6 +1429,7 @@ V2.0 (Ecosystem):
 | **Cache (Remoto)** | Redis | Distributed, cluster-ready |
 | **Task Queue** | Celery | Escala horizontal, remoto |
 | **Controle de Volume** | VolumeGuardService (COUNT(*) + checagem de KB) | Evita estourar tokens do cliente, sem handler nenhum |
+| **Autenticação** | Token opaco (hash SHA-256), sem JWT/OAuth2 | Bloqueio imediato e permissões dinâmicas já exigem BD por chamada — ver ADR-007 |
 | **Containerização** | Docker | Portabilidade local ↔ remoto |
 | **Orchestração** | Docker Compose (local), Kubernetes (remoto) | Simplicity + power |
 

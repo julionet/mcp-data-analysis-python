@@ -2,9 +2,9 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Referência:** ARQUITETURA.md §2.2 e §2.3 (v1.12)
+**Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.16)
 **Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
-**Data:** 2026-09-27
+**Data:** 2026-09-29 (atualizado — F12: tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
 > Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, versões, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
@@ -20,13 +20,25 @@ data_sources (1) ──────< (N) analyses
                               ├──────< (N) analysis_versions
                               │                │
                               │                │ (opcional)
-                              └──────< (N) execution_history >──── (0..1) analysis_versions
+                              ├──────< (N) execution_history >──── (0..1) analysis_versions
+                              │                        │
+                              │                        │ (0..1, F12)
+                              │                        ▼
+                              │                     users >──────< (N:N via user_profiles) profiles
+                              │                        │                                      │
+                              │                        │ (1:N)                       (N:N via profile_analyses)
+                              │                        ▼                                      │
+                              │                 access_tokens                                 │
+                              └────────────────────────────────────────────────────────────────┘
+                                        (profile_analyses vincula profiles <-> analyses)
 ```
 
 - Uma **análise** pertence a exatamente uma **fonte de dados** (`data_sources`).
 - Uma **análise** tem N **etapas** (`analysis_steps`) — em V1.0, sempre uma etapa do tipo `query`.
 - Uma **análise** acumula N **versões** (`analysis_versions`) ao longo do tempo.
-- Cada **execução** (`execution_history`) referencia a análise executada e, opcionalmente, qual versão específica foi usada.
+- Cada **execução** (`execution_history`) referencia a análise executada, opcionalmente qual versão foi usada e, desde F12, opcionalmente qual **usuário** (`user_id`) a executou.
+- Um **usuário** (`users`, F12) tem N **tokens de acesso** (`access_tokens`) e está vinculado a N **perfis** (`profiles`) via `user_profiles`.
+- Um **perfil** está vinculado a N **analyses** via `profile_analyses` — a permissão efetiva de um usuário é a união das analyses ativas de todos os seus perfis ativos (ver ARQUITETURA.md §3.5).
 
 ---
 
@@ -115,15 +127,16 @@ Snapshot completo de uma análise em um ponto no tempo, para permitir histórico
 
 ---
 
-### 2.5 `execution_history` — Histórico de Execuções (Simplificado)
+### 2.5 `execution_history` — Histórico de Execuções
 
-Registro de cada execução de análise. **Importante:** em V1.0 não há identificação de usuário nem de cliente MCP (ver NEGOCIO.md §9 T5) — o log é apenas *o quê* foi executado, *quando* e *com que resultado*.
+Registro de cada execução de análise — *o quê* foi executado, *quando*, *com que resultado* e, desde F12, *por quem* (quando disponível).
 
 | Campo | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `analysis_id` | UUID (FK → `analyses.id`) | ✅ | Qual análise foi executada |
 | `analysis_version_id` | UUID (FK → `analysis_versions.id`) | — | Qual versão específica foi usada (pode ser nulo) |
+| `user_id` | UUID (FK → `users.id`) | — | Quem executou (F12). `NULL` para execuções anteriores a F12 |
 | `parameters` | JSONB | — | Parâmetros com que a análise foi chamada |
 | `status` | VARCHAR(50) | — | `success`, `failed`, `timeout` (também usado para o caso `volume_exceeded`, ver ARQUITETURA.md §3.4) |
 | `execution_time_ms` | INT | — | Tempo total de execução em milissegundos |
@@ -134,7 +147,83 @@ Registro de cada execução de análise. **Importante:** em V1.0 não há identi
 | `executed_at` | TIMESTAMP | — | Default `NOW()` |
 | `cached` | BOOLEAN | — | Default `false`. Indica se o resultado veio do cache (F7) |
 
-**Relacionamentos:** N:1 com `analyses` e, opcionalmente, N:1 com `analysis_versions`.
+**Relacionamentos:** N:1 com `analyses`, opcionalmente N:1 com `analysis_versions` e, desde F12, opcionalmente N:1 com `users`.
+
+---
+
+### 2.6 `users` — Usuários com Acesso à Plataforma (F12)
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `id` | UUID (PK) | ✅ | Identificador único |
+| `name` | VARCHAR(255) | ✅ | Nome do usuário |
+| `external_id` | VARCHAR(255) | — (UNIQUE) | Identificador externo opcional (login/e-mail/matrícula) |
+| `is_blocked` | BOOLEAN | — | Default `false`. Bloqueado perde acesso imediato a todas as analyses (ver ARQUITETURA.md §3.5) |
+| `created_by` | VARCHAR(255) | — | Quem criou o registro |
+| `created_at` | TIMESTAMP | — | Default `NOW()` |
+| `updated_at` | TIMESTAMP | — | Default `NOW()` |
+
+**Relacionamentos:** 1:N com `access_tokens`; N:N com `profiles` via `user_profiles`; referenciado por `execution_history.user_id`.
+
+---
+
+### 2.7 `profiles` — Perfis de Acesso (F12)
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `id` | UUID (PK) | ✅ | Identificador único |
+| `name` | VARCHAR(255) | ✅ (UNIQUE) | Nome do perfil (ex.: `"Comercial"`) |
+| `description` | TEXT | — | Descrição do perfil |
+| `is_active` | BOOLEAN | — | Default `true`. Perfil inativo não libera nenhuma analysis, mesmo que o vínculo em `profile_analyses` exista |
+| `created_at` | TIMESTAMP | — | Default `NOW()` |
+| `updated_at` | TIMESTAMP | — | Default `NOW()` |
+
+**Relacionamentos:** N:N com `users` via `user_profiles`; N:N com `analyses` via `profile_analyses`.
+
+---
+
+### 2.8 `user_profiles` — Vínculo N:N Usuário ↔ Perfil (F12)
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `user_id` | UUID (FK → `users.id`, `ON DELETE CASCADE`) | ✅ (PK composta) | Usuário vinculado |
+| `profile_id` | UUID (FK → `profiles.id`, `ON DELETE CASCADE`) | ✅ (PK composta) | Perfil vinculado |
+
+**Constraint:** `PRIMARY KEY (user_id, profile_id)` — um usuário não pode ter o mesmo perfil vinculado duas vezes.
+
+---
+
+### 2.9 `profile_analyses` — Vínculo N:N Perfil ↔ Analyses (F12)
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `profile_id` | UUID (FK → `profiles.id`, `ON DELETE CASCADE`) | ✅ (PK composta) | Perfil vinculado |
+| `analysis_id` | UUID (FK → `analyses.id`, `ON DELETE CASCADE`) | ✅ (PK composta) | Análise liberada pelo perfil |
+
+**Constraint:** `PRIMARY KEY (profile_id, analysis_id)`.
+
+**Nota:** a permissão efetiva de um usuário é a união das analyses ativas de todos os perfis ativos vinculados a ele — recalculada em toda chamada MCP, nunca cacheada (ver ARQUITETURA.md §3.5).
+
+---
+
+### 2.10 `access_tokens` — Tokens de Acesso (F12)
+
+Token **opaco** — só o hash é persistido, nunca o valor bruto (ver ARQUITETURA.md ADR-007).
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `id` | UUID (PK) | ✅ | Identificador único |
+| `user_id` | UUID (FK → `users.id`, `ON DELETE CASCADE`) | ✅ | Dono do token |
+| `token_hash` | CHAR(64) | ✅ (UNIQUE) | SHA-256 hex do token bruto (`secrets.token_urlsafe(32)`) |
+| `label` | VARCHAR(255) | — | Identifica de qual cliente MCP é esse token (ex.: `"Claude Desktop - notebook Julio"`) |
+| `expires_at` | TIMESTAMP | ✅ | Expiração — default 90 dias na emissão (`ACCESS_TOKEN_EXPIRATION_DAYS`) |
+| `revoked_at` | TIMESTAMP | — | Preenchido se revogado manualmente antes de expirar |
+| `created_at` | TIMESTAMP | — | Default `NOW()` |
+| `last_used_at` | TIMESTAMP | — | Atualizado a cada autenticação bem-sucedida (observabilidade) |
+
+**Relacionamentos:** N:1 com `users`.
+
+**Emissão e renovação:** administrativa, via `scripts/generate_access_token.py` — sem endpoint de login/senha no servidor (ver ARQUITETURA.md §3.5, ADR-007).
 
 ---
 
@@ -194,7 +283,10 @@ O campo `password` (e demais credenciais sensíveis) é cifrado com **Fernet** (
 CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
+CREATE INDEX idx_execution_history_user ON execution_history(user_id);
 CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
+CREATE INDEX idx_access_tokens_hash ON access_tokens(token_hash);
+CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 ```
 
 ---
@@ -204,8 +296,10 @@ CREATE INDEX idx_versions_analysis ON analysis_versions(analysis_id);
 Para não haver confusão ao ler versões antigas de código/specs:
 
 - ❌ `custom_handlers` — removida na revisão v1.9 do ARQUITETURA.md, junto com toda a camada de Handlers Python (ADR-005 reescrito — servidor entrega dataset bruto).
-- ❌ `mcp_clients`, `users`, `user_api_keys` — removidas na v1.2, junto com as colunas `user_id`, `username`, `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history`. A especificação completa (com middleware, repositórios etc.) está preservada como referência em FEATURES_ROADMAP.md §9 (Backlog Futuro — FB1/FB2), para quando o requisito de autenticação voltar ao escopo (fora da rede interna confiável).
+- ❌ `mcp_clients` — removida na v1.2 junto com as colunas `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history`; segue fora de escopo (FB1, identificação de cliente MCP/software — diferente de identificação de usuário, já implementada via F12).
+- ❌ `user_api_keys` — desenho original de FB2 (v1.2), API Key direta por usuário sem perfis; **não voltou** — F12 usa `access_tokens` (token opaco com hash) em vez disso.
+- ✅ `users` e `execution_history.user_id`, removidas na v1.2, **voltaram na revisão de 2026-09-29 (F12)** com um desenho revisado: perfis N:N (`profiles`, `user_profiles`, `profile_analyses`) em vez de API Key + quota direta — ver ARQUITETURA.md ADR-007 e §2.6-§2.10 acima.
 
 ---
 
-**Fonte:** ARQUITETURA.md v1.12, §2.2–§2.3 e §8.2.
+**Fonte:** ARQUITETURA.md v1.16, §2.2, §2.3 e §3.5.

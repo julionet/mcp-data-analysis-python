@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.8 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, sem autenticação em V1.0, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-28
+**Versão:** 1.9 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-29
 **Autor:** Jose
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.8 → v1.9):** documento aprovado. Autenticação e controle de acesso passam a fazer parte do escopo desta versão, via nova feature **F12** (ver FEATURES_ROADMAP.md v1.12 e ARQUITETURA.md ADR-007): usuários cadastrados, agrupados em perfis, e perfis vinculados às analyses que liberam — um usuário só acessa (via `list_tools`/`call_tool`) analyses ativas vinculadas a um perfil ativo vinculado a ele. Autenticação via **token de acesso opaco** (não JWT, não OAuth2 — ver ARQUITETURA.md ADR-007 para as alternativas comparadas e a razão da escolha), emitido administrativamente (sem login/senha no servidor), validade padrão de 90 dias, renovação manual. Usuário bloqueado perde acesso imediatamente. `execution_history` (F8) ganha `user_id` (nullable) para auditoria por usuário. Isso substitui, com um desenho revisado, o que estava anotado em "Roadmap Futuro" (§12, V1.1) desde a v1.2 deste documento — a seção foi atualizada para refletir que esse requisito específico (identificação de usuário + RBAC) não é mais futuro. Rate limiting/quotas por usuário e SSO/OAuth seguem fora de escopo (ver §12 revisado). Atualizados: §4 (Escopo), nova UC3 (§6), nova RF5 (§7), RNF5 (§8), Restrição T5 (§9), §12 (Roadmap Futuro), §14 (Glossário).
 
 > **Nota de revisão (v1.7 → v1.8):** documento aprovado. O adapter de **MongoDB** foi removido do escopo de V1.0 e substituído por **Oracle** (Oracle Database 12.1+, via `python-oracledb` em modo thin — sem Oracle Client no SO). MongoDB não entra no Backlog Futuro: sai de vez. Com isso, todos os data sources de V1.0 são relacionais/SQL (PostgreSQL, MySQL, SQL Server, Oracle). Atualizados: escopo (§4), RF2/RF3 (§7), dependências externas (§10), critérios de sucesso da Sprint 2 (§11) e glossário (§14). Ver FEATURES_ROADMAP.md v1.11 e ARQUITETURA.md v1.15.
 
@@ -27,7 +29,7 @@
 
 Uma **plataforma de análise de dados genérica e agnóstica** que permite a qualquer usuário realizar análises complexas contra múltiplos bancos de dados através de uma interface conversacional com **qualquer LLM que implemente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, e futuros), sem necessidade de escrever código Python para cada nova análise.
 
-O servidor roda como um **serviço Streamable HTTP único na rede interna**, e múltiplos usuários — cada um com o cliente MCP de sua preferência — podem se conectar a ele simultaneamente, sem necessidade de configuração individual de autenticação em V1.0.
+O servidor roda como um **serviço Streamable HTTP único na rede interna**, e múltiplos usuários — cada um com o cliente MCP de sua preferência — podem se conectar a ele simultaneamente, cada um com seu próprio token de acesso (ver RF5).
 
 **Escopo de Clientes MCP Suportados (V1.0):**
 - ✅ Qualquer cliente MCP compatível com o protocolo padrão via Streamable HTTP (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.), conectando à mesma instância do servidor na rede local.
@@ -138,6 +140,7 @@ Versionamento de análises (mudanças na query SQL) não é necessário em V1.0 
 - [x] Cache de resultados (memória local, Redis remoto)
 - [x] Servidor MCP via **Streamable HTTP**, acessível por múltiplos clientes simultaneamente na rede local
 - [x] Protocolo MCP padrão (sem customizações proprietárias)
+- [x] Autenticação por token de acesso (opaco) e controle de acesso via perfis — usuário → perfil → analyses (N:N); usuário bloqueado perde acesso imediato (ver RF5)
 
 ✅ **Não-Funcionais**
 - [x] Rodar localmente em rede interna (sem exposição pública)
@@ -149,9 +152,9 @@ Versionamento de análises (mudanças na query SQL) não é necessário em V1.0 
 
 ❌ **Fora do Escopo V1.0**
 - [ ] Interface Web/Dashboard (usar cliente MCP como interface)
-- [ ] **Autenticação ou identificação de usuário/cliente MCP** — rede interna é assumida confiável; qualquer pessoa com acesso à rede pode executar análises
-- [ ] Rate limiting / quotas por usuário (depende de identificação, fora de escopo)
-- [ ] RBAC (controle de acesso por papel)
+- [ ] **Identificação de qual cliente MCP/software está chamando** (Claude Desktop vs. Gemini Desktop vs. outro) — diferente de identificação de usuário (essa entra em escopo via F12); sem requisito de negócio que a justifique hoje
+- [ ] Rate limiting / quotas por usuário (autenticação por usuário entra em escopo via F12, mas sem quota/rate limit associado ainda)
+- [ ] SSO/OAuth (Azure AD, Google, LDAP) — avaliado e descartado para V1.0 (ver ARQUITETURA.md ADR-007); autenticação em V1.0 é por token de acesso administrado, não delegada
 - [ ] Machine Learning real-time (forecasting fica a cargo do LLM cliente, não do servidor)
 - [ ] Integração com Salesforce/SAP (extensível via adapters later)
 - [ ] Notificações automáticas (manual via cliente MCP pedindo)
@@ -283,10 +286,43 @@ Scenario: Usuario B quer a mesma análise (com Gemini Desktop), ao mesmo tempo
   And Ambas as execuções ficam registradas no histórico (sem identificar A ou B)
 ```
 
-**Benefício:** Mesma análise funciona com qualquer cliente MCP, múltiplos usuários ao mesmo tempo, sem necessidade de configurar autenticação.
+**Benefício:** Mesma análise funciona com qualquer cliente MCP, múltiplos usuários ao mesmo tempo.
 **Esforço:** ~0 minutos (conversacional, independente do cliente)
 
 ---
+
+### UC3: Executar Análise com Token de Acesso (Usuário Autenticado)
+
+```gherkin
+Feature: Autenticação por token e controle de acesso via perfis
+
+Scenario: Usuário autorizado executa análise liberada pelo seu perfil
+  Given Usuário X tem um token de acesso válido, configurado no seu cliente MCP
+  And Usuário X está vinculado ao perfil "Comercial"
+  And O perfil "Comercial" está vinculado à análise "vendas_por_regiao" (ativa)
+  When Usuário X chama list_tools()
+  Then A lista retornada inclui "execute_vendas_por_regiao"
+  When Usuário X chama call_tool("execute_vendas_por_regiao", params)
+  Then O servidor valida o token, confirma que o usuário não está bloqueado
+  And Confirma que a análise está entre as liberadas para o usuário
+  And Executa normalmente, como no UC2
+
+Scenario: Usuário bloqueado perde acesso imediatamente
+  Given Usuário Y foi marcado como bloqueado (is_blocked=true)
+  When Usuário Y chama list_tools() ou call_tool() com um token ainda válido (não expirado)
+  Then O servidor recusa a chamada, sem consultar analyses/perfis
+  And Nenhuma análise é executada, mesmo que o token não tenha expirado
+
+Scenario: Análise não liberada para o perfil do usuário
+  Given Usuário X está vinculado apenas ao perfil "Comercial"
+  And A análise "custos_financeiros" está vinculada só ao perfil "Financeiro"
+  When Usuário X chama call_tool("execute_custos_financeiros", params)
+  Then O servidor recusa a execução por falta de permissão,
+       mesmo que a análise esteja ativa
+```
+
+**Benefício:** cada usuário só vê e executa as analyses do(s) perfil(is) vinculado(s) a ele; bloqueio e mudança de perfil têm efeito imediato, sem depender de o token expirar.
+**Esforço:** ~0 minutos do ponto de vista do usuário final (token configurado 1 vez no cliente MCP); emissão/gestão de usuários e perfis é administrativa (ver RF5).
 
 ---
 
@@ -312,12 +348,12 @@ Então:
 
 ---
 
-### RF2: Execução de Análises (Multi-Cliente, Sem Autenticação)
+### RF2: Execução de Análises (Multi-Cliente, Autenticado)
 
 ```
-Dado: Análise "vendas_por_regiao" com steps
+Dado: Análise "vendas_por_regiao" com steps, liberada para o usuário autenticado (ver RF5)
 Quando: Qualquer cliente MCP conectado ao servidor via Streamable HTTP chama
-        execute_analysis(id, params) via MCP
+        execute_analysis(id, params) via MCP, com token de acesso válido
 Então:
 ├─ Sistema conecta ao data_source correto
 ├─ Executa um `SELECT COUNT(*)` barato com os mesmos filtros, para estimar o volume
@@ -336,7 +372,7 @@ Então:
 - ✅ Parâmetros são validados antes de executar
 - ✅ Erro contém mensagem clara (não stack trace)
 - ✅ Protocolo MCP segue especificação padrão (não proprietário)
-- ✅ Suporta múltiplas conexões/clientes simultâneos sem autenticação em V1.0
+- ✅ Suporta múltiplas conexões/clientes simultâneos, cada um autenticado com seu próprio token (ver RF5)
 - ✅ Recusa de volume alto nunca busca o dataset completo antes de decidir (checagem por `COUNT(*)` primeiro)
 
 ---
@@ -361,6 +397,36 @@ Então:
 - ✅ Log de execução funciona com todos os adapters
 
 **Nota:** Versionamento de análises (mudanças na query SQL) foi removido de V1.0 (ver O3 na seção 3). O log de execução (F8) fornece auditoria completa — qual análise foi executada, quando, com qual resultado. Mudanças na SQL são operações diretas na tabela `analyses`, rastreadas via schema versionamento (git + migration histórico).
+
+---
+
+### RF5: Autenticação por Token e Controle de Acesso via Perfis
+
+```
+Dado: Usuário cadastrado, com 1+ token(s) de acesso válido(s) e 1+ perfil(is) vinculado(s)
+Quando: O cliente MCP chama list_tools() ou call_tool() com o header
+        Authorization: Bearer <token>
+Então:
+├─ Sistema valida o token (hash bate com um access_tokens.token_hash não
+│  revogado e não expirado)
+├─ Sistema confirma que o usuário não está bloqueado (users.is_blocked=false)
+├─ list_tools() retorna somente analyses ativas vinculadas a um perfil ativo
+│  vinculado ao usuário autenticado
+├─ call_tool() revalida a mesma permissão antes de executar (não confia em
+│  list_tools() ter sido chamado antes)
+└─ Requisição sem token, com token inválido/expirado/revogado, ou de usuário
+   bloqueado é recusada antes de tocar em qualquer analysis
+```
+
+**Critério de Aceitação:**
+- ✅ Token é opaco (não JWT, não OAuth2 — ver ARQUITETURA.md ADR-007); só o hash SHA-256 é persistido, nunca o valor bruto
+- ✅ Emissão de token é administrativa (script local), sem endpoint de login/senha no servidor
+- ✅ Um usuário pode ter múltiplos tokens simultâneos (1 por cliente MCP)
+- ✅ Expiração padrão de 90 dias (configurável via `.env`), renovação manual (reemissão)
+- ✅ Bloquear um usuário (`is_blocked=true`) corta acesso imediatamente, mesmo com token ainda não expirado
+- ✅ Mudança de vínculo usuário↔perfil ou perfil↔analysis tem efeito imediato (sem cache de permissão)
+- ✅ `call_tool()` nunca confia apenas na lista que `list_tools()` já retornou — revalida
+- ✅ `execution_history` (F8) registra qual usuário executou cada análise (`user_id`, nullable)
 
 ---
 
@@ -411,15 +477,19 @@ Então:
 ### RNF5: Segurança
 
 ```
-├─ Rede interna: assumir confiável (sem autenticação em V1.0)
+├─ Rede interna: assumida confiável, mas com autenticação por token desde
+│  V1.0 (ver RF5 e Restrição T5) — a rede confiável reduz o risco de rede,
+│  não substitui o controle de acesso por usuário
 ├─ Transporte: TLS (HTTPS) obrigatório mesmo em rede interna — requisito de
 │  compatibilidade de cliente MCP (confirmado: Claude Desktop recusa conector
 │  remoto via http:// simples), não uma política de segurança em profundidade
+├─ Token de acesso: opaco, hash SHA-256 em repouso (nunca o valor bruto),
+│  expiração configurável (default 90 dias) — ver ARQUITETURA.md ADR-007
 ├─ Credenciais BD: criptografadas em repouso
 ├─ SQL injection: parametrized queries obrigatório
 ├─ Validação: todos inputs validados antes execução
-└─ Log de execução: qual análise foi executada, quando e com qual resultado
-   (sem identificação de usuário/cliente — ver Restrição T5)
+└─ Log de execução: qual análise foi executada, quando, com qual resultado
+   e por qual usuário (execution_history.user_id, ver RF5)
 ```
 
 ---
@@ -449,11 +519,13 @@ Então:
 - ✅ Substitui o transporte HTTP+SSE (path `/sse`) usado nas versões 1.0-1.3 deste documento
 - ✅ **TLS obrigatório** mesmo em rede interna: certificado self-signed local via mkcert para desenvolvimento/máquina única, ou CA interna confiável instalada em cada máquina cliente quando o servidor for acessado por mais de uma máquina na rede (ver ARQUITETURA.md §7 ADR-006 e §9)
 
-### Restrição T5: Sem Autenticação em V1.0
-- ✅ Rede interna é assumida confiável — qualquer pessoa/cliente na rede pode executar análises
-- ❌ Não requer API Key, OAuth/SSO ou qualquer identificação de usuário em V1.0
-- ❌ Não requer identificação de qual cliente MCP está chamando em V1.0
-- ⚠️ Antes de expor a aplicação além dessa rede confiável (remoto, internet), autenticação e identificação **devem** ser reintroduzidas (ver seção 12)
+### Restrição T5: Autenticação por Token de Acesso, Sem OAuth/SSO em V1.0
+- ✅ Rede interna é assumida confiável, mas toda chamada MCP exige um token de acesso válido (ver RF5) — a rede confiável não dispensa saber quem está executando
+- ✅ Token opaco emitido administrativamente (script local), sem login/senha nem endpoint público de autenticação
+- ❌ Não requer OAuth2/SSO/LDAP em V1.0 (ver ARQUITETURA.md ADR-007 para o racional)
+- ❌ Não requer identificação de qual cliente MCP/software está chamando em V1.0 (ex.: Claude Desktop vs. Gemini Desktop — ver FB1 em §12)
+- ❌ Não há rate limiting/quota por usuário em V1.0 (ver §12)
+- ⚠️ Antes de expor a aplicação além dessa rede confiável (remoto, internet), SSO/OAuth e rate limiting **devem** ser avaliados (ver seção 12)
 
 ---
 
@@ -490,6 +562,7 @@ Então:
 
 ### Sprint 3 (Production-Ready)
 - ✅ Cache local funcional
+- ✅ Autenticação por token funcional: usuário sem token, com token expirado/revogado, ou bloqueado é recusado; usuário autenticado só vê/executa analyses liberadas pelo(s) perfil(is) vinculado(s)
 - ✅ Docker compose (local + remoto)
 - ✅ Testes automatizados (80%+ coverage)
 
@@ -503,12 +576,16 @@ Então:
 ## 12. Roadmap Futuro (Post V1.0)
 
 ```
-V1.1: Reintrodução de Identificação (quando necessário)
-├─ ClientIdentificationService: qual cliente MCP executou (Claude, Gemini, OpenAI, etc.)
-├─ UserIdentificationService: qual pessoa executou, com API Key e quota
-├─ Necessário antes de expor a aplicação além da rede interna confiável
-└─ Especificação técnica detalhada já existe e pode ser retomada quando este
-   requisito voltar ao escopo (repositório de decisões do projeto)
+V1.0: Autenticação por Token + Perfis (F12 — já no escopo desta versão)
+├─ Usuários, perfis e vínculo N:N usuário↔perfil↔analyses
+├─ Token de acesso opaco, emissão administrativa, sem OAuth/SSO
+└─ Ver RF5, Restrição T5 e ARQUITETURA.md ADR-007
+
+V1.1: Identificação de Cliente + Rate Limiting (quando necessário)
+├─ ClientIdentificationService: qual cliente MCP executou (Claude, Gemini, OpenAI, etc.) — FB1
+├─ Rate limiting / quotas por usuário — FB3
+├─ SSO/OAuth (Azure AD, Google, LDAP) — FB5, se a plataforma sair da rede confiável
+└─ Necessário antes de expor a aplicação além da rede interna confiável
 
 V1.2: Remoto + Escalabilidade
 ├─ Celery + Redis para production
@@ -586,7 +663,11 @@ Nossa Plataforma: Funciona com QUALQUER cliente MCP (protocolo padrão, via Stre
 | **Streamable HTTP** | Transporte MCP via HTTP com endpoint único (`/mcp`), sucessor do antigo transporte HTTP+SSE, permitindo múltiplos clientes remotos/na rede conectados ao mesmo servidor |
 | **Versioning** | Histórico de mudanças em análises |
 | **Rollback** | Voltar análise para versão anterior |
-| **Log de Execução** | Registro de cada execução (análise, parâmetros, status, tempo) |
+| **Log de Execução** | Registro de cada execução (análise, parâmetros, status, tempo, usuário) |
+| **Usuário** | Pessoa cadastrada com acesso à plataforma, identificada por 1+ token(s) de acesso; pode ser bloqueada |
+| **Perfil** | Agrupamento de analyses liberadas; vinculado a usuários (N:N) e a analyses (N:N) |
+| **Token de Acesso** | Segredo opaco (não JWT/OAuth2) que identifica o usuário nas chamadas MCP; validade configurável, revogável |
+| **Permissão Efetiva** | Conjunto de analyses ativas vinculadas a um perfil ativo vinculado ao usuário autenticado — recalculado a cada chamada, nunca cacheado no token |
 
 ---
 
