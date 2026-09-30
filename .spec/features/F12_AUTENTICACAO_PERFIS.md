@@ -59,6 +59,7 @@ Componentes novos:
 ├─ repositories/user_repo.py         # UserRepository
 ├─ repositories/profile_repo.py      # ProfileRepository (get_allowed_analysis_ids)
 ├─ repositories/access_token_repo.py # AccessTokenRepository
+├─ security/auth_middleware.py       # middleware ASGI em /mcp: 401 + contextvar do AuthenticatedUser (ver §4.2)
 ├─ schemas/auth.py                   # AuthenticatedUser, InvalidTokenError
 ├─ scripts/generate_access_token.py  # emissão administrativa de token (padrão de encrypt_credential.py)
 ├─ tests/test_token_auth.py
@@ -66,7 +67,8 @@ Componentes novos:
 └─ tests/test_mcp_tools_auth.py      # list_tools()/call_tool() com AuthenticatedUser
 
 Componentes modificados:
-├─ mcp_transport/tools.py            # list_tools()/call_tool() exigem AuthenticatedUser (ver §4.2, nota técnica)
+├─ mcp_transport/__init__.py         # registra o middleware; handlers leem o contextvar (stateless=True já aplicado)
+├─ mcp_transport/tools.py            # list_tools()/call_tool() exigem AuthenticatedUser (ver §4.2, decisão técnica)
 ├─ services/analysis_service.py      # get_allowed_analyses(user_id); execute(..., user_id=) repassado ao Audit
 ├─ services/audit_service.py         # log_execution(..., user_id=)
 ├─ repositories/execution_repo.py    # grava execution_history.user_id
@@ -122,8 +124,13 @@ python scripts/generate_access_token.py --user-id <uuid> --label "Claude Desktop
   └─ Imprime o token bruto 1 única vez — nunca fica salvo em texto puro
 ```
 
-**Nota técnica em aberto (a resolver na implementação, não muda nenhuma decisão de negócio):**
-O SDK `mcp` usado neste projeto (`mcp>=1.9.0,<2.0.0`, classe de baixo nível `Server`, ver ADR-006) registra `list_tools()`/`call_tool()` como decorators sem um parâmetro de `Request` HTTP direto. Como F12 precisa extrair e validar o header `Authorization` por requisição e entregar o `AuthenticatedUser` resultante dentro desses handlers, é necessário confirmar durante a implementação **como** threadar esse contexto — candidatos: (a) middleware ASGI que valida o token e guarda o `AuthenticatedUser` num `contextvar`, lido dentro de `list_tools()`/`call_tool()`; (b) mecanismo de contexto por requisição já exposto pelo SDK `mcp` (a confirmar na documentação/código da versão travada). Isso é detalhe de implementação de `mcp_transport/tools.py`, não uma decisão de arquitetura em aberto.
+**Decisão técnica (2026-09-29): transporte stateless + middleware ASGI com `contextvar`.**
+O SDK `mcp` (`mcp>=1.9.0,<2.0.0`, classe de baixo nível `Server`, ver ADR-006) registra `list_tools()`/`call_tool()` sem um parâmetro de `Request` HTTP. Decidido:
+1. **Pré-requisito já aplicado:** `StreamableHTTPSessionManager(app=mcp_server, stateless=True)` em `mcp_transport/__init__.py` (cada requisição HTTP é independente, sem `Mcp-Session-Id`). Sem isso, a autenticação validada só no `initialize` deixaria uma sessão aberta viva após o bloqueio do usuário. Validado: F6 com 2+ clientes reais e `TestStatelessTransport` (`tests/test_server_setup.py`), 189/189 testes ✅.
+2. **Middleware ASGI** em volta de `/mcp` (rota exata + mount `/mcp/...`): lê `Authorization: Bearer`, chama `AuthService.authenticate()`, responde **401 HTTP** em caso de `InvalidTokenError` (sem entrar no SDK), e guarda o `AuthenticatedUser` num `contextvar` do projeto.
+3. `list_tools()`/`call_tool()` em `mcp_transport/__init__.py` leem o `contextvar` e repassam o usuário a `tools.list_tools(current_user)`/`tools.call_tool(name, arguments, current_user)`.
+4. Um teste deve provar que o `contextvar` chega ao handler (duas requisições simultâneas com tokens de usuários distintos não se misturam).
+Alternativa descartada: ler `mcp_server.request_context.request.headers` dentro dos handlers — depende de detalhe interno do SDK e não permite recusar em nível HTTP. Ver ARQUITETURA.md §3.5 e ADR-006 (v1.19).
 
 ### 4.3 Banco de Dados
 
@@ -437,7 +444,7 @@ Um novo requisito de negócio (ex.: rate limiting por usuário — FB3) consome 
 |---|---|---|
 | 1 | Sem CRUD/endpoint administrativo para `users`/`profiles`/vínculos — segue o padrão já usado para `analyses`/`data_sources` (INSERT direto) | Aceito em V1.0, consistente com o resto da plataforma |
 | 2 | Sem tool MCP de auto-renovação de token — renovação é sempre manual (reemissão do script) | Decisão confirmada nesta sessão; pode virar backlog se o atrito for alto na prática |
-| 3 | Forma exata de threading do `AuthenticatedUser` do header HTTP até dentro de `list_tools()`/`call_tool()` (middleware + contextvar, ou mecanismo do SDK `mcp`) | A confirmar na implementação — ver nota técnica em §4.2 |
+| 3 | Threading do `AuthenticatedUser` do header HTTP até `list_tools()`/`call_tool()` | ✅ Resolvido: transporte stateless + middleware ASGI + `contextvar` — ver §4.2 |
 | 4 | Identificação de qual cliente MCP/software está chamando (FB1) continua fora de escopo — `label` do token é só uma anotação administrativa, não uma identificação automática | Fora de escopo, ver FEATURES_ROADMAP.md §9 |
 | 5 | Sem rate limiting/quota por usuário (FB3) | Fora de escopo, backlog futuro |
 | 6 | `execution_history.user_id` fica `NULL` para todas as linhas gravadas antes do F12 | Aceito — sem backfill retroativo |

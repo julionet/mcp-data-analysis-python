@@ -36,7 +36,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
 
 
-session_manager = StreamableHTTPSessionManager(app=mcp_server)
+# stateless=True: cada requisição HTTP é independente (sem Mcp-Session-Id). Necessário
+# para o F12 — token/usuário validados a cada chamada, bloqueio com efeito imediato.
+session_manager = StreamableHTTPSessionManager(app=mcp_server, stateless=True)
 
 
 class _MCPExactPathASGI:

@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.18 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Versão:** 1.19 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-29
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.18 → v1.19):** transporte MCP passa a **stateless** (`StreamableHTTPSessionManager(app=mcp_server, stateless=True)`, `mcp_transport/__init__.py`) — pré-requisito do F12, já aplicado no código e validado (F6 com 2+ clientes reais + `TestStatelessTransport` em `tests/test_server_setup.py`, 189/189 testes ✅). Racional: com sessão (`stateless=False`, padrão do SDK) o servidor mantém `Mcp-Session-Id` entre requisições, e um usuário bloqueado ou token revogado continuaria usando uma sessão já aberta — contradiz o requisito de bloqueio imediato do F12. Em stateless cada requisição HTTP é independente e é autenticada por conta própria. Registrado em ADR-006 (nova consequência) e na nota técnica de §3.5 (threading do `AuthenticatedUser` decidido: middleware ASGI + `contextvar`). Nenhuma outra decisão arquitetural mudou.
 
 > **Nota de revisão (v1.17 → v1.18):** F11 (SQL Server Adapter) implementado (2026-09-29), sem mudança de decisão arquitetural — `SQLServerAdapter` (`adapters/sqlserver.py`) registrado no `AdapterFactory` (§4.2). Detalhes de implementação: `translate_params()` gera `@nome` e `execute_query()` converte para `?` na ordem de ocorrência (o pyodbc só aceita parâmetros posicionais; o contrato do `DatabaseAdapter` não mudou); pool `aioodbc` com `minsize=1`/`maxsize=10` (o default 10/10 abriria 10 conexões no primeiro uso); autocommit; timeout de query via `settings.query_timeout_seconds`; `sslmode` mapeado para `Encrypt`/`TrustServerCertificate`; senha escapada em `PWD={...}`; autenticação somente usuário/senha SQL (sem Integrated Auth); driver ODBC configurável em `connection_config.driver` (padrão `ODBC Driver 18 for SQL Server`). Os erros nativos 1033/8155/8156 do wrapper `SELECT COUNT(*) FROM (<sql>) AS sub` são relançados com mensagem explicando a restrição de SQL; a mensagem fica no log do servidor, pois o `AnalysisService` continua devolvendo mensagem genérica ao cliente MCP. **Subconjunto comum de SQL** (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único e explícito, todo parâmetro declarado presente no SQL) documentado em `features/F11_SQLSERVER_ADAPTER.md` §8.4. Novo `tests/test_adapter_contract.py`: contrato de parâmetros agnóstico entre PostgreSQL, MySQL e SQL Server. Pendências registradas em F11 §10 (`sslmode` ignorado por PostgreSQL/MySQL; PostgreSQL depende de `params` na ordem de `param_names`).
 >
@@ -622,14 +624,16 @@ novo token para o usuário atualizar a config do cliente MCP. Sem self-service,
 sem endpoint de login (ver ADR-007, "Alternativas Rejeitadas").
 ```
 
-> **Nota sobre acesso ao header de autenticação dentro de `list_tools()`/`call_tool()`:**
-> o SDK `mcp` usado neste projeto (`mcp>=1.9.0,<2.0.0`, classe de baixo nível `Server`,
-> ver ADR-006) expõe os decorators `list_tools()`/`call_tool()` sem um parâmetro de
-> `Request` direto — como o F12 depende de extrair e validar o `Authorization` por
-> requisição, a forma exata de passar o `AuthenticatedUser` resolvido (middleware
-> ASGI + `contextvar`, ou outro mecanismo do SDK) é um detalhe a confirmar durante a
-> implementação (ver `features/F12_AUTENTICACAO_PERFIS.md`, §4.1) — não muda nenhuma
-> decisão deste documento, só o "como" de threading do contexto de autenticação.
+> **Decisão sobre acesso ao header de autenticação dentro de `list_tools()`/`call_tool()`
+> (v1.19):** o SDK `mcp` (`mcp>=1.9.0,<2.0.0`, classe de baixo nível `Server`, ver ADR-006)
+> não passa a `Request` HTTP como parâmetro dos decorators. Decidido: **middleware ASGI
+> em volta de `/mcp`** (rota exata e mount `/mcp/...`) que valida o token a cada requisição
+> — devolvendo 401 HTTP antes de o SDK processar qualquer coisa — e guarda o
+> `AuthenticatedUser` num `contextvar` do projeto, lido por `list_tools()`/`call_tool()`.
+> Só é seguro porque o transporte é **stateless** (ADR-006, v1.19): sem sessão, a task do
+> servidor de cada requisição herda o contexto dela. Descartada a alternativa de ler
+> `mcp_server.request_context.request.headers` dentro dos handlers (existe no SDK 1.30,
+> mas depende de detalhe interno e só cobre `list_tools`/`call_tool`, não a recusa HTTP).
 
 ---
 
@@ -1064,6 +1068,13 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 - A CLI padrão do uvicorn (`--ssl-certfile`/`--ssl-keyfile`) **não negocia ALPN** — alguns clientes (Chromium/Electron) abandonam a conexão TLS sem nunca enviar uma requisição HTTP se o servidor não participar da negociação ALPN. É necessário configurar um `ssl_context_factory` programático que chame `context.set_alpn_protocols(["http/1.1"])`.
 - O endpoint `/mcp`, se montado via `app.mount("/mcp", ...)` do Starlette/FastAPI, responde com redirect `307` para `/mcp/` quando a requisição bate exatamente em `/mcp` sem barra final — o padrão de URL usado por clientes reais. É necessário registrar também uma rota exata (`app.add_route("/mcp", ...)`) para esse caso, evitando o redirect. O próprio `FastMCP` (wrapper de alto nível do SDK, não usado aqui) resolve isso da mesma forma — registrando uma `Route` exata em vez de um `Mount`.
 - CORS precisa ser habilitado mesmo sem um navegador tradicional envolvido — clientes desktop (Electron) podem validar o conector via `fetch()` no processo de renderer, sujeito à mesma política de CORS de um browser.
+
+**Consequência adicionada na v1.19 — transporte stateless:**
+- O `StreamableHTTPSessionManager` roda com `stateless=True`: cada requisição HTTP cria um transporte novo e não há `Mcp-Session-Id`. Clientes que seguem a especificação simplesmente não reenviam o header (validado no F6 com 2+ clientes MCP reais).
+- Custo aceito: o servidor não pode iniciar mensagens por conta própria (notificações, `list_changed`, streaming de progresso). Nenhuma feature atual usa isso — `call_tool()` devolve 1 resultado por chamada.
+- Ganho: nenhum estado de conexão entre chamadas, e o `AuthenticatedUser` do F12 (middleware ASGI + `contextvar`, §3.5) fica sempre coerente com a requisição corrente, já que a task do servidor é criada dentro dela e herda seu contexto.
+- Cache, `VolumeGuardService` e `AuditService` não mudam (são singletons de módulo em `mcp_transport/tools.py`, sem relação com sessão MCP).
+- Rollback: trocar `stateless=True` por `False` — mas o F12 então teria de ler o header via `request_context` do SDK dentro dos handlers, e a validação por requisição continuaria obrigatória.
 
 Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 
