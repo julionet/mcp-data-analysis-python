@@ -4,7 +4,7 @@
 
 **Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.17)
 **Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
-**Data:** 2026-09-29 (atualizado — F12: tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
+**Data:** 2026-09-29 (atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
 > Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
@@ -116,7 +116,7 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `analysis_id` | UUID (FK → `analyses.id`) | ✅ | Qual análise foi executada |
-| `user_id` | UUID (FK → `users.id`) | — | Quem executou (F12). `NULL` para execuções anteriores a F12 |
+| `user_id` | UUID (FK → `users.id`, sem `ON DELETE` — `NO ACTION`) | — | Quem executou (F12). `NULL` para execuções anteriores a F12. **Impede apagar o usuário** enquanto houver execuções dele (preserva a auditoria) — ver §2.6 |
 | `parameters` | JSONB | — | Parâmetros com que a análise foi chamada |
 | `status` | VARCHAR(50) | — | `success`, `failed`, `timeout` (também usado para o caso `volume_exceeded`, ver ARQUITETURA.md §3.4) |
 | `execution_time_ms` | INT | — | Tempo total de execução em milissegundos |
@@ -137,13 +137,16 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `name` | VARCHAR(255) | ✅ | Nome do usuário |
-| `external_id` | VARCHAR(255) | — (UNIQUE) | Identificador externo opcional (login/e-mail/matrícula) |
-| `is_blocked` | BOOLEAN | — | Default `false`. Bloqueado perde acesso imediato a todas as analyses (ver ARQUITETURA.md §3.5) |
+| `external_id` | VARCHAR(255) | — (UNIQUE) | **E-mail de login (F12)**, cadastrado sempre em minúsculas; a aplicação normaliza (`strip().lower()`) o e-mail recebido em `POST /auth/token`/`/auth/revoke` antes de buscar. Sem `CHECK` no banco — cadastro com maiúscula nunca casa com o login |
+| `password_hash` | VARCHAR(255) | — | **Hash bcrypt da senha (F12)**, nunca a senha. `NULL` = usuário não consegue emitir token. Gerado fora do código e inserido à mão (ver F12 §8.2) |
+| `is_blocked` | BOOLEAN | ✅ (NOT NULL) | Default `false`. Bloqueado perde acesso imediato a todas as analyses (ver ARQUITETURA.md §3.5) |
 | `created_by` | VARCHAR(255) | — | Quem criou o registro |
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
 | `updated_at` | TIMESTAMP | — | Default `NOW()` |
 
 **Relacionamentos:** 1:N com `access_tokens`; N:N com `profiles` via `user_profiles`; referenciado por `execution_history.user_id`.
+
+**Exclusão de usuário:** `DELETE FROM users` **falha** (violação de FK) se o usuário tiver alguma linha em `execution_history` — decisão deliberada, para nunca perder o rastro de quem executou o quê. Vínculos em `user_profiles` e `access_tokens` têm `ON DELETE CASCADE` e são apagados junto. Para tirar o acesso de alguém que já executou análises, o caminho é `UPDATE users SET is_blocked = true` (efeito imediato, ver ARQUITETURA.md §3.5), e não apagar.
 
 ---
 
@@ -154,7 +157,7 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `name` | VARCHAR(255) | ✅ (UNIQUE) | Nome do perfil (ex.: `"Comercial"`) |
 | `description` | TEXT | — | Descrição do perfil |
-| `is_active` | BOOLEAN | — | Default `true`. Perfil inativo não libera nenhuma analysis, mesmo que o vínculo em `profile_analyses` exista |
+| `is_active` | BOOLEAN | ✅ (NOT NULL) | Default `true`. Perfil inativo não libera nenhuma analysis, mesmo que o vínculo em `profile_analyses` exista |
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
 | `updated_at` | TIMESTAMP | — | Default `NOW()` |
 
@@ -196,14 +199,16 @@ Token **opaco** — só o hash é persistido, nunca o valor bruto (ver ARQUITETU
 | `user_id` | UUID (FK → `users.id`, `ON DELETE CASCADE`) | ✅ | Dono do token |
 | `token_hash` | CHAR(64) | ✅ (UNIQUE) | SHA-256 hex do token bruto (`secrets.token_urlsafe(32)`) |
 | `label` | VARCHAR(255) | — | Identifica de qual cliente MCP é esse token (ex.: `"Claude Desktop - notebook Julio"`) |
-| `expires_at` | TIMESTAMP | ✅ | Expiração — default 90 dias na emissão (`ACCESS_TOKEN_EXPIRATION_DAYS`) |
-| `revoked_at` | TIMESTAMP | — | Preenchido se revogado manualmente antes de expirar |
-| `created_at` | TIMESTAMP | — | Default `NOW()` |
-| `last_used_at` | TIMESTAMP | — | Atualizado a cada autenticação bem-sucedida (observabilidade) |
+| `expires_at` | TIMESTAMPTZ | ✅ | Expiração — default 90 dias na emissão (`ACCESS_TOKEN_EXPIRATION_DAYS`) |
+| `revoked_at` | TIMESTAMPTZ | — | Preenchido se revogado manualmente antes de expirar |
+| `created_at` | TIMESTAMPTZ | — | Default `NOW()` |
+| `last_used_at` | TIMESTAMPTZ | — | Atualizado a cada autenticação bem-sucedida (observabilidade) |
 
 **Relacionamentos:** N:1 com `users`.
 
-**Emissão e renovação:** administrativa, via `scripts/generate_access_token.py` — sem endpoint de login/senha no servidor (ver ARQUITETURA.md §3.5, ADR-007).
+**Fuso:** as 4 datas desta tabela são `TIMESTAMPTZ` (o resto do schema usa `TIMESTAMP`), porque o asyncpg devolve `TIMESTAMP` sem fuso e a validação de expiração compara com `datetime.now(timezone.utc)`.
+
+**Emissão, renovação e revogação:** pelo próprio usuário, via `POST /auth/token` (e-mail + senha; `label` e `expire_days` opcionais) e `POST /auth/revoke` — ver ARQUITETURA.md §3.5, ADR-007 e `features/F12_AUTENTICACAO_PERFIS.md`. O `label` é texto livre informado pelo usuário no pedido de emissão.
 
 ---
 
@@ -264,7 +269,7 @@ CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
 CREATE INDEX idx_execution_history_user ON execution_history(user_id);
-CREATE INDEX idx_access_tokens_hash ON access_tokens(token_hash);
+-- (sem índice em token_hash: o UNIQUE de access_tokens.token_hash já cria um índice)
 CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 ```
 

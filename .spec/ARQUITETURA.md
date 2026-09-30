@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.19 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Versão:** 1.20 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-29
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.19 → v1.20):** F12 passa a emitir token por **e-mail e senha**, pelo próprio usuário (revisão de ADR-007; sem mudança no formato do token nem na autorização por perfis). (1) Novos endpoints `POST /auth/token` (e-mail, senha, `label` e `expire_days` opcionais; `expire_days` limitado por `ACCESS_TOKEN_MAX_EXPIRATION_DAYS`) e `POST /auth/revoke` (e-mail, senha e token; credenciais validadas antes do token; 404 para token inexistente ou de outro usuário), em `routes/auth.py`, registrados em `main.py`, fora do middleware do `/mcp` — §3.5. (2) `users` ganha `password_hash` (bcrypt); `external_id` vira o e-mail de login (minúsculas, normalizado pela aplicação) — §2.2. (3) `scripts/generate_access_token.py` removido — §5.2, §8, §9. (4) Nova dependência `bcrypt` — §5.1; novas variáveis `ACCESS_TOKEN_MAX_EXPIRATION_DAYS` — §8.2. (5) ADR-007 revisado: emissão self-service em vez de administrativa; consequência registrada — os endpoints ampliam a superfície de ataque e V1.0 não tem proteção contra tentativas de senha (só log). (6) Falhas de login e revogação com log próprio (sem senha e sem e-mail) — F12 §4.5. (7) Revisão final do F12: datas de `access_tokens` em `TIMESTAMPTZ` (asyncpg devolve `TIMESTAMP` sem fuso e a comparação com `datetime.now(timezone.utc)` falharia); `users.is_blocked` e `profiles.is_active` `NOT NULL DEFAULT`; árvore de pastas §5.2 corrigida (sem `models.py`/Alembic — o schema é `database/schema.sql` + `database/migrations/f12_autenticacao.sql`).
+>
 > **Nota de revisão (v1.18 → v1.19):** transporte MCP passa a **stateless** (`StreamableHTTPSessionManager(app=mcp_server, stateless=True)`, `mcp_transport/__init__.py`) — pré-requisito do F12, já aplicado no código e validado (F6 com 2+ clientes reais + `TestStatelessTransport` em `tests/test_server_setup.py`, 189/189 testes ✅). Racional: com sessão (`stateless=False`, padrão do SDK) o servidor mantém `Mcp-Session-Id` entre requisições, e um usuário bloqueado ou token revogado continuaria usando uma sessão já aberta — contradiz o requisito de bloqueio imediato do F12. Em stateless cada requisição HTTP é independente e é autenticada por conta própria. Registrado em ADR-006 (nova consequência) e na nota técnica de §3.5 (threading do `AuthenticatedUser` decidido: middleware ASGI + `contextvar`). Nenhuma outra decisão arquitetural mudou.
 
 > **Nota de revisão (v1.17 → v1.18):** F11 (SQL Server Adapter) implementado (2026-09-29), sem mudança de decisão arquitetural — `SQLServerAdapter` (`adapters/sqlserver.py`) registrado no `AdapterFactory` (§4.2). Detalhes de implementação: `translate_params()` gera `@nome` e `execute_query()` converte para `?` na ordem de ocorrência (o pyodbc só aceita parâmetros posicionais; o contrato do `DatabaseAdapter` não mudou); pool `aioodbc` com `minsize=1`/`maxsize=10` (o default 10/10 abriria 10 conexões no primeiro uso); autocommit; timeout de query via `settings.query_timeout_seconds`; `sslmode` mapeado para `Encrypt`/`TrustServerCertificate`; senha escapada em `PWD={...}`; autenticação somente usuário/senha SQL (sem Integrated Auth); driver ODBC configurável em `connection_config.driver` (padrão `ODBC Driver 18 for SQL Server`). Os erros nativos 1033/8155/8156 do wrapper `SELECT COUNT(*) FROM (<sql>) AS sub` são relançados com mensagem explicando a restrição de SQL; a mensagem fica no log do servidor, pois o `AnalysisService` continua devolvendo mensagem genérica ao cliente MCP. **Subconjunto comum de SQL** (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único e explícito, todo parâmetro declarado presente no SQL) documentado em `features/F11_SQLSERVER_ADAPTER.md` §8.4. Novo `tests/test_adapter_contract.py`: contrato de parâmetros agnóstico entre PostgreSQL, MySQL e SQL Server. Pendências registradas em F11 §10 (`sslmode` ignorado por PostgreSQL/MySQL; PostgreSQL depende de `params` na ordem de `param_names`).
@@ -104,7 +106,7 @@ um header customizado funciona — cada usuário/cliente usa seu próprio token
     "analysis": {
       "url": "https://192.168.1.50:3000/mcp",
       "headers": {
-        "Authorization": "Bearer <token gerado por scripts/generate_access_token.py>"
+        "Authorization": "Bearer <token obtido em POST /auth/token>"
       }
     }
   }
@@ -202,6 +204,9 @@ identificação de cliente MCP, rate limiting e SSO/OAuth DEVEM ser avaliados
 │  │  │  └─ get_execution_history()                     │   │
 │  │  └─ AuthService (F12 — ver §3.5, ADR-007)           │   │
 │  │     ├─ authenticate(raw_token) -> AuthenticatedUser │   │
+│  │     ├─ issue_token(email, password, label,          │   │
+│  │     │               expire_days) -> (token, exp)    │   │
+│  │     ├─ revoke_token(email, password, raw_token)     │   │
 │  │     └─ get_allowed_analysis_ids(user_id) -> set[UUID]│  │
 │  └─────────────────────────────────────────────────────┘   │
 │                           ↓                                  │
@@ -277,8 +282,9 @@ CREATE TABLE analysis_steps (
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
-    external_id VARCHAR(255) UNIQUE,  -- identificador externo (login/e-mail/matrícula), opcional
-    is_blocked BOOLEAN DEFAULT false,
+    external_id VARCHAR(255) UNIQUE,  -- e-mail de login (F12), cadastrado em minúsculas; a app normaliza o e-mail recebido
+    password_hash VARCHAR(255),       -- hash bcrypt da senha (F12); NULL = usuário não consegue emitir token
+    is_blocked BOOLEAN NOT NULL DEFAULT false,
     created_by VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -289,7 +295,7 @@ CREATE TABLE profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) UNIQUE NOT NULL,
     description TEXT,
-    is_active BOOLEAN DEFAULT true,
+    is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -314,17 +320,17 @@ CREATE TABLE access_tokens (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token_hash CHAR(64) NOT NULL UNIQUE,  -- SHA-256 hex do token bruto
     label VARCHAR(255),                    -- ex.: "Claude Desktop - notebook Julio"
-    expires_at TIMESTAMP NOT NULL,
-    revoked_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    last_used_at TIMESTAMP
+    expires_at TIMESTAMPTZ NOT NULL,       -- TIMESTAMPTZ: asyncpg devolve datetime com fuso (comparação com now(UTC) em Python)
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ
 );
 
 -- Tabela 9: Histórico de Execuções (F12 adiciona user_id — quem executou)
 CREATE TABLE execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id),
-    user_id UUID REFERENCES users(id),  -- nullable: quem executou (F12); NULL para execuções pré-F12
+    user_id UUID REFERENCES users(id),  -- nullable: quem executou (F12); NULL para execuções pré-F12; sem ON DELETE: impede apagar usuário com histórico
 
     parameters JSONB,
     status VARCHAR(50),  -- success, failed, timeout
@@ -342,7 +348,7 @@ CREATE INDEX idx_analyses_active ON analyses(is_active);
 CREATE INDEX idx_execution_history_analysis ON execution_history(analysis_id);
 CREATE INDEX idx_execution_history_executed_at ON execution_history(executed_at);
 CREATE INDEX idx_execution_history_user ON execution_history(user_id);
-CREATE INDEX idx_access_tokens_hash ON access_tokens(token_hash);
+-- (sem índice em token_hash: o UNIQUE de access_tokens.token_hash já cria um índice)
 CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 ```
 
@@ -612,23 +618,61 @@ Diferente de um JWT, o token é **opaco** — a validação sempre consulta o BD
            a registrar quem executou (execution_history.user_id)
 ```
 
-**Emissão e renovação de token — fora do fluxo MCP, administrativa:**
+**Resposta de recusa (401) — genérica, idêntica em todos os casos:**
 ```
-scripts/generate_access_token.py --user-id <uuid> --expires-days 90
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+Content-Type: application/json
+
+{"error": "unauthorized", "message": "Token de acesso inválido ou ausente."}
+```
+Vale para header `Authorization` ausente ou malformado, token inexistente, expirado,
+revogado, e usuário bloqueado ou inexistente — **sem distinguir o motivo** (não vaza se um
+token existiu, expirou ou pertence a um usuário bloqueado). Quem precisa saber por que o
+acesso falhou é o admin (que consulta o log), não o cliente; o cliente só precisa saber que
+deve emitir um novo token em `POST /auth/token`.
+A recusa por falta de permissão numa análise (`call_tool()`, passo 4) é outro caso: não é
+401 — o usuário está autenticado, e a resposta é o payload MCP `status: "error"`.
+
+**Log de falhas:** como o cliente não vê o motivo, o servidor registra o motivo real
+(`WARNING`, `logging` padrão/stdout): `auth_failed reason=<token_expired|token_revoked|token_not_found|
+user_blocked|user_not_found|missing_header|malformed_header> client_ip=... token_id=... user_id=...`
+no middleware, `access_denied user_id=... analysis_id=... analysis_name=...` em `call_tool()`, e
+`login_failed endpoint=... reason=<user_not_found|no_password|wrong_password|user_blocked> client_ip=... user_id=...`
+em `/auth/token` e `/auth/revoke`. Nunca loga o token bruto, o header `Authorization`, o hash, a senha,
+o `password_hash` nem o e-mail informado. Sem tabela de auditoria de
+falhas em V1.0. Detalhes: `features/F12_AUTENTICACAO_PERFIS.md` §4.5.
+
+**Emissão e renovação de token — self-service, fora do fluxo MCP (rotas em `routes/auth.py`, registradas em `main.py`):**
+```
+POST /auth/token   {"email", "password", "label"?, "expire_days"?}        (TLS obrigatório)
+  ├─ email = strip().lower()  →  UserRepository.get_by_external_id(email)
+  ├─ bcrypt.checkpw(password, users.password_hash)        -- em thread (CPU-bound)
+  │    └─ e-mail inexistente / sem password_hash / senha errada / is_blocked=true
+  │       → 401 genérico {"error": "invalid_credentials", "message": "E-mail ou senha inválidos."}
+  │         (idêntico nos 4 casos; motivo real só no log; nenhum token é criado)
+  ├─ expire_days ausente → ACCESS_TOKEN_EXPIRATION_DAYS; > ACCESS_TOKEN_MAX_EXPIRATION_DAYS → 400
   ├─ token = secrets.token_urlsafe(32)  -- gerado 1x, nunca reconstruído
   ├─ AccessTokenRepository.create(user_id, hash=sha256(token), expires_at, label)
-  └─ Imprime o token bruto 1 única vez — não fica salvo em texto puro em lugar nenhum
+  └─ 200 {"token", "token_type": "Bearer", "expires_at"} — token bruto devolvido 1 única vez
 
-Renovação: quando o token expira, o admin roda o script de novo e reenvia o
-novo token para o usuário atualizar a config do cliente MCP. Sem self-service,
-sem endpoint de login (ver ADR-007, "Alternativas Rejeitadas").
+POST /auth/revoke  {"email", "password", "token"}
+  ├─ valida e-mail/senha PRIMEIRO (401 igual ao acima)
+  ├─ token inexistente ou de outro usuário → 404 {"error": "token_not_found", ...}
+  └─ senão revoked_at = now() → 200 {"status": "revoked"}
+
+Renovação: quando o token expira, o usuário chama POST /auth/token de novo e atualiza a
+config do cliente MCP. Sem admin no processo, sem tool MCP de renovação (ver ADR-007).
+Os dois endpoints ficam FORA do middleware de autenticação do /mcp (não usam Bearer).
+Usuários (e-mail em minúsculas + hash bcrypt) continuam cadastrados por INSERT direto, sem CRUD.
 ```
 
 > **Decisão sobre acesso ao header de autenticação dentro de `list_tools()`/`call_tool()`
 > (v1.19):** o SDK `mcp` (`mcp>=1.9.0,<2.0.0`, classe de baixo nível `Server`, ver ADR-006)
 > não passa a `Request` HTTP como parâmetro dos decorators. Decidido: **middleware ASGI
 > em volta de `/mcp`** (rota exata e mount `/mcp/...`) que valida o token a cada requisição
-> — devolvendo 401 HTTP antes de o SDK processar qualquer coisa — e guarda o
+> — devolvendo 401 HTTP antes de o SDK processar qualquer coisa (o middleware fica dentro do
+> `CORSMiddleware`: preflight `OPTIONS` passa sem token e o 401 leva os headers CORS) — e guarda o
 > `AuthenticatedUser` num `contextvar` do projeto, lido por `list_tools()`/`call_tool()`.
 > Só é seguro porque o transporte é **stateless** (ADR-006, v1.19): sem sessão, a task do
 > servidor de cada requisição herda o contexto dela. Descartada a alternativa de ler
@@ -750,6 +794,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from uuid import UUID
 
 
 def generate_token() -> str:
@@ -762,22 +807,35 @@ def hash_token(raw_token: str) -> str:
 
 @dataclass
 class AuthenticatedUser:
-    id: str
+    id: UUID   # mesmo tipo de users.id (UUID) e das demais entidades (Analysis.id etc.)
     name: str
 
 
 class InvalidTokenError(Exception):
-    pass
+    def __init__(self, message: str, reason: str, token_id: UUID | None = None, user_id: UUID | None = None):
+        super().__init__(message)          # mensagem genérica, a única que o cliente vê
+        self.reason = reason               # AuthFailureReason — só para o log (§3.5)
+        self.token_id = token_id
+        self.user_id = user_id
 
 
 async def authenticate(raw_token: str, token_repo, user_repo) -> AuthenticatedUser:
     token = await token_repo.get_by_hash(hash_token(raw_token))
-    if token is None or token.revoked_at is not None or token.expires_at < datetime.now(timezone.utc):
-        raise InvalidTokenError("Token inválido ou expirado")
+    # Mensagem única e genérica ao cliente em todos os casos de recusa (ver §3.5);
+    # o motivo real vai em `reason` (AuthFailureReason) só para o log do servidor.
+    generic = "Token de acesso inválido ou ausente."
+    if token is None:
+        raise InvalidTokenError(generic, reason="token_not_found")
+    if token.revoked_at is not None:
+        raise InvalidTokenError(generic, reason="token_revoked", token_id=token.id, user_id=token.user_id)
+    if token.expires_at < datetime.now(timezone.utc):
+        raise InvalidTokenError(generic, reason="token_expired", token_id=token.id, user_id=token.user_id)
 
     user = await user_repo.get_by_id(token.user_id)
-    if user is None or user.is_blocked:
-        raise InvalidTokenError("Usuário bloqueado ou inexistente")
+    if user is None:
+        raise InvalidTokenError(generic, reason="user_not_found", token_id=token.id, user_id=token.user_id)
+    if user.is_blocked:
+        raise InvalidTokenError(generic, reason="user_blocked", token_id=token.id, user_id=user.id)
 
     await token_repo.touch_last_used(token.id)
     return AuthenticatedUser(id=user.id, name=user.name)
@@ -836,6 +894,7 @@ structlog==23.2.0
 
 # Security
 cryptography==41.0.7  # Fernet — cifra connection_config.password em repouso (ver §8.2)
+bcrypt  # F12 — hash de senha de users.password_hash (versão a fixar na implementação; conferir wheel Python 3.13)
 
 # Utils
 python-dotenv==1.0.0
@@ -851,6 +910,10 @@ analysis_app/
 ├── main.py                    # FastAPI app entry point (Streamable HTTP)
 ├── config.py                  # Configuration (pydantic)
 ├── requirements.txt
+│
+├── routes/                    # F12 — rotas HTTP fora do /mcp, registradas em main.py (include_router)
+│   ├── __init__.py
+│   └── auth.py                # POST /auth/token, POST /auth/revoke (§3.5)
 │
 ├── adapters/
 │   ├── __init__.py
@@ -872,7 +935,9 @@ analysis_app/
 ├── security/
 │   ├── __init__.py
 │   ├── crypto.py             # Fernet — cifra connection_config.password (já existente)
-│   └── token_auth.py         # F12 — generate_token()/hash_token()/authenticate() (§4.5)
+│   ├── token_auth.py         # F12 — generate_token()/hash_token()/authenticate() (§4.5)
+│   ├── password_hash.py      # F12 — verify_password() (bcrypt, em thread) (§4.5)
+│   └── auth_middleware.py    # F12 — middleware ASGI do /mcp: 401 + contextvar do AuthenticatedUser (§3.5)
 │
 ├── repositories/
 │   ├── __init__.py
@@ -901,16 +966,14 @@ analysis_app/
 │                              # escopo em V1.0, ver F5_MCP_TOOLS_INTEGRATION.md §3
 │
 ├── scripts/
-│   ├── encrypt_credential.py     # já existente
-│   └── generate_access_token.py  # F12 — emissão administrativa de token (§3.5)
+│   └── encrypt_credential.py     # já existente (não há mais script de emissão de token — F12 usa POST /auth/token)
 │
 ├── database/
 │   ├── __init__.py
 │   ├── connection.py         # DB connection pool
-│   ├── migrations/
-│   │   ├── versions/         # Alembic migrations
-│   │   └── env.py
-│   └── models.py             # SQLAlchemy models
+│   ├── schema.sql            # schema do Config DB, aplicado à mão (F12 acrescenta as tabelas de auth)
+│   └── migrations/
+│       └── f12_autenticacao.sql  # F12 — CREATE/ALTER para bancos já criados (o projeto não usa Alembic/SQLAlchemy)
 │
 ├── logs/
 │   ├── app.log
@@ -1084,7 +1147,7 @@ Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 
 ### ADR-007: Autenticação por Token Opaco (F12) — Não JWT, Não OAuth2
 
-**Decisão:** Autenticar cada chamada MCP com um **token de acesso opaco** (segredo aleatório gerado com `secrets.token_urlsafe`, hash SHA-256 persistido — nunca o valor bruto), emitido administrativamente via script, sem login/senha nem fluxo OAuth.
+**Decisão:** Autenticar cada chamada MCP com um **token de acesso opaco** (segredo aleatório gerado com `secrets.token_urlsafe`, hash SHA-256 persistido — nunca o valor bruto). O token é emitido pelo **próprio usuário**, num endpoint HTTP do servidor (`POST /auth/token`) que recebe **e-mail e senha** (hash bcrypt em `users.password_hash`) — sem fluxo OAuth e sem admin no processo. *(Revisão v1.20: a decisão original era emissão administrativa por script, sem login/senha no servidor.)*
 
 **Contexto:** F12 exige saber "quem" está chamando `list_tools()`/`call_tool()`, para filtrar analyses por perfil e negar acesso a usuário bloqueado. Três mecanismos foram avaliados:
 
@@ -1100,14 +1163,17 @@ Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 - ✅ A permissão efetiva (quais analyses um usuário pode ver/executar) depende de `user_profiles`/`profile_analyses`, que podem mudar a qualquer momento — e o requisito de negócio exige que bloquear um usuário tenha efeito **imediato**. Isso força uma consulta ao BD em toda chamada de qualquer forma — a vantagem "stateless" de um JWT (evitar ida ao BD) não se realiza neste projeto, então sua complexidade extra (gestão de chave de assinatura, rotação, blacklist para revogar antes do `exp`) não compra nada em troca
 - ✅ OAuth 2.1 resolve delegação de autorização para clientes de terceiros não confiáveis — não é o problema deste projeto (rede interna confiável, ver Restrição T1). Pior: apostar a autenticação nisso acopla o servidor ao cliente MCP mais avançado (confirmado: Claude Desktop suporta a extensão de autorização MCP; não há confirmação equivalente para outros clientes), o que vai contra o pilar "agnóstico de cliente MCP" do projeto (ver NEGOCIO.md §13)
 - ✅ Token opaco funciona em qualquer cliente MCP capaz de enviar um header HTTP customizado — praticamente universal, sem exigir que o cliente implemente autorização nenhuma
-- ✅ Revogação trivial: `UPDATE access_tokens SET revoked_at = NOW()`, sem blacklist
+- ✅ Revogação trivial: `UPDATE access_tokens SET revoked_at = NOW()`, sem blacklist (o usuário revoga o próprio token por `POST /auth/revoke`)
+- ✅ (v1.20) Emissão self-service por e-mail/senha: elimina o admin como gargalo e não exige que o usuário tenha acesso ao banco de configuração (um script local exigiria as credenciais do Config DB em cada máquina). A senha nunca sai do hash bcrypt persistido; o segredo que o cliente MCP carrega continua sendo só o token opaco (nunca a senha)
 
 **Alternativas Rejeitadas:**
+- ❌ (v1.20) Script local de emissão rodado por cada usuário: obrigaria a distribuir credenciais do Config DB
 - ❌ JWT: complexidade de assinatura/rotação sem ganho real de performance (BD já é consultado por causa do bloqueio imediato e das permissões dinâmicas)
 - ❌ OAuth 2.1 (inclusive a extensão de autorização MCP para Streamable HTTP): overkill para rede interna confiável; quebra o requisito de "qualquer cliente MCP" por depender de suporte desigual entre clientes ao fluxo de autorização
 
 **Consequências:**
-- Emissão e renovação de token são **administrativas** (script local, `scripts/generate_access_token.py`), sem endpoint de login/senha no servidor — reduz superfície de ataque, mas exige um humano no processo de emissão/renovação (aceito: expiração longa de 90 dias torna isso raro)
+- (v1.20) Emissão e revogação de token são **endpoints HTTP públicos** (`POST /auth/token`, `POST /auth/revoke`, fora do middleware do `/mcp`), protegidos apenas por e-mail e senha sobre TLS — **aumenta a superfície de ataque** em relação à emissão por script: sem rate limit nem bloqueio por tentativas em V1.0 (decisão confirmada; só log — ver F12 §10, item 8), a proteção contra força bruta a senhas é só o custo do bcrypt. Rever antes de qualquer exposição fora da rede interna. Falhas de login retornam sempre o mesmo 401 genérico (sem distinguir e-mail inexistente, senha errada, sem senha ou bloqueado)
+- Usuários continuam cadastrados por INSERT direto (sem CRUD), agora com `external_id` (e-mail em minúsculas) e `password_hash`; sem troca/recuperação de senha em V1.0
 - `list_tools()`/`call_tool()` sempre fazem 1+ consultas ao BD por chamada — aceitável para o volume de uso deste projeto (rede interna, sem SLA de alta escala)
 
 ---
@@ -1168,7 +1234,8 @@ Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 Exemplo .env:
 POSTGRES_CONFIG_PASSWORD=secure_password
 FERNET_KEY=<chave gerada com Fernet.generate_key(), fora do repositório>
-ACCESS_TOKEN_EXPIRATION_DAYS=90  # F12 — validade padrão de novos tokens (scripts/generate_access_token.py)
+ACCESS_TOKEN_EXPIRATION_DAYS=90       # F12 — validade padrão de novos tokens (POST /auth/token sem expire_days)
+ACCESS_TOKEN_MAX_EXPIRATION_DAYS=365  # F12 — maior expire_days aceito em POST /auth/token (acima → 400)
 ```
 
 **Formato de `data_sources.connection_config`** (ver §2.2, Tabela 1 — antes um placeholder):
@@ -1208,8 +1275,9 @@ python run_https.py
 # Verificar
 curl https://localhost:3000/health
 
-# Gerar um token de acesso para o usuário (F12 — ver §3.5, ADR-007):
-python scripts/generate_access_token.py --user-id <uuid> --expires-days 90
+# Emitir um token de acesso (F12 — ver §3.5, ADR-007) — o próprio usuário, com e-mail e senha:
+curl -X POST https://localhost:3000/auth/token -H "Content-Type: application/json" \
+     -d '{"email": "maria@empresa.com", "password": "...", "label": "Claude Desktop", "expire_days": 90}'
 
 # Configuração em cada cliente MCP (exemplo genérico, formato varia por app):
 # {

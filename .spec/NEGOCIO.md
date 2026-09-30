@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.9 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Versão:** 1.10 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-29
 **Autor:** Jose
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.9 → v1.10):** a emissão de token do RF5 deixa de ser administrativa (script) e passa a ser **feita pelo próprio usuário**, informando **e-mail e senha** num endpoint do servidor (`POST /auth/token`); um segundo endpoint (`POST /auth/revoke`) permite revogar o próprio token. Só e-mail e senha válidos geram token; usuário bloqueado não gera. Usuários continuam cadastrados manualmente no banco (sem CRUD), agora com senha guardada como hash. Sem proteção contra tentativas de senha em V1.0 (rede interna) — a rever antes de expor fora dela (Restrição T5 e §12). Ver ARQUITETURA.md v1.20 (ADR-007 revisado) e `features/F12_AUTENTICACAO_PERFIS.md`.
+>
 > **Nota de revisão (v1.8 → v1.9):** documento aprovado. Autenticação e controle de acesso passam a fazer parte do escopo desta versão, via nova feature **F12** (ver FEATURES_ROADMAP.md v1.12 e ARQUITETURA.md ADR-007): usuários cadastrados, agrupados em perfis, e perfis vinculados às analyses que liberam — um usuário só acessa (via `list_tools`/`call_tool`) analyses ativas vinculadas a um perfil ativo vinculado a ele. Autenticação via **token de acesso opaco** (não JWT, não OAuth2 — ver ARQUITETURA.md ADR-007 para as alternativas comparadas e a razão da escolha), emitido administrativamente (sem login/senha no servidor), validade padrão de 90 dias, renovação manual. Usuário bloqueado perde acesso imediatamente. `execution_history` (F8) ganha `user_id` (nullable) para auditoria por usuário. Isso substitui, com um desenho revisado, o que estava anotado em "Roadmap Futuro" (§12, V1.1) desde a v1.2 deste documento — a seção foi atualizada para refletir que esse requisito específico (identificação de usuário + RBAC) não é mais futuro. Rate limiting/quotas por usuário e SSO/OAuth seguem fora de escopo (ver §12 revisado). Atualizados: §4 (Escopo), nova UC3 (§6), nova RF5 (§7), RNF5 (§8), Restrição T5 (§9), §12 (Roadmap Futuro), §14 (Glossário).
 
 > **Nota de revisão (v1.7 → v1.8):** documento aprovado. O adapter de **MongoDB** foi removido do escopo de V1.0 e substituído por **Oracle** (Oracle Database 12.1+, via `python-oracledb` em modo thin — sem Oracle Client no SO). MongoDB não entra no Backlog Futuro: sai de vez. Com isso, todos os data sources de V1.0 são relacionais/SQL (PostgreSQL, MySQL, SQL Server, Oracle). Atualizados: escopo (§4), RF2/RF3 (§7), dependências externas (§10), critérios de sucesso da Sprint 2 (§11) e glossário (§14). Ver FEATURES_ROADMAP.md v1.11 e ARQUITETURA.md v1.15.
@@ -322,7 +324,7 @@ Scenario: Análise não liberada para o perfil do usuário
 ```
 
 **Benefício:** cada usuário só vê e executa as analyses do(s) perfil(is) vinculado(s) a ele; bloqueio e mudança de perfil têm efeito imediato, sem depender de o token expirar.
-**Esforço:** ~0 minutos do ponto de vista do usuário final (token configurado 1 vez no cliente MCP); emissão/gestão de usuários e perfis é administrativa (ver RF5).
+**Esforço:** ~0 minutos do ponto de vista do usuário final (token configurado 1 vez no cliente MCP); o usuário emite o próprio token com e-mail e senha (ver RF5); o cadastro de usuários e perfis é feito direto no banco.
 
 ---
 
@@ -420,9 +422,13 @@ Então:
 
 **Critério de Aceitação:**
 - ✅ Token é opaco (não JWT, não OAuth2 — ver ARQUITETURA.md ADR-007); só o hash SHA-256 é persistido, nunca o valor bruto
-- ✅ Emissão de token é administrativa (script local), sem endpoint de login/senha no servidor
+- ✅ O próprio usuário emite o token num endpoint do servidor (`POST /auth/token`), informando e-mail e senha; só credenciais válidas geram token, e usuário bloqueado, sem senha, inexistente ou com senha errada recebe a mesma recusa genérica
+- ✅ A senha é guardada apenas como hash (bcrypt); nunca em texto puro
+- ✅ O usuário revoga um token próprio por `POST /auth/revoke` (e-mail, senha e o token); token inexistente ou de outro usuário responde "não encontrado"
+- ✅ No pedido de emissão, o usuário pode informar um `label` e uma validade (`expire_days`, limitada por configuração); sem `expire_days` vale o padrão do `.env`
 - ✅ Um usuário pode ter múltiplos tokens simultâneos (1 por cliente MCP)
-- ✅ Expiração padrão de 90 dias (configurável via `.env`), renovação manual (reemissão)
+- ✅ Expiração padrão de 90 dias (configurável via `.env`), renovação manual (o usuário emite um novo token)
+- ⚠️ Sem proteção contra tentativas de senha em V1.0 (sem rate limit nem bloqueio por tentativas) — só log
 - ✅ Bloquear um usuário (`is_blocked=true`) corta acesso imediatamente, mesmo com token ainda não expirado
 - ✅ Mudança de vínculo usuário↔perfil ou perfil↔analysis tem efeito imediato (sem cache de permissão)
 - ✅ `call_tool()` nunca confia apenas na lista que `list_tools()` já retornou — revalida
@@ -521,7 +527,7 @@ Então:
 
 ### Restrição T5: Autenticação por Token de Acesso, Sem OAuth/SSO em V1.0
 - ✅ Rede interna é assumida confiável, mas toda chamada MCP exige um token de acesso válido (ver RF5) — a rede confiável não dispensa saber quem está executando
-- ✅ Token opaco emitido administrativamente (script local), sem login/senha nem endpoint público de autenticação
+- ✅ Token opaco emitido pelo próprio usuário via e-mail e senha (`POST /auth/token`), sobre TLS; endpoints de emissão/revogação não exigem token, então **não há proteção contra tentativas de senha em V1.0** (decisão para rede interna — ver §12)
 - ❌ Não requer OAuth2/SSO/LDAP em V1.0 (ver ARQUITETURA.md ADR-007 para o racional)
 - ❌ Não requer identificação de qual cliente MCP/software está chamando em V1.0 (ex.: Claude Desktop vs. Gemini Desktop — ver FB1 em §12)
 - ❌ Não há rate limiting/quota por usuário em V1.0 (ver §12)
@@ -578,7 +584,8 @@ Então:
 ```
 V1.0: Autenticação por Token + Perfis (F12 — já no escopo desta versão)
 ├─ Usuários, perfis e vínculo N:N usuário↔perfil↔analyses
-├─ Token de acesso opaco, emissão administrativa, sem OAuth/SSO
+├─ Token de acesso opaco, emitido pelo usuário por e-mail e senha, sem OAuth/SSO
+├─ (Pendente antes de expor fora da rede interna) rate limit/bloqueio por tentativas em /auth/token
 └─ Ver RF5, Restrição T5 e ARQUITETURA.md ADR-007
 
 V1.1: Identificação de Cliente + Rate Limiting (quando necessário)

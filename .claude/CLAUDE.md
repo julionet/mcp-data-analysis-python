@@ -3,7 +3,7 @@
 # Análise de Dados Genérica com MCP - V1.0
 
 ## Projeto
-Plataforma agnóstica de LLM para análise de dados conversacional, **multi-cliente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. — todos via Streamable HTTP com TLS obrigatório), multi-database. **Sem autenticação/identificação de usuário ou cliente em V1.0** (rede interna confiável). **Servidor não transforma dados** (sem handlers) — executa a query parametrizada e devolve o dataset bruto; é o LLM do cliente MCP quem interpreta/agrega, com um Controle de Volume (COUNT(*) + KB) protegendo contra resultados grandes demais. Log de execução completo para auditoria (sem identificação de usuário/cliente).
+Plataforma agnóstica de LLM para análise de dados conversacional, **multi-cliente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. — todos via Streamable HTTP com TLS obrigatório), multi-database. **Autenticação por token opaco + controle de acesso por perfis (F12 — spec completa, implementação pendente na Sprint 3):** o usuário emite o próprio token em `POST /auth/token` (e-mail + senha, hash bcrypt) e o envia em `Authorization: Bearer`; só vê/executa analyses liberadas pelos perfis dele. **Até o F12 ser implementado o servidor ainda roda sem autenticação** (rede interna confiável). Identificação de *qual cliente MCP/software* chama segue fora de escopo. **Servidor não transforma dados** (sem handlers) — executa a query parametrizada e devolve o dataset bruto; é o LLM do cliente MCP quem interpreta/agrega, com um Controle de Volume (COUNT(*) + KB) protegendo contra resultados grandes demais. Log de execução completo para auditoria (hoje sem identificação de usuário; o F12 acrescenta `user_id`).
 
 ## Stack
 FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, porta 3000) + PostgreSQL + Python. Cache em memória local (Redis só em ambiente remoto/futuro).
@@ -25,17 +25,21 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F10: MySQL Adapter 🟩 Done (named parameters `%(name)s`, 3 correções, 23/23 testes ✅)
 - F11: SQL Server Adapter 🟩 Done (`aioodbc`+`pyodbc`, `@n`→`?` por ordem de ocorrência, contrato agnóstico testado nos 3 adapters, 185/185 testes ✅)
 
+### Sprint 3: Production-Ready (⬜ não iniciada)
+- F12: Autenticação e Controle de Acesso via Perfis ⬜ Todo — **spec completa e revisada** (`.spec/features/F12_AUTENTICACAO_PERFIS.md`, 3.5d); pré-requisito já aplicado: transporte MCP **stateless** (`StreamableHTTPSessionManager(..., stateless=True)`, F6 revalidado, 189/189 testes ✅)
+
 ## Documentos (Aprovados e Atualizados)
-- **NEGOCIO.md** (v1.8): Requisitos (RF1-RF3, T1-T5, RNF1-RNF5) — versionamento removido
-- **ARQUITETURA.md** (v1.18): Design técnico (componentes, schema, ADRs, fluxos) — VersionService/Repository removidas
-- **FEATURES_ROADMAP.md** (v1.13): Timeline (21 features, ~27.5 dias, Sprint 1-4) — F9/F10 removidas, F11-F23 renumeradas → F9-F21
+- **NEGOCIO.md** (v1.10): Requisitos (RF1-RF5, T1-T5, RNF1-RNF5) — RF5 = autenticação por token + perfis (F12)
+- **ARQUITETURA.md** (v1.20): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
+- **FEATURES_ROADMAP.md** (v1.14): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12
+- **DATABASE_SCHEMA.md**: schema do Config DB (tabelas de auth do F12: `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`)
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
 - **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional da remoção de Handlers e Controle de Volume
 
-> `IDENTIFICATION_SERVICES_V1_0.md`, `EXECUTIVE_SUMMARY_V1_0.md`, `README_V1_0.md` e `MANIFEST_V1_0.md` foram descontinuados — a spec de autenticação multi-user saiu do escopo de V1.0 e ficou preservada como "Backlog Futuro" dentro dos 3 documentos acima.
+> `IDENTIFICATION_SERVICES_V1_0.md`, `EXECUTIVE_SUMMARY_V1_0.md`, `README_V1_0.md` e `MANIFEST_V1_0.md` foram descontinuados. A autenticação voltou ao escopo de V1.0 como **F12**, com desenho novo (token opaco + perfis N:N, ver ADR-007), e não a partir daqueles documentos.
 
 ## Requisitos V1.0 (Sprint 1 — Concluído | Sprint 2 — Em Progresso)
-✅ Multi-cliente MCP simultâneo, via Streamable HTTP com TLS obrigatório, sem autenticação
+✅ Multi-cliente MCP simultâneo, via Streamable HTTP (stateless) com TLS obrigatório — hoje sem autenticação; o F12 passa a exigir token em toda chamada `/mcp`
 ✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE)
 ✅ MySQL Adapter (F10, com tradução agnóstica de placeholders — `:param` → `%(param)s`)
 ✅ SQL Server Adapter (F11, `:param` → `@param` → `?` na execução; driver ODBC 17/18 do SO)
@@ -45,13 +49,15 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 ✅ Cache in-memory com TTL configurável por análise
 ✅ 2+ clientes MCP simultâneos validados (execution_history sem erro de concorrência)
 ✅ Placeholders agnósticos de banco — SQL com `:param` é traduzido por adapter (PostgreSQL `$n`, MySQL `%(n)s`, SQL Server `@n`→`?`, Oracle `:pN`); o dialeto SQL não é traduzido — para rodar nos 4 bancos usar o subconjunto comum (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único, todo parâmetro declarado presente no SQL — ver F11 §8.4 e F9 §8.4)
-❌ Sem API Key, sem quota por usuário, sem RBAC (fora de escopo V1.0 — ver Roadmap Futuro)
+⬜ Autenticação por token opaco + perfis (F12, spec pronta): `POST /auth/token` (e-mail + senha, `label`/`expire_days` opcionais) e `POST /auth/revoke`; `list_tools()` filtra e `call_tool()` revalida por perfil; usuário bloqueado perde acesso imediato; `execution_history.user_id`; usuários cadastrados por INSERT direto (sem CRUD); **sem proteção contra tentativas de senha em V1.0** (rever antes de expor fora da rede interna)
+❌ Sem API Key, sem quota/rate limit por usuário, sem identificação de qual cliente MCP chama, sem OAuth/SSO (fora de escopo V1.0 — ver Roadmap Futuro)
 ❌ Sem versionamento de análises/rollback (removido: query SQL é configurada 1 vez; mudanças são diretas na tabela — histórico de execuções fornece auditoria necessária)
 
 ## Como Ajudar
 1. Especificação/design técnico → Cite **ARQUITETURA.md**
 2. Cronograma/ordem de features → Cite **FEATURES_ROADMAP.md**
 3. Requisitos/critérios de aceitação → Cite **NEGOCIO.md**
+3b. Schema do Config DB → Cite **DATABASE_SCHEMA.md**; spec de feature → `.spec/features/F<n>_*.md`
 4. Template de spec para features - Use **TEMPLATE_FEATURE_SPEC.md**
 5. Código → só depois da spec da feature ser confirmada; apresentar para execução manual, nunca gerar tudo de uma vez
 6. **Regra de ouro:** nunca inventar — perguntar sempre que houver ambiguidade ou decisão de arquitetura em aberto

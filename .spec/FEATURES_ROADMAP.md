@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.13 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-29 (atualizado 2026-09-29 — F11 SQL Server Adapter concluída)
+**Versão:** 1.14 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-29 (atualizado 2026-09-29 — F12 passa a emitir token por e-mail e senha)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
+> **Nota de revisão (v1.13 → v1.14):** F12 revisada — a emissão de token deixa de ser administrativa (script) e passa a ser **self-service por endpoint**: `POST /auth/token` (e-mail + senha, `label` e `expire_days` opcionais) e `POST /auth/revoke`, em `routes/auth.py`. `users` ganha `password_hash` (bcrypt) e `external_id` vira o e-mail de login. Sem proteção contra tentativas de senha em V1.0 (só log). Esforço de F12: 2.5d → **3.5d** (+1d: endpoints, bcrypt, testes); Sprint 3: ~11.5 → ~12.5 dias; total do projeto: ~30 → ~31 dias. Ver ARQUITETURA.md v1.20 (ADR-007 revisado) e `features/F12_AUTENTICACAO_PERFIS.md`.
+>
 > **Nota de revisão (v1.12 → v1.13):** F11 (SQL Server Adapter) implementada (2026-09-29). `SQLServerAdapter` (`aioodbc` + `pyodbc`, pool 1/10, autocommit, timeout de query via `settings.query_timeout_seconds`) traduz `:x` → `@x` em `translate_params()` e converte `@x` → `?` na ordem de ocorrência em `execute_query()` (parâmetro repetido e ordem diferente de `param_names` funcionam). Novo `tests/test_adapter_contract.py` garante o mesmo comportamento de parâmetros em PostgreSQL, MySQL e SQL Server — o F9 (Oracle) deve entrar na fixture dele. Sprint 2: 2/3 features concluídas; próxima é F9. Bancos suportados: 2 → 3. Spec e histórico: `features/F11_SQLSERVER_ADAPTER.md` §12.
 >
 > **Nota de revisão (v1.11 → v1.12):** documento aprovado. Adicionada **F12: Autenticação e Controle de Acesso via Perfis**, retomando e revisando FB2 (UserIdentificationService) e FB4 (RBAC) do Backlog Futuro (§9) — a diferença para o desenho original de FB2/FB4 é a camada intermediária de **perfis** (N:N usuário↔perfil↔analyses) e o mecanismo de token **opaco** (hash SHA-256, não JWT nem OAuth2 — ver ARQUITETURA.md ADR-007 para o racional completo da escolha). F12 entra na Sprint 3, antes do antigo F12 (Docker Setup) — decisão: autenticação é pré-requisito para expor o servidor em produção interna (ARQUITETURA.md §9.2), então precisa existir antes do deploy, mesmo ainda dentro da rede confiável. Todas as features de F12 em diante foram renumeradas em +1 (F12→F13, ..., F21→F22). `execution_history` (F8) ganha `user_id` (nullable, FK → `users.id`) — decisão desta revisão: já que agora existe identificação de usuário, o histórico de execução passa a registrar quem executou cada análise. NEGOCIO.md revisado: nova RF5, RNF5, Restrição T5 e §12 (Roadmap Futuro) — autenticação sai do "Fora de Escopo V1.0"/Roadmap Futuro (V1.1) e entra nesta mesma versão, como F12. ARQUITETURA.md revisado: novo ADR-007, novas tabelas no schema (§2.2), novos componentes (AuthService, UserRepository/ProfileRepository/AccessTokenRepository), nova seção de fluxo (§3.5). DATABASE_SCHEMA.md ganha as tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`. Spec completa em `features/F12_AUTENTICACAO_PERFIS.md`.
@@ -139,7 +141,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 2.5d | F5 | ⬜ Todo |
+| F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 3.5d | F5 | ⬜ Todo |
 | F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | ⬜ Todo |
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
@@ -147,7 +149,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
 | F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
 
-**Total Sprint 3:** ~11.5 dias
+**Total Sprint 3:** ~12.5 dias
 
 **F12 em detalhe (Autenticação e Controle de Acesso via Perfis):**
 ```
@@ -163,11 +165,18 @@ Escopo:
 │  (ver DATABASE_SCHEMA.md §2.6-2.10 e ARQUITETURA.md §2.2)
 ├─ Token opaco (secrets.token_urlsafe(32)), hash SHA-256 persistido — nunca o
 │  token bruto
-├─ Emissão administrativa via script (scripts/generate_access_token.py),
-│  sem endpoint de login/senha no servidor
-├─ N tokens por usuário (1 por cliente MCP, com `label` identificando qual)
-├─ Expiração padrão 90 dias (ACCESS_TOKEN_EXPIRATION_DAYS via .env), renovação
-│  manual pelo admin (reemissão do script)
+├─ Emissão self-service: POST /auth/token (e-mail + senha, label e expire_days
+│  opcionais) — rotas em routes/auth.py, registradas em main.py; senha guardada
+│  como hash bcrypt em users.password_hash, e-mail em users.external_id
+│  (sempre normalizado, minúsculas); usuário bloqueado/sem senha não gera token
+├─ Revogação: POST /auth/revoke (e-mail + senha + token; credenciais validadas
+│  antes do token; 404 se o token não existir ou for de outro usuário)
+├─ N tokens por usuário, ilimitados (1 por cliente MCP, com `label` opcional)
+├─ Expiração padrão 90 dias (ACCESS_TOKEN_EXPIRATION_DAYS), expire_days opcional
+│  no request limitado por ACCESS_TOKEN_MAX_EXPIRATION_DAYS; renovação manual
+│  pelo próprio usuário (novo POST /auth/token)
+├─ Sem proteção contra tentativas de senha em V1.0 (só log) — rever antes de
+│  expor fora da rede interna; usuários continuam cadastrados por INSERT direto
 ├─ list_tools() filtra analyses pela permissão efetiva do usuário autenticado
 │  (JOIN profile_analyses + user_profiles, is_active em analyses E profiles)
 ├─ call_tool() revalida a permissão (não confia só no que list_tools() já mostrou)
@@ -175,7 +184,7 @@ Escopo:
 │  sempre contra o BD, nunca contra claim armazenada no token
 └─ execution_history ganha user_id (nullable) — quem executou cada análise
 
-Sem JWT, sem OAuth2, sem endpoint de login — ver ADR-007 (ARQUITETURA.md §7)
+Sem JWT, sem OAuth2 — ver ADR-007 (ARQUITETURA.md §7)
 para as 3 alternativas comparadas e por que token opaco venceu para este
 projeto (multi-cliente heterogêneo, rede interna confiável, bloqueio precisa
 ter efeito imediato). Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
@@ -196,7 +205,7 @@ ter efeito imediato). Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
 
 **Release:** V1.0 (MVP Local Multi-Cliente, com autenticação por token + perfis, com PostgreSQL + MySQL + SQL Server + Oracle)
 
-**Total geral do projeto:** 22 features, ~30 dias (≈ 6 semanas com buffer normal de imprevistos — acrescida em +1 feature/+2.5d na revisão v1.12 pela adição de F12 "Autenticação e Controle de Acesso via Perfis" — ver nota de revisão no topo do documento).
+**Total geral do projeto:** 22 features, ~31 dias (≈ 6 semanas com buffer normal de imprevistos — acrescida em +1 feature/+3.5d (2.5d na revisão v1.12, +1d na v1.14 pela emissão por e-mail/senha) pela adição de F12 "Autenticação e Controle de Acesso via Perfis" — ver nota de revisão no topo do documento).
 
 ---
 
@@ -419,14 +428,14 @@ Sprint 2 (Dias 10-14): Multi-DB
 ├─ Dia 11-12: F11 (SQL Server Adapter) ✅
 └─ Dia 13-14: F9  (Oracle Adapter)
 
-Sprint 3 (Dias 15-26): Production-Ready
-├─ Dia 15-17: F12 (Autenticação e Controle de Acesso via Perfis)
-├─ Dia 18-19: F13 (Docker Local + Remote)
-├─ Dia 20:    F14 (Error Handling)
-├─ Dia 21-22: F15 (Performance)
-├─ Dia 23:    F16 (API Docs)
-├─ Dia 24-25: F17 (Unit Tests)
-└─ Dia 26:    F18 (Integration Tests)
+Sprint 3 (Dias 15-27): Production-Ready
+├─ Dia 15-18: F12 (Autenticação e Controle de Acesso via Perfis)
+├─ Dia 19-20: F13 (Docker Local + Remote)
+├─ Dia 21:    F14 (Error Handling)
+├─ Dia 22-23: F15 (Performance)
+├─ Dia 24:    F16 (API Docs)
+├─ Dia 25-26: F17 (Unit Tests)
+└─ Dia 27:    F18 (Integration Tests)
 
 Sprint 4 (Dias 27-30): Deploy
 ├─ Dia 27: F19 (E2E Testing)
@@ -435,7 +444,7 @@ Sprint 4 (Dias 27-30): Deploy
 └─ Dia 30: F22 (Demo) → RELEASE V1.0
 ```
 
-**Total:** ~30 dias úteis (≈ 6 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
+**Total:** ~31 dias úteis (≈ 6 semanas — dias acima são ilustrativos/arredondados, não uma soma exata)
 
 ---
 
