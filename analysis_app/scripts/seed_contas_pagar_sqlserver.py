@@ -34,7 +34,7 @@ DATA_SOURCE_NAME = "sedare_sqlserver"
 ANALYSIS_NAME = "contas_a_pagar_por_fornecedor"
 ANALYSIS_DESCRIPTION = (
     "Retorna títulos a pagar (fornecedor, vencimento, valor receita, valor despesa, "
-    "valor título) por período de vencimento e, opcionalmente, por fornecedor"
+    "valor título) por período de vencimento e, opcionalmente, por trecho do nome do fornecedor"
 )
 CACHE_FREQUENCY = "daily"
 CREATED_BY = "jose"
@@ -44,8 +44,7 @@ CONNECTION = {
     "database": "SedareDB",
     "user": "sa",
     "sslmode": "prefer",  # Encrypt=yes;TrustServerCertificate=yes
-    # Na máquina de dev só o ODBC Driver 17 está instalado (F11 §7.2)
-    "driver": "ODBC Driver 17 for SQL Server",
+    "driver": "ODBC Driver 18 for SQL Server",  # é também o default do adapter (F11 §7.3)
 }
 
 # Subconjunto comum de SQL (F11 §8.4): sem ORDER BY de topo, sem ';', colunas com nome único
@@ -59,7 +58,9 @@ STEP_SQL = (
     "INNER JOIN Fornecedor ON Fornecedor.Id = TituloPagar.FornecedorId "
     "WHERE TituloPagar.DataVencimento >= :DATA_INI "
     "AND TituloPagar.DataVencimento <= :DATA_FIM "
-    "AND (Fornecedor.Nome = :FORNECEDOR OR :FORNECEDOR IS NULL)"
+    # busca "contém": o adapter só troca ":FORNECEDOR" por "?", então os '%' ficam no SQL
+    # (T-SQL: '+' concatena). :FORNECEDOR nulo → o "OR ... IS NULL" devolve todos
+    "AND (Fornecedor.Nome LIKE '%' + :FORNECEDOR + '%' OR :FORNECEDOR IS NULL)"
 )
 STEP_PARAMS = ["DATA_INI", "DATA_FIM", "FORNECEDOR"]
 
@@ -77,7 +78,7 @@ PARAMETERS = {
     "FORNECEDOR": {
         "type": "string",
         "required": False,
-        "description": "Nome exato do fornecedor; omitir para todos",
+        "description": "Parte do nome do fornecedor (busca por trecho, sem diferenciar curingas % e _); omitir para todos",
     },
 }
 
@@ -107,6 +108,8 @@ def main() -> None:
     print(f"-- data_source_id: {data_source_id}")
     print(f"-- analysis_id:    {analysis_id}")
     print("-- ================================================================\n")
+
+    print("BEGIN;\n")  # tudo ou nada: falha em qualquer INSERT não deixa data_source órfão
 
     print(f"""INSERT INTO data_sources (id, name, type, connection_config, is_active, created_by)
 VALUES (
@@ -141,6 +144,8 @@ VALUES (
     {sql_literal(json.dumps(step_definition))}::jsonb
 );
 """)
+
+    print("COMMIT;")
 
 
 if __name__ == "__main__":

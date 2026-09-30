@@ -6,7 +6,7 @@
 **Nome:** SQL Server Adapter
 **Prioridade:** 🟡 Média
 **Esforço Estimado:** 1.5d (12h)
-**Status:** ⬜ Todo
+**Status:** 🟩 Done (2026-09-29)
 
 ---
 
@@ -356,22 +356,22 @@ class TestAdapterContract:
 O helper de PostgreSQL depende de o caller passar `params` na ordem de `param_names` (contrato implícito já assumido pelo `analysis_service`, que monta `ordered_values`). O teste deve **documentar isso explicitamente** para o dia em que alguém mexer nessa montagem.
 
 ### 6.2 Checklist de Testes
-- [ ] Unitário: `translate_params` (single, múltiplos, word boundary, vazio, repetido)
-- [ ] Unitário: `_to_positional` (ordem de ocorrência, repetido, `@@`, `@local`, sem params)
-- [ ] Unitário: connection string (defaults, driver custom, sslmode, senha com `;`/`}`)
-- [ ] Unitário: `execute_query` lista de dicts / escalar / vazio
-- [ ] Unitário: tradução dos erros nativos 1033 / 8155 / 8156
-- [ ] Unitário: `execute()` DML, `test_connection`, `disconnect`
-- [ ] Contrato: 3 adapters × cenários de parâmetros
-- [ ] Factory: `sqlserver` registrado; tipo desconhecido continua levantando `ValueError`
-- [ ] Integração: `AnalysisService` com data_source sqlserver (adapter falso)
-- [ ] Manual: driver ODBC presente (ver §7.2)
-- [ ] Manual: `pip install` de `aioodbc`/`pyodbc` no Python 3.13 sem erro
-- [ ] Manual: data_source sqlserver real → `test_connection()` True
+- [x] Unitário: `translate_params` (single, múltiplos, word boundary, vazio, repetido)
+- [x] Unitário: `_to_positional` (ordem de ocorrência, repetido, `@@`, `@local`, sem params)
+- [x] Unitário: connection string (defaults, driver custom, sslmode, senha com `;`/`}`)
+- [x] Unitário: `execute_query` lista de dicts / escalar / vazio
+- [x] Unitário: tradução dos erros nativos 1033 / 8155 / 8156
+- [x] Unitário: `execute()` DML, `test_connection`, `disconnect`
+- [x] Contrato: 3 adapters × cenários de parâmetros
+- [x] Factory: `sqlserver` registrado; tipo desconhecido continua levantando `ValueError`
+- [x] Integração: `AnalysisService` com data_source sqlserver (adapter falso)
+- [x] Manual: driver ODBC presente (ver §7.2)
+- [x] Manual: `pip install` de `aioodbc`/`pyodbc` no Python 3.13 sem erro
+- [x] Manual: data_source sqlserver real → `test_connection()` True
 - [ ] Manual: análise com parâmetro repetido e com filtro opcional `(:x IS NULL OR ...)` no SQL Server
 - [ ] Manual: mesma análise (SQL do subconjunto comum) executada em PG, MySQL e SQL Server com o mesmo resultado
 - [ ] Manual: análise com `ORDER BY` de topo → erro claro no log
-- [ ] Manual: executar via cliente MCP real
+- [x] Manual: executar via cliente MCP real
 
 ---
 
@@ -470,19 +470,19 @@ Novo adapter = herdar `DatabaseAdapter`, implementar `connect`, `disconnect`, `e
 ## 9. Checklist de Implementação
 
 **Código:**
-- [ ] `adapters/sqlserver.py` — `SQLServerAdapter` completo
-- [ ] `adapters/factory.py` — registrar `sqlserver`
-- [ ] `requirements.txt` — `aioodbc`, `pyodbc`
-- [ ] `tests/test_sqlserver_adapter.py`
-- [ ] `tests/test_adapter_contract.py`
-- [ ] `tests/test_adapter_factory.py` — caso sqlserver
-- [ ] Docstrings (módulo e métodos públicos)
+- [x] `adapters/sqlserver.py` — `SQLServerAdapter` completo
+- [x] `adapters/factory.py` — registrar `sqlserver`
+- [x] `requirements.txt` — `aioodbc`, `pyodbc`
+- [x] `tests/test_sqlserver_adapter.py`
+- [x] `tests/test_adapter_contract.py`
+- [x] `tests/test_adapter_factory.py` — caso sqlserver
+- [x] Docstrings (módulo e métodos públicos)
 - [ ] Code review completo
-- [ ] Testes passing (100% dos casos, suíte existente sem regressão)
+- [x] Testes passing (100% dos casos, suíte existente sem regressão)
 
 **Docs:**
-- [ ] `FEATURES_ROADMAP.md`, `ARQUITETURA.md`, `CLAUDE.md` (§8.4)
-- [ ] Esta spec: status 🟩 Done + histórico de implementação
+- [x] `FEATURES_ROADMAP.md`, `ARQUITETURA.md`, `CLAUDE.md` (§8.4)
+- [x] Esta spec: status 🟩 Done + histórico de implementação
 
 **QA:**
 - [ ] Validação manual contra SQL Server local (checklist §6.2)
@@ -520,5 +520,41 @@ Feitas antes da implementação, com um venv de teste fora do projeto (Python 3.
 
 ---
 
+## 12. Histórico de Implementação
+
+### ✅ Implementação Completada (2026-09-29)
+
+**Arquivos criados:**
+- ✅ `analysis_app/adapters/sqlserver.py` (150 linhas) — `SQLServerAdapter`: `_build_connection_string()`, `connect()`/`disconnect()`, `_to_positional()`, `execute_query()`, `execute()`, `test_connection()`, `translate_params()`
+- ✅ `analysis_app/tests/test_sqlserver_adapter.py` — testes unitários com `aioodbc` mockado
+- ✅ `analysis_app/tests/test_adapter_contract.py` — contrato de parâmetros PostgreSQL × MySQL × SQL Server
+- ✅ `analysis_app/scripts/seed_contas_pagar_sqlserver.py` e `analysis_app/database/seed_contas_pagar_sqlserver.sql` — cadastro do data_source `sedare_sqlserver` (senha cifrada com Fernet) e da análise `contas_a_pagar_por_fornecedor` (uso real da feature, fora da spec original)
+
+**Arquivos modificados:**
+- ✅ `analysis_app/adapters/factory.py` — `"sqlserver": SQLServerAdapter`
+- ✅ `analysis_app/requirements.txt` — `aioodbc>=0.4.0`, `pyodbc>=5.2.0`
+- ✅ `analysis_app/tests/test_adapter_factory.py` — caso `sqlserver`; o teste de "tipo desconhecido" passou a usar `oracle` (antes usava `sqlserver`, que agora é válido)
+- ✅ `analysis_app/tests/test_analysis_service.py` — `TestAnalysisServiceSQLServer` (adapter real, pool mockado, data_source `sqlserver`)
+- ✅ `.spec/FEATURES_ROADMAP.md` (v1.13), `.spec/ARQUITETURA.md` (v1.18), `.claude/CLAUDE.md`
+
+**Testes:** 185/185 na suíte completa (61 nos arquivos do F11: adapter, contrato e factory), sem regressão.
+
+### Decisões de implementação (dentro do que a spec definiu)
+- `connect()` monta a connection string **antes** de `create_pool`, então `sslmode` inválido falha sem abrir conexão.
+- Erros 1033/8155/8156 (por número **ou** pelo texto "ORDER BY clause is invalid in views, ...") viram `RuntimeError` com a explicação do §8.4; o erro nativo fica em `__cause__`. Outros erros (ex.: 156) são relançados sem alteração.
+- `execute()` não chama `commit()` (autocommit do pool), diferente do MySQL.
+- A spec não fixava o tipo da exceção traduzida; foi usado `RuntimeError` (o `AnalysisService` a converte em `DataSourceConnectionError` de qualquer forma).
+
+### Validação manual
+- ✅ `pip install` de `aioodbc`/`pyodbc` no Python 3.13 (`aioodbc 0.5.0`, `pyodbc 5.3.0`).
+- ✅ Data source `sqlserver` cadastrado com ODBC Driver 18 e senha cifrada; análise `contas_a_pagar_por_fornecedor` listada como ferramenta MCP (`execute_contas_a_pagar_por_fornecedor`) e executada via Claude Desktop — confirmação do usuário em 2026-09-29.
+- ⚠️ **Não verificados individualmente:** análise com `ORDER BY` de topo (mensagem no log), comparação do mesmo SQL em PostgreSQL, MySQL e SQL Server, e o número nativo 1033 (a detecção por texto cobre essa lacuna, conforme §8.4).
+- Observação de uso: `LIKE '%' + :FORNECEDOR + '%'` na análise cadastrada é T-SQL — não é portável para PostgreSQL/MySQL sem adaptação.
+
+### Pendências (não fazem parte da F11)
+Ver §10 — `sslmode` ignorado por PostgreSQL/MySQL, PostgreSQL dependente da ordem de `params`, mensagem de erro genérica ao cliente MCP.
+
+---
+
 **Documento de Especificação F11 — SQL Server Adapter.**
-**Sprint 2 — Multi-DB Adapters (aguardando implementação).**
+**Sprint 2 — Multi-DB Adapters (F11 concluída em 2026-09-29).**

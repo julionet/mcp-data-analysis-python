@@ -20,15 +20,15 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F7: Cache Service (in-memory) 🟩 Done
 - F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag — sem identificação de usuário) 🟩 Done
 
-### Sprint 2: Multi-DB Adapters (1/3 concluído)
-- F9: Oracle Adapter ⬜ Todo (implementar após F11)
+### Sprint 2: Multi-DB Adapters (2/3 concluído)
+- F9: Oracle Adapter ⬜ Todo (próximo; reutiliza `tests/test_adapter_contract.py` do F11)
 - F10: MySQL Adapter 🟩 Done (named parameters `%(name)s`, 3 correções, 23/23 testes ✅)
-- F11: SQL Server Adapter ⬜ Todo
+- F11: SQL Server Adapter 🟩 Done (`aioodbc`+`pyodbc`, `@n`→`?` por ordem de ocorrência, contrato agnóstico testado nos 3 adapters, 185/185 testes ✅)
 
 ## Documentos (Aprovados e Atualizados)
 - **NEGOCIO.md** (v1.8): Requisitos (RF1-RF3, T1-T5, RNF1-RNF5) — versionamento removido
-- **ARQUITETURA.md** (v1.15): Design técnico (componentes, schema, ADRs, fluxos) — VersionService/Repository removidas
-- **FEATURES_ROADMAP.md** (v1.11): Timeline (21 features, ~27.5 dias, Sprint 1-4) — F9/F10 removidas, F11-F23 renumeradas → F9-F21
+- **ARQUITETURA.md** (v1.18): Design técnico (componentes, schema, ADRs, fluxos) — VersionService/Repository removidas
+- **FEATURES_ROADMAP.md** (v1.13): Timeline (21 features, ~27.5 dias, Sprint 1-4) — F9/F10 removidas, F11-F23 renumeradas → F9-F21
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
 - **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional da remoção de Handlers e Controle de Volume
 
@@ -38,7 +38,8 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 ✅ Multi-cliente MCP simultâneo, via Streamable HTTP com TLS obrigatório, sem autenticação
 ✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE)
 ✅ MySQL Adapter (F10, com tradução agnóstica de placeholders — `:param` → `%(param)s`)
-🟨 SQL Server e Oracle Adapters em progresso (Sprint 2)
+✅ SQL Server Adapter (F11, `:param` → `@param` → `?` na execução; driver ODBC 17/18 do SO)
+🟨 Oracle Adapter em progresso (Sprint 2, F9)
 ✅ Servidor entrega dataset bruto (sem handlers); Controle de Volume recusa/pede refinamento se exceder limites (.env)
 ✅ Log de execução completo (analysis_id, params, status, execution_time_ms, rows_affected, result_size_bytes, cached flag — sem identificar usuário/cliente)
 ✅ Cache in-memory com TTL configurável por análise

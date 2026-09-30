@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.12 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-29 (atualizado 2026-09-29 — nova F12: Autenticação e Controle de Acesso via Perfis)
+**Versão:** 1.13 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-29 (atualizado 2026-09-29 — F11 SQL Server Adapter concluída)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
+> **Nota de revisão (v1.12 → v1.13):** F11 (SQL Server Adapter) implementada (2026-09-29). `SQLServerAdapter` (`aioodbc` + `pyodbc`, pool 1/10, autocommit, timeout de query via `settings.query_timeout_seconds`) traduz `:x` → `@x` em `translate_params()` e converte `@x` → `?` na ordem de ocorrência em `execute_query()` (parâmetro repetido e ordem diferente de `param_names` funcionam). Novo `tests/test_adapter_contract.py` garante o mesmo comportamento de parâmetros em PostgreSQL, MySQL e SQL Server — o F9 (Oracle) deve entrar na fixture dele. Sprint 2: 2/3 features concluídas; próxima é F9. Bancos suportados: 2 → 3. Spec e histórico: `features/F11_SQLSERVER_ADAPTER.md` §12.
+>
 > **Nota de revisão (v1.11 → v1.12):** documento aprovado. Adicionada **F12: Autenticação e Controle de Acesso via Perfis**, retomando e revisando FB2 (UserIdentificationService) e FB4 (RBAC) do Backlog Futuro (§9) — a diferença para o desenho original de FB2/FB4 é a camada intermediária de **perfis** (N:N usuário↔perfil↔analyses) e o mecanismo de token **opaco** (hash SHA-256, não JWT nem OAuth2 — ver ARQUITETURA.md ADR-007 para o racional completo da escolha). F12 entra na Sprint 3, antes do antigo F12 (Docker Setup) — decisão: autenticação é pré-requisito para expor o servidor em produção interna (ARQUITETURA.md §9.2), então precisa existir antes do deploy, mesmo ainda dentro da rede confiável. Todas as features de F12 em diante foram renumeradas em +1 (F12→F13, ..., F21→F22). `execution_history` (F8) ganha `user_id` (nullable, FK → `users.id`) — decisão desta revisão: já que agora existe identificação de usuário, o histórico de execução passa a registrar quem executou cada análise. NEGOCIO.md revisado: nova RF5, RNF5, Restrição T5 e §12 (Roadmap Futuro) — autenticação sai do "Fora de Escopo V1.0"/Roadmap Futuro (V1.1) e entra nesta mesma versão, como F12. ARQUITETURA.md revisado: novo ADR-007, novas tabelas no schema (§2.2), novos componentes (AuthService, UserRepository/ProfileRepository/AccessTokenRepository), nova seção de fluxo (§3.5). DATABASE_SCHEMA.md ganha as tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`. Spec completa em `features/F12_AUTENTICACAO_PERFIS.md`.
 
 > **Nota de revisão (v1.10 → v1.11):** F9 deixa de ser "MongoDB Adapter" e passa a ser **"Oracle Adapter"** (Oracle Database 12.1+, `python-oracledb` em modo thin, sem dependência de SO). MongoDB removido de vez do escopo de V1.0 (não vai para o Backlog Futuro). F9 rebaixada de 🟠 Alta para 🟡 Média — não há instância Oracle para teste no momento e a validação manual fica pendente (F9 pode ser dada como Done sem validação manual). Esforço mantido em 1.5d; dependência passa a `F2, F11` (reutiliza `tests/test_adapter_contract.py`, criado no F11). Ordem de implementação da Sprint 2: F10 ✅ → F11 → F9. O F9 também altera `analysis_service.py` (alias do wrapper `COUNT(*)`: `AS sub` → `sub`). Specs: `features/F11_SQLSERVER_ADAPTER.md` e `features/F9_ORACLE_ADAPTER.md`.
@@ -119,11 +121,11 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 |---|---------|-----------|--------|-----------|--------|
 | F9 | Oracle Adapter (via `oracledb`, thin mode) | 🟡 Média | 1.5d | F2, F11 | ⬜ Todo |
 | F10 | MySQL Adapter | 🟡 Média | 1d | F2 | 🟩 Done |
-| F11 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | ⬜ Todo |
+| F11 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | 🟩 Done |
 
-**Total Sprint 2:** ~3 dias (F10 concluído em 2026-09-27)
+**Total Sprint 2:** ~3 dias (F10 concluído em 2026-09-27; F11 em 2026-09-29)
 
-**Ordem de implementação:** F10 ✅ → F11 → F9 (o F9 reutiliza `tests/test_adapter_contract.py`, criado no F11).
+**Ordem de implementação:** F10 ✅ → F11 ✅ → F9 (o F9 reutiliza `tests/test_adapter_contract.py`, criado no F11).
 
 **F11 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
 
@@ -385,10 +387,10 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 22/22 | 9/22 🟩 |
+| **Features Implementadas** | 22/22 | 10/22 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
-| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 2 (PostgreSQL, MySQL) ✅ |
+| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 3 (PostgreSQL, MySQL, SQL Server) ✅ |
 | **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |
 | **Tempo de Análise** | < 30s | < 5s ✅ |
 | **Uptime Local** | 99%+ | TBD |
@@ -414,7 +416,7 @@ Sprint 1 (Dias 1-10): MVP Local Multi-Cliente
 
 Sprint 2 (Dias 10-14): Multi-DB
 ├─ Dia 10:    F10 (MySQL Adapter) ✅
-├─ Dia 11-12: F11 (SQL Server Adapter)
+├─ Dia 11-12: F11 (SQL Server Adapter) ✅
 └─ Dia 13-14: F9  (Oracle Adapter)
 
 Sprint 3 (Dias 15-26): Production-Ready
