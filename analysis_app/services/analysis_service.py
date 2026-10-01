@@ -77,6 +77,7 @@ class AnalysisService:
         analysis_id: UUID,
         params: dict,
         confirmar_volume_alto: bool = False,
+        user_id: UUID | None = None,
     ) -> dict:
         """Executa uma análise e SEMPRE retorna um dict estruturado — nunca
         propaga exceção (F5, ajuste retroativo). Formatos possíveis:
@@ -86,7 +87,7 @@ class AnalysisService:
           {"status": "error", "mensagem": "...", "cached": false}
         """
         try:
-            return await self._execute(analysis_id, params, confirmar_volume_alto)
+            return await self._execute(analysis_id, params, confirmar_volume_alto, user_id)
         except (
             AnalysisNotFoundError,
             InvalidAnalysisSchemaError,
@@ -108,6 +109,7 @@ class AnalysisService:
         analysis_id: UUID,
         params: dict,
         confirmar_volume_alto: bool,
+        user_id: UUID | None,
     ) -> dict:
         analysis = await self.analysis_repo.get_by_id(analysis_id)
         if analysis is None:
@@ -155,6 +157,7 @@ class AnalysisService:
                 execution_time_ms=0,
                 cached=False,
                 error_message=str(exc),
+                user_id=user_id,
             )
             raise
         except Exception:
@@ -165,6 +168,7 @@ class AnalysisService:
                 execution_time_ms=0,
                 cached=False,
                 error_message="Erro interno ao executar a análise.",
+                user_id=user_id,
             )
             raise
 
@@ -175,6 +179,7 @@ class AnalysisService:
             execution_time_ms=exec_time_ms["value"],
             cached=result.get("cached", False),
             result=result,
+            user_id=user_id,
         )
         return result
 
@@ -248,9 +253,14 @@ class AnalysisService:
             result["aviso"] = "resultado grande, enviado por confirmação explícita"
         return result
 
+    async def get_allowed_analyses(self, user_id: UUID) -> list[Analysis]:
+        """F12: analyses que o usuário pode ver/executar (perfis ativos × analyses
+        ativas). Usado por list_tools(); a permissão vem do banco a cada chamada."""
+        return await self.analysis_repo.get_allowed_for_user(user_id)
+
     async def get_all_analyses(self) -> list[Analysis]:
-        """Lista análises ativas. Sem endpoint MCP nesta feature (isso é F5) —
-        método já disponível no Service para o F5 consumir depois."""
+        """Lista todas as análises ativas, sem filtro por usuário (uso interno —
+        list_tools() usa get_allowed_analyses() desde o F12)."""
         return await self.analysis_repo.get_all()
 
     async def _get_adapter(self, data_source: DataSource) -> DatabaseAdapter:

@@ -6,7 +6,7 @@
 **Nome:** Autenticação e Controle de Acesso via Perfis
 **Prioridade:** 🔴 Crítica
 **Esforço Estimado:** 3.5d (28h) — era 2.5d; +1d pela emissão/revogação de token por e-mail e senha (endpoints, bcrypt, testes)
-**Status:** ⬜ Todo
+**Status:** 🟩 Done (2026-09-30)
 
 ---
 
@@ -750,25 +750,25 @@ class TestMcpToolsAuth:
 ```
 
 ### 6.2 Checklist de Testes
-- [ ] Unitário: `generate_token`/`hash_token`
-- [ ] Unitário: `verify_password` (correta, errada, hash nulo, senha > 72 bytes)
-- [ ] Unitário: `AuthService.authenticate` (sucesso, token não encontrado, expirado, revogado, usuário bloqueado/inexistente)
-- [ ] Unitário: `AuthService.issue_token` (padrão, `expire_days`/`label`, e-mail normalizado, acima do máximo, 4 falhas de credencial, token bruto nunca persistido)
-- [ ] Unitário: `AuthService.revoke_token` (sucesso, credenciais antes do token, token de outro usuário, já revogado/expirado)
-- [ ] Unitário: `AuthService.is_analysis_allowed` (permitido, sem perfil, perfil inativo, análise inativa)
-- [ ] Unitário: rotas `/auth/token` e `/auth/revoke` (200/400/401/404/422, sem exigir `Authorization`)
-- [ ] Unitário: middleware — 401 genérico e idêntico (ausente, malformado, inexistente, expirado, revogado, bloqueado) + `contextvar` isolado por requisição
-- [ ] Regressão: `contextvar` isolado entre usuários distintos no mesmo cliente, em sequência (`initialize` como A → `tools/list` como B chega como B) — falha se o transporte voltar a stateful
-- [ ] Unitário: `contextvar` restaurado (`reset`) ao fim de cada requisição, inclusive com exceção
-- [ ] Unitário: logs de falha (`/mcp`, login, acesso negado); nenhum contém token/header/hash/senha/`password_hash`/e-mail
-- [ ] Unitário: `list_tools()` filtra por permissão efetiva
-- [ ] Unitário: `call_tool()` revalida (nega mesmo após aparecer em `list_tools()`)
-- [ ] Unitário: `execution_history.user_id` gravado corretamente
-- [ ] Integração: `AnalysisRepository.get_allowed_for_user()` e `ProfileRepository.get_allowed_analysis_ids()` concordam (mesmo conjunto de analyses) para o mesmo usuário
-- [ ] Regressão: os 189 testes anteriores voltam a passar, com os 13 ajustados conforme §6.3
-- [ ] Integração: fluxo completo — `POST /auth/token` com usuário real → `tools/list` no `/mcp` com o token → `POST /auth/revoke` → `/mcp` passa a responder 401
-- [ ] Manual: testar via pelo menos 1 cliente MCP real com o token emitido por `/auth/token` no header `Authorization`
-- [ ] Manual: bloquear um usuário com sessão de cliente MCP já aberta e confirmar recusa imediata na próxima chamada
+- [x] Unitário: `generate_token`/`hash_token`
+- [x] Unitário: `verify_password` (correta, errada, hash nulo, senha > 72 bytes)
+- [x] Unitário: `AuthService.authenticate` (sucesso, token não encontrado, expirado, revogado, usuário bloqueado/inexistente)
+- [x] Unitário: `AuthService.issue_token` (padrão, `expire_days`/`label`, e-mail normalizado, acima do máximo, 4 falhas de credencial, token bruto nunca persistido)
+- [x] Unitário: `AuthService.revoke_token` (sucesso, credenciais antes do token, token de outro usuário, já revogado/expirado)
+- [x] Unitário: `AuthService.is_analysis_allowed` (permitido, sem perfil, perfil inativo, análise inativa)
+- [x] Unitário: rotas `/auth/token` e `/auth/revoke` (200/400/401/404/422, sem exigir `Authorization`)
+- [x] Unitário: middleware — 401 genérico e idêntico (ausente, malformado, inexistente, expirado, revogado, bloqueado) + `contextvar` isolado por requisição
+- [x] Regressão: `contextvar` isolado entre usuários distintos no mesmo cliente, em sequência (`initialize` como A → `tools/list` como B chega como B) — falha se o transporte voltar a stateful
+- [x] Unitário: `contextvar` restaurado (`reset`) ao fim de cada requisição, inclusive com exceção
+- [x] Unitário: logs de falha (`/mcp`, login, acesso negado); nenhum contém token/header/hash/senha/`password_hash`/e-mail
+- [x] Unitário: `list_tools()` filtra por permissão efetiva
+- [x] Unitário: `call_tool()` revalida (nega mesmo após aparecer em `list_tools()`)
+- [x] Unitário: `execution_history.user_id` gravado corretamente
+- [x] Integração: `AnalysisRepository.get_allowed_for_user()` e `ProfileRepository.get_allowed_analysis_ids()` concordam (mesmo conjunto de analyses) para o mesmo usuário
+- [x] Regressão: os 189 testes anteriores voltam a passar, com os 13 ajustados conforme §6.3
+- [x] Integração: fluxo completo — `POST /auth/token` com usuário real → `tools/list` no `/mcp` com o token → `POST /auth/revoke` → `/mcp` passa a responder 401
+- [x] Manual: testar via pelo menos 1 cliente MCP real com o token emitido por `/auth/token` no header `Authorization`
+- [x] Manual: bloquear um usuário com sessão de cliente MCP já aberta e confirmar recusa imediata na próxima chamada
 
 ### 6.3 Impacto nos Testes Existentes
 
@@ -836,29 +836,29 @@ Um novo requisito de negócio (ex.: rate limiting por usuário — FB3) consome 
 ## 9. Checklist de Implementação
 
 **Código:**
-- [ ] `security/token_auth.py`
-- [ ] `security/password_hash.py`
-- [ ] `schemas/auth.py`
-- [ ] `repositories/user_repo.py` (com `get_by_external_id`), `profile_repo.py`, `access_token_repo.py`
-- [ ] `services/auth_service.py` — `authenticate`, `issue_token`, `revoke_token`, `is_analysis_allowed`
-- [ ] `services/analysis_service.py` — `get_allowed_analyses()`, `execute(..., user_id=)`
-- [ ] `services/audit_service.py` / `repositories/execution_repo.py` — `user_id`
-- [ ] `security/auth_middleware.py` — middleware + `contextvar` + log de falhas (§4.5)
-- [ ] `routes/__init__.py` + `routes/auth.py` — `POST /auth/token`, `POST /auth/revoke`; registrar em `main.py` (`include_router`)
-- [ ] `mcp_transport/tools.py` — `list_tools()`/`call_tool()` exigem `AuthenticatedUser`; log `access_denied`
-- [ ] `database/schema.sql` (tabelas F12, `users.password_hash`, `execution_history.user_id`, índices) + `database/migrations/f12_autenticacao.sql` para bancos existentes
-- [ ] `mcp_transport/tools.py` cria a instância única de `AuthService`; `routes/auth.py::get_auth_service()` e o middleware a reutilizam
-- [ ] `config.py` — `ACCESS_TOKEN_EXPIRATION_DAYS`, `ACCESS_TOKEN_MAX_EXPIRATION_DAYS`
-- [ ] `requirements.txt` — `bcrypt`
-- [ ] `repositories/analysis_repo.py` — `get_allowed_for_user()`
-- [ ] `tests/conftest.py` + `tests/helpers.py` (`make_user`) e ajuste dos 6 arquivos de teste existentes (§6.3), cada um no mesmo passo do código que o afeta
-- [ ] Testes (§6) passing — suíte inteira verde a cada passo
-- [ ] Docstrings
+- [x] `security/token_auth.py`
+- [x] `security/password_hash.py`
+- [x] `schemas/auth.py`
+- [x] `repositories/user_repo.py` (com `get_by_external_id`), `profile_repo.py`, `access_token_repo.py`
+- [x] `services/auth_service.py` — `authenticate`, `issue_token`, `revoke_token`, `is_analysis_allowed`
+- [x] `services/analysis_service.py` — `get_allowed_analyses()`, `execute(..., user_id=)`
+- [x] `services/audit_service.py` / `repositories/execution_repo.py` — `user_id`
+- [x] `security/auth_middleware.py` — middleware + `contextvar` + log de falhas (§4.5)
+- [x] `routes/__init__.py` + `routes/auth.py` — `POST /auth/token`, `POST /auth/revoke`; registrar em `main.py` (`include_router`)
+- [x] `mcp_transport/tools.py` — `list_tools()`/`call_tool()` exigem `AuthenticatedUser`; log `access_denied`
+- [x] `database/schema.sql` (tabelas F12, `users.password_hash`, `execution_history.user_id`, índices) + `database/migrations/f12_autenticacao.sql` para bancos existentes
+- [x] `mcp_transport/tools.py` cria a instância única de `AuthService`; `routes/auth.py::get_auth_service()` e o middleware a reutilizam
+- [x] `config.py` — `ACCESS_TOKEN_EXPIRATION_DAYS`, `ACCESS_TOKEN_MAX_EXPIRATION_DAYS`
+- [x] `requirements.txt` — `bcrypt`
+- [x] `repositories/analysis_repo.py` — `get_allowed_for_user()`
+- [x] `tests/conftest.py` + `tests/helpers.py` (`make_user`) e ajuste dos 6 arquivos de teste existentes (§6.3), cada um no mesmo passo do código que o afeta
+- [x] Testes (§6) passing — suíte inteira verde a cada passo
+- [x] Docstrings
 
 **QA:**
-- [ ] Code review aprovado
-- [ ] Validação manual com cliente MCP real (§6.2)
-- [ ] PR merge aprovado
+- [x] Code review aprovado
+- [x] Validação manual com cliente MCP real (§6.2)
+- [x] PR merge aprovado
 
 ---
 
@@ -879,9 +879,37 @@ Um novo requisito de negócio (ex.: rate limiting por usuário — FB3) consome 
 | 12 | Sem modo de desenvolvimento sem autenticação (`AUTH_ENABLED`): para rodar localmente é preciso cadastrar um usuário e emitir um token; os testes contornam a autenticação por fixtures | Decisão confirmada — evita uma flag que possa ir desligada para produção |
 | 11 | Um token perdido, sem cópia guardada, não pode ser revogado por `/auth/revoke` (só por SQL, `UPDATE access_tokens SET revoked_at = NOW()`) — bloquear o usuário (`is_blocked`) também derruba todos os tokens dele | Aceito em V1.0 |
 | 13 | O transporte stateless é **obrigatório** para o desenho de `contextvar` do F12 — voltar para stateful exige reescrever a leitura da identidade (ver §4.2 item 1 e ARQUITETURA.md ADR-006 v1.21). Consequência aceita: sem mensagens iniciadas pelo servidor (ex.: `tools/list_changed` quando um perfil muda); o cliente só vê a nova lista no próximo `list_tools()`, e `call_tool()` já revalida a permissão | Decisão confirmada (2026-09-30) |
-| 14 | Comportamento dos clientes MCP reais com token estático: confirmar que Claude Desktop e ChatGPT Desktop permitem configurar `Authorization: Bearer` fixo num conector remoto e como reagem ao `401` com `WWW-Authenticate: Bearer` — pela especificação de autorização do MCP, alguns clientes podem tentar descoberta OAuth (`/.well-known/oauth-protected-resource`) em vez de usar o header. Se algum cliente não suportar header fixo, avaliar proxy local no cliente (ex.: `mcp-remote --header`) antes de mudar o desenho | Pendente — validar antes de implementar o middleware |
+| 14 | Comportamento dos clientes MCP reais com token estático: confirmar que Claude Desktop e ChatGPT Desktop permitem configurar `Authorization: Bearer` fixo num conector remoto e como reagem ao `401` com `WWW-Authenticate: Bearer` — pela especificação de autorização do MCP, alguns clientes podem tentar descoberta OAuth (`/.well-known/oauth-protected-resource`) em vez de usar o header. Se algum cliente não suportar header fixo, avaliar proxy local no cliente (ex.: `mcp-remote --header`) antes de mudar o desenho | ✅ Resolvido (2026-09-30): validado com Claude Desktop via `mcp-remote --header "Authorization:${AUTH_HEADER}"` (token em variável de ambiente do conector, ver §8.2) |
+
+---
+
+## 11. Implementação (2026-09-30)
+
+**Resultado:** 295 testes ✅ (189 anteriores, com os 13 ajustados conforme §6.3, + 106 novos); 1 teste de integração (`tests/test_permission_queries_integration.py`) pula sozinho se a migration ainda não foi aplicada ao banco.
+
+**Arquivos novos:** `security/{token_auth,password_hash,auth_middleware}.py`, `schemas/auth.py`, `repositories/{user,profile,access_token}_repo.py`, `services/auth_service.py`, `routes/{__init__,auth}.py`, `database/migrations/f12_autenticacao.sql`, `database/seed_usuario_admin_f12.sql` (exemplo de cadastro), `tests/{conftest,test_token_auth,test_password_hash,test_auth_service,test_auth_middleware,test_auth_routes,test_mcp_tools_auth,test_permission_queries_integration}.py`.
+
+**Desvios em relação ao desenho acima (decididos na implementação):**
+1. **O middleware envolve diretamente os endpoints do `/mcp`** (`add_route("/mcp", AuthMiddleware(...))` e `mount("/mcp", AuthMiddleware(...))`), sem filtro por path dentro dele. Tudo que chega ao middleware é `/mcp`; assim um path reescrito pelo `Mount` do Starlette nunca vira bypass de autenticação (fail-closed). `/health` e `/auth/*` nunca passam por ele; o `CORSMiddleware` continua mais externo.
+2. **`AuthService.issue_token()` devolve `(token_bruto, expires_at, user_id, token_id)` e `revoke_token()` devolve `(user_id, token_id)`** (§4.4 previa `(token, expires_at)` e `None`): a rota precisa de `user_id`/`token_id` para o log INFO de §4.5 sem consultar o banco de novo.
+3. **O middleware recebe um wrapper que resolve `tools.auth_service.authenticate` a cada chamada**, e não o bound method capturado em `configure_mcp()` — sem isso as fixtures de teste (§6.3) não conseguiriam patchar a autenticação depois do import.
+4. **`_require_user()` em `mcp_transport/__init__.py`** levanta `PermissionError` se o contextvar estiver vazio: sem usuário no contexto (middleware ausente/contornado), nenhuma tool é listada nem executada (fail-closed).
+5. **O SDK `mcp` chama `list_tools()` internamente em todo `tools/call`**, para validar o input contra o `inputSchema`. Consequência: uma query extra de permissão por `tools/call`, e os testes HTTP de `tools/call` precisam patchar `get_allowed_analyses`.
+6. **Tempo constante no login:** `_validate_credentials()` sempre executa um `bcrypt.checkpw` — contra o hash real ou contra um hash fictício constante (custo 12) quando o e-mail não existe ou não tem senha —, para o tempo de resposta não revelar se o e-mail está cadastrado.
+7. **`AccessTokenRepository.revoke()` é idempotente** (`WHERE revoked_at IS NULL`): revogar de novo mantém o `revoked_at` original.
+8. **Config:** `Settings` valida no startup `ACCESS_TOKEN_EXPIRATION_DAYS >= 1`, `ACCESS_TOKEN_MAX_EXPIRATION_DAYS >= 1` e `EXPIRATION <= MAX`.
+
+**Como rodar:** aplicar `database/migrations/f12_autenticacao.sql` (bancos já criados) → cadastrar usuário/perfil/vínculos (modelo: `database/seed_usuario_admin_f12.sql`) → `python run_https.py` → `POST /auth/token` → configurar o cliente (ver §8.2). Exemplo de conector Claude Desktop com `mcp-remote`:
+```json
+"analise-dados": {
+  "command": "npx",
+  "args": ["mcp-remote", "https://127.0.0.1:3000/mcp", "--header", "Authorization:${AUTH_HEADER}"],
+  "env": {"NODE_OPTIONS": "--use-system-ca", "AUTH_HEADER": "Bearer <token>"}
+}
+```
+(sem espaço depois de `Authorization:` — evita o problema de espaços em argumentos no Windows; o `Bearer ` vai dentro da variável.)
 
 ---
 
 **Documento de Especificação F12 — Autenticação e Controle de Acesso via Perfis.**
-**Sprint 3 — Production-Ready (aguardando implementação).**
+**Sprint 3 — Production-Ready (F12 implementada em 2026-09-30).**

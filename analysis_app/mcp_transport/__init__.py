@@ -2,6 +2,9 @@
 
 F5: `list_tools()`/`call_tool()` delegam para mcp_transport/tools.py, que
 gera as tools dinamicamente a partir de `analyses` (F5_MCP_TOOLS_INTEGRATION.md).
+
+F12: o AuthMiddleware envolve os endpoints do /mcp (401 sem token válido) e grava
+o usuário num contextvar; os handlers abaixo o leem e o repassam a tools.py.
 """
 
 import contextlib
@@ -15,6 +18,8 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
 
 from mcp_transport import tools
+from schemas.auth import AuthenticatedUser
+from security.auth_middleware import AuthMiddleware, current_user
 
 mcp_server = Server(
     "analysis-mcp",
@@ -25,14 +30,23 @@ mcp_server = Server(
 )
 
 
+def _require_user() -> AuthenticatedUser:
+    """Usuário gravado pelo AuthMiddleware. Fail-closed: sem ele (middleware
+    ausente/contornado) nenhuma tool é listada nem executada."""
+    user = current_user.get()
+    if user is None:
+        raise PermissionError("Usuário autenticado ausente no contexto da requisição.")
+    return user
+
+
 @mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
-    return await tools.list_tools()
+    return await tools.list_tools(_require_user())
 
 
 @mcp_server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    result = await tools.call_tool(name, arguments)
+    result = await tools.call_tool(name, arguments, _require_user())
     return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
 
 
@@ -71,7 +85,13 @@ def configure_mcp(app: FastAPI) -> None:
         allow_origins=["*"],  # confirmado: rede interna, todas origens liberadas
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["Mcp-Session-Id"],
+        expose_headers=["WWW-Authenticate"],  # o 401 do AuthMiddleware; sem sessão (stateless) não há Mcp-Session-Id
     )
-    app.add_route("/mcp", _MCPExactPathASGI())  # "/mcp" exato, sem redirect 307
-    app.mount("/mcp", session_manager.handle_request)  # "/mcp/..." (qualquer sub-path)
+    async def authenticate(raw_token: str) -> AuthenticatedUser:
+        # Resolvido a cada chamada (não um bound method capturado aqui), para os
+        # testes poderem patchar tools.auth_service.authenticate depois do import.
+        return await tools.auth_service.authenticate(raw_token)
+
+    # O AuthMiddleware envolve os dois endpoints do /mcp (e só eles), por dentro do CORS.
+    app.add_route("/mcp", AuthMiddleware(_MCPExactPathASGI(), authenticate))  # "/mcp" exato, sem redirect 307
+    app.mount("/mcp", AuthMiddleware(session_manager.handle_request, authenticate))  # "/mcp/..." (qualquer sub-path)

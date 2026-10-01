@@ -3,12 +3,12 @@
 # Análise de Dados Genérica com MCP - V1.0
 
 ## Projeto
-Plataforma agnóstica de LLM para análise de dados conversacional, **multi-cliente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. — todos via Streamable HTTP com TLS obrigatório), multi-database. **Autenticação por token opaco + controle de acesso por perfis (F12 — spec completa, implementação pendente na Sprint 3):** o usuário emite o próprio token em `POST /auth/token` (e-mail + senha, hash bcrypt) e o envia em `Authorization: Bearer`; só vê/executa analyses liberadas pelos perfis dele. **Até o F12 ser implementado o servidor ainda roda sem autenticação** (rede interna confiável). Identificação de *qual cliente MCP/software* chama segue fora de escopo. **Servidor não transforma dados** (sem handlers) — executa a query parametrizada e devolve o dataset bruto; é o LLM do cliente MCP quem interpreta/agrega, com um Controle de Volume (COUNT(*) + KB) protegendo contra resultados grandes demais. Log de execução completo para auditoria (hoje sem identificação de usuário; o F12 acrescenta `user_id`).
+Plataforma agnóstica de LLM para análise de dados conversacional, **multi-cliente MCP** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc. — todos via Streamable HTTP com TLS obrigatório), multi-database. **Autenticação por token opaco + controle de acesso por perfis (F12 — ✅ implementada):** o usuário emite o próprio token em `POST /auth/token` (e-mail + senha, hash bcrypt) e o envia em `Authorization: Bearer`; só vê/executa analyses liberadas pelos perfis dele. **Toda chamada ao `/mcp` exige o token** (sem modo sem autenticação; testes contornam por fixtures). Identificação de *qual cliente MCP/software* chama segue fora de escopo. **Servidor não transforma dados** (sem handlers) — executa a query parametrizada e devolve o dataset bruto; é o LLM do cliente MCP quem interpreta/agrega, com um Controle de Volume (COUNT(*) + KB) protegendo contra resultados grandes demais. Log de execução completo para auditoria (com `user_id` de quem executou — F12).
 
 ## Stack
 FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, porta 3000) + PostgreSQL + Python. Cache em memória local (Redis só em ambiente remoto/futuro).
 
-## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — 🟨 Em Progresso)
+## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — 🟨 Em Progresso | Sprint 3 — 🟨 F12 ✅)
 
 ### Sprint 1: MVP Local Multi-Cliente (✅ 100%)
 - F1: FastAPI + MCP Server via Streamable HTTP com TLS 🟩 Done
@@ -18,20 +18,20 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F5: MCP Tools Integration (`list_tools`/`call_tool`) 🟩 Done
 - F6: Validação Multi-Cliente Simultâneo (2+ clientes MCP, critérios 1–5 incluindo execution_history sem erro) 🟩 Done
 - F7: Cache Service (in-memory) 🟩 Done
-- F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag — sem identificação de usuário) 🟩 Done
+- F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag; o `user_id` entrou com o F12) 🟩 Done
 
 ### Sprint 2: Multi-DB Adapters (2/3 concluído)
 - F9: Oracle Adapter ⬜ Todo (próximo; reutiliza `tests/test_adapter_contract.py` do F11)
 - F10: MySQL Adapter 🟩 Done (named parameters `%(name)s`, 3 correções, 23/23 testes ✅)
 - F11: SQL Server Adapter 🟩 Done (`aioodbc`+`pyodbc`, `@n`→`?` por ordem de ocorrência, contrato agnóstico testado nos 3 adapters, 185/185 testes ✅)
 
-### Sprint 3: Production-Ready (⬜ não iniciada)
-- F12: Autenticação e Controle de Acesso via Perfis ⬜ Todo — **spec completa e revisada** (`.spec/features/F12_AUTENTICACAO_PERFIS.md`, 3.5d); pré-requisito já aplicado: transporte MCP **stateless** (`StreamableHTTPSessionManager(..., stateless=True)`, F6 revalidado, 189/189 testes ✅). **Stateless é obrigatório:** em stateful o `contextvar` do usuário fica congelado no `initialize` (ARQUITETURA.md §14.1 item 8) — não trocar a flag
+### Sprint 3: Production-Ready (🟨 em progresso — 1/7)
+- F12: Autenticação e Controle de Acesso via Perfis 🟩 Done (2026-09-30) — `POST /auth/token` e `POST /auth/revoke` (e-mail + senha bcrypt), `AuthMiddleware` + `contextvar` no `/mcp`, perfis N:N, `execution_history.user_id`; 295/295 testes ✅ (spec e notas: `.spec/features/F12_AUTENTICACAO_PERFIS.md` §11). **Stateless é obrigatório:** em stateful o `contextvar` do usuário fica congelado no `initialize` (ARQUITETURA.md §14.1 item 8) — não trocar a flag. Migration: `analysis_app/database/migrations/f12_autenticacao.sql`; cliente `mcp-remote` passa o token com `--header`
 
 ## Documentos (Aprovados e Atualizados)
 - **NEGOCIO.md** (v1.10): Requisitos (RF1-RF5, T1-T5, RNF1-RNF5) — RF5 = autenticação por token + perfis (F12)
-- **ARQUITETURA.md** (v1.21): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
-- **FEATURES_ROADMAP.md** (v1.14): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12
+- **ARQUITETURA.md** (v1.22): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
+- **FEATURES_ROADMAP.md** (v1.15): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12
 - **DATABASE_SCHEMA.md**: schema do Config DB (tabelas de auth do F12: `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`)
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
 - **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional da remoção de Handlers e Controle de Volume
@@ -39,17 +39,17 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 > `IDENTIFICATION_SERVICES_V1_0.md`, `EXECUTIVE_SUMMARY_V1_0.md`, `README_V1_0.md` e `MANIFEST_V1_0.md` foram descontinuados. A autenticação voltou ao escopo de V1.0 como **F12**, com desenho novo (token opaco + perfis N:N, ver ADR-007), e não a partir daqueles documentos.
 
 ## Requisitos V1.0 (Sprint 1 — Concluído | Sprint 2 — Em Progresso)
-✅ Multi-cliente MCP simultâneo, via Streamable HTTP (stateless) com TLS obrigatório — hoje sem autenticação; o F12 passa a exigir token em toda chamada `/mcp`
+✅ Multi-cliente MCP simultâneo, via Streamable HTTP (stateless) com TLS obrigatório — token exigido em toda chamada `/mcp` (F12)
 ✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE)
 ✅ MySQL Adapter (F10, com tradução agnóstica de placeholders — `:param` → `%(param)s`)
 ✅ SQL Server Adapter (F11, `:param` → `@param` → `?` na execução; driver ODBC 17/18 do SO)
 🟨 Oracle Adapter em progresso (Sprint 2, F9)
 ✅ Servidor entrega dataset bruto (sem handlers); Controle de Volume recusa/pede refinamento se exceder limites (.env)
-✅ Log de execução completo (analysis_id, params, status, execution_time_ms, rows_affected, result_size_bytes, cached flag — sem identificar usuário/cliente)
+✅ Log de execução completo (analysis_id, params, status, execution_time_ms, rows_affected, result_size_bytes, cached flag, user_id — sem identificar o cliente MCP)
 ✅ Cache in-memory com TTL configurável por análise
 ✅ 2+ clientes MCP simultâneos validados (execution_history sem erro de concorrência)
 ✅ Placeholders agnósticos de banco — SQL com `:param` é traduzido por adapter (PostgreSQL `$n`, MySQL `%(n)s`, SQL Server `@n`→`?`, Oracle `:pN`); o dialeto SQL não é traduzido — para rodar nos 4 bancos usar o subconjunto comum (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único, todo parâmetro declarado presente no SQL — ver F11 §8.4 e F9 §8.4)
-⬜ Autenticação por token opaco + perfis (F12, spec pronta): `POST /auth/token` (e-mail + senha, `label`/`expire_days` opcionais) e `POST /auth/revoke`; `list_tools()` filtra e `call_tool()` revalida por perfil; usuário bloqueado perde acesso imediato; `execution_history.user_id`; usuários cadastrados por INSERT direto (sem CRUD); **sem proteção contra tentativas de senha em V1.0** (rever antes de expor fora da rede interna)
+✅ Autenticação por token opaco + perfis (F12, implementada): `POST /auth/token` (e-mail + senha, `label`/`expire_days` opcionais) e `POST /auth/revoke`; `list_tools()` filtra e `call_tool()` revalida por perfil; usuário bloqueado perde acesso imediato; `execution_history.user_id`; usuários cadastrados por INSERT direto (sem CRUD); **sem proteção contra tentativas de senha em V1.0** (rever antes de expor fora da rede interna)
 ❌ Sem API Key, sem quota/rate limit por usuário, sem identificação de qual cliente MCP chama, sem OAuth/SSO (fora de escopo V1.0 — ver Roadmap Futuro)
 ❌ Sem versionamento de análises/rollback (removido: query SQL é configurada 1 vez; mudanças são diretas na tabela — histórico de execuções fornece auditoria necessária)
 

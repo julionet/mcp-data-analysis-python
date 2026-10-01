@@ -3,10 +3,12 @@
 ## Plataforma de Análise de Dados Genérica com MCP
 
 **Versão:** 1.10 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-29
+**Data:** 2026-09-30
 **Autor:** Jose
 **Status:** ✅ Aprovado
 
+> **Nota de implementação (2026-09-30):** o RF5 (autenticação por token + perfis) está **implementado** (F12 ✅ Done), sem mudança de requisito. O servidor passa a exigir `Authorization: Bearer` em toda chamada ao `/mcp` (401 genérico caso contrário). Segue pendente, antes de expor fora da rede interna, a proteção contra tentativas de senha em `/auth/token` (ver §12). F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Migration: `analysis_app/database/migrations/f12_autenticacao.sql`; seed de exemplo: `analysis_app/database/seed_usuario_admin_f12.sql`. Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11.
+>
 > **Nota de revisão (v1.9 → v1.10):** a emissão de token do RF5 deixa de ser administrativa (script) e passa a ser **feita pelo próprio usuário**, informando **e-mail e senha** num endpoint do servidor (`POST /auth/token`); um segundo endpoint (`POST /auth/revoke`) permite revogar o próprio token. Só e-mail e senha válidos geram token; usuário bloqueado não gera. Usuários continuam cadastrados manualmente no banco (sem CRUD), agora com senha guardada como hash. Sem proteção contra tentativas de senha em V1.0 (rede interna) — a rever antes de expor fora dela (Restrição T5 e §12). Ver ARQUITETURA.md v1.20 (ADR-007 revisado) e `features/F12_AUTENTICACAO_PERFIS.md`.
 >
 > **Nota de revisão (v1.8 → v1.9):** documento aprovado. Autenticação e controle de acesso passam a fazer parte do escopo desta versão, via nova feature **F12** (ver FEATURES_ROADMAP.md v1.12 e ARQUITETURA.md ADR-007): usuários cadastrados, agrupados em perfis, e perfis vinculados às analyses que liberam — um usuário só acessa (via `list_tools`/`call_tool`) analyses ativas vinculadas a um perfil ativo vinculado a ele. Autenticação via **token de acesso opaco** (não JWT, não OAuth2 — ver ARQUITETURA.md ADR-007 para as alternativas comparadas e a razão da escolha), emitido administrativamente (sem login/senha no servidor), validade padrão de 90 dias, renovação manual. Usuário bloqueado perde acesso imediatamente. `execution_history` (F8) ganha `user_id` (nullable) para auditoria por usuário. Isso substitui, com um desenho revisado, o que estava anotado em "Roadmap Futuro" (§12, V1.1) desde a v1.2 deste documento — a seção foi atualizada para refletir que esse requisito específico (identificação de usuário + RBAC) não é mais futuro. Rate limiting/quotas por usuário e SSO/OAuth seguem fora de escopo (ver §12 revisado). Atualizados: §4 (Escopo), nova UC3 (§6), nova RF5 (§7), RNF5 (§8), Restrição T5 (§9), §12 (Roadmap Futuro), §14 (Glossário).
@@ -585,6 +587,7 @@ Então:
 V1.0: Autenticação por Token + Perfis (F12 — já no escopo desta versão)
 ├─ Usuários, perfis e vínculo N:N usuário↔perfil↔analyses
 ├─ Token de acesso opaco, emitido pelo usuário por e-mail e senha, sem OAuth/SSO
+├─ ✅ Implementado (F12, 2026-09-30)
 ├─ (Pendente antes de expor fora da rede interna) rate limit/bloqueio por tentativas em /auth/token
 └─ Ver RF5, Restrição T5 e ARQUITETURA.md ADR-007
 

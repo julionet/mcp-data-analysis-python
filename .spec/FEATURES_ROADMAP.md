@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.14 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-29 (atualizado 2026-09-29 — F12 passa a emitir token por e-mail e senha)
+**Versão:** 1.15 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-09-30 (atualizado 2026-09-30 — F12 implementada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
+> **Nota de revisão (v1.14 → v1.15):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Migration: `analysis_app/database/migrations/f12_autenticacao.sql`; seed de exemplo: `analysis_app/database/seed_usuario_admin_f12.sql`. Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Sprint 3: 1/7 features concluídas. Próximas: F9 (Oracle, Sprint 2) e F13 (Docker, que já deve sair com autenticação obrigatória).
+>
 > **Nota de revisão (v1.13 → v1.14):** F12 revisada — a emissão de token deixa de ser administrativa (script) e passa a ser **self-service por endpoint**: `POST /auth/token` (e-mail + senha, `label` e `expire_days` opcionais) e `POST /auth/revoke`, em `routes/auth.py`. `users` ganha `password_hash` (bcrypt) e `external_id` vira o e-mail de login. Sem proteção contra tentativas de senha em V1.0 (só log). Esforço de F12: 2.5d → **3.5d** (+1d: endpoints, bcrypt, testes); Sprint 3: ~11.5 → ~12.5 dias; total do projeto: ~30 → ~31 dias. Ver ARQUITETURA.md v1.20 (ADR-007 revisado) e `features/F12_AUTENTICACAO_PERFIS.md`.
 >
 > **Nota de revisão (v1.12 → v1.13):** F11 (SQL Server Adapter) implementada (2026-09-29). `SQLServerAdapter` (`aioodbc` + `pyodbc`, pool 1/10, autocommit, timeout de query via `settings.query_timeout_seconds`) traduz `:x` → `@x` em `translate_params()` e converte `@x` → `?` na ordem de ocorrência em `execute_query()` (parâmetro repetido e ordem diferente de `param_names` funcionam). Novo `tests/test_adapter_contract.py` garante o mesmo comportamento de parâmetros em PostgreSQL, MySQL e SQL Server — o F9 (Oracle) deve entrar na fixture dele. Sprint 2: 2/3 features concluídas; próxima é F9. Bancos suportados: 2 → 3. Spec e histórico: `features/F11_SQLSERVER_ADAPTER.md` §12.
@@ -141,7 +143,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 3.5d | F5 | ⬜ Todo |
+| F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 3.5d | F5 | 🟩 Done (2026-09-30) |
 | F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | ⬜ Todo |
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
@@ -429,7 +431,7 @@ Sprint 2 (Dias 10-14): Multi-DB
 └─ Dia 13-14: F9  (Oracle Adapter)
 
 Sprint 3 (Dias 15-27): Production-Ready
-├─ Dia 15-18: F12 (Autenticação e Controle de Acesso via Perfis)
+├─ Dia 15-18: F12 (Autenticação e Controle de Acesso via Perfis) ✅
 ├─ Dia 19-20: F13 (Docker Local + Remote)
 ├─ Dia 21:    F14 (Error Handling)
 ├─ Dia 22-23: F15 (Performance)

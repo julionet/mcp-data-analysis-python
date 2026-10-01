@@ -1,8 +1,10 @@
 """Helpers compartilhados pelos testes."""
 
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 from adapters.postgresql import PostgreSQLAdapter
+from schemas.auth import AuthenticatedUser
 
 
 def make_fake_adapter() -> AsyncMock:
@@ -14,3 +16,8 @@ def make_fake_adapter() -> AsyncMock:
     adapter = AsyncMock()
     adapter.translate_params = MagicMock(side_effect=PostgreSQLAdapter({}).translate_params)
     return adapter
+
+
+def make_user(name: str = "Maria") -> AuthenticatedUser:
+    """AuthenticatedUser de teste (F12), com UUID novo a cada chamada."""
+    return AuthenticatedUser(id=uuid4(), name=name)

@@ -106,6 +106,22 @@ class AnalysisRepository:
         )
         return [_to_analysis(row) for row in rows]
 
+    async def get_allowed_for_user(self, user_id: UUID) -> list[Analysis]:
+        """F12: analyses ativas vinculadas a um perfil ativo vinculado ao usuário.
+        Mesma regra de ProfileRepository.get_allowed_analysis_ids() (usada na
+        revalidação de call_tool()); um teste de integração garante que concordam."""
+        rows = await self._db.execute_query(
+            "SELECT DISTINCT a.id, a.name, a.description, a.data_source_id, a.parameters, "
+            "a.is_active, a.updated_at, a.cache_frequency "
+            "FROM analyses a "
+            "JOIN profile_analyses pa ON pa.analysis_id = a.id "
+            "JOIN user_profiles up ON up.profile_id = pa.profile_id "
+            "JOIN profiles p ON p.id = pa.profile_id "
+            "WHERE up.user_id = $1 AND a.is_active = true AND p.is_active = true",
+            {"user_id": user_id},
+        )
+        return [_to_analysis(row) for row in rows]
+
     async def get_steps(self, analysis_id: UUID) -> list[AnalysisStep]:
         rows = await self._db.execute_query(
             "SELECT id, analysis_id, step_order, step_type, definition "

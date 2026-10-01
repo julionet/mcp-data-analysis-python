@@ -4,6 +4,10 @@ Agnóstico de qual análise está sendo processada (§8.3 da spec): nenhuma
 lógica específica de uma análise pode viver aqui. Toda análise ativa e com
 nome válido em `analyses` vira uma Tool MCP `execute_<nome>`; call_tool()
 resolve qual análise executar a partir do nome recebido do protocolo.
+
+F12: ambas exigem o `AuthenticatedUser` (já validado pelo middleware do /mcp).
+list_tools() só devolve o que o usuário pode ver; call_tool() REVALIDA a
+permissão a cada chamada — nunca confia no que list_tools() já mostrou.
 """
 
 import logging
@@ -14,11 +18,16 @@ from mcp.types import Tool
 from config import settings
 from database.connection import config_db_adapter
 from repositories.analysis_repo import Analysis, AnalysisRepository
+from repositories.access_token_repo import AccessTokenRepository
 from repositories.data_source_repo import DataSourceRepository
 from repositories.execution_repo import ExecutionRepository
+from repositories.profile_repo import ProfileRepository
+from repositories.user_repo import UserRepository
 from schemas.analysis_parameters import to_json_schema
+from schemas.auth import AuthenticatedUser
 from services.analysis_service import AnalysisService
 from services.audit_service import AuditService
+from services.auth_service import AuthService
 from services.cache_backend import CacheBackend, InMemoryBackend, NullBackend
 from services.cache_service import CacheService
 from services.volume_guard_service import VolumeGuardService
@@ -64,6 +73,13 @@ _audit_service = AuditService(_execution_repo)
 analysis_service = AnalysisService(
     analysis_repo, _data_source_repo, _volume_guard, _cache_service, _audit_service
 )
+# Instância única do AuthService: o middleware do /mcp, as rotas /auth/* e
+# call_tool() usam esta mesma (F12 §4.1). É o ponto que os testes patcham.
+auth_service = AuthService(
+    AccessTokenRepository(config_db_adapter),
+    UserRepository(config_db_adapter),
+    ProfileRepository(config_db_adapter),
+)
 
 
 def _build_tool(analysis: Analysis) -> Tool:
@@ -76,12 +92,13 @@ def _build_tool(analysis: Analysis) -> Tool:
     )
 
 
-async def list_tools() -> list[Tool]:
-    """Gera dinamicamente uma Tool MCP por análise ativa e com nome válido.
+async def list_tools(current_user: AuthenticatedUser) -> list[Tool]:
+    """Gera dinamicamente uma Tool MCP por análise ativa, com nome válido e
+    liberada ao usuário (perfil ativo → análise ativa — F12).
     Análises com nome fora do padrão de identificador MCP são ignoradas
     (logadas como warning), nunca viram uma tool inválida."""
     tools: list[Tool] = []
-    for analysis in await analysis_service.get_all_analyses():
+    for analysis in await analysis_service.get_allowed_analyses(current_user.id):
         if not _NAME_PATTERN.match(analysis.name):
             logger.warning(
                 "Análise '%s' ignorada em list_tools(): nome fora do padrão %s",
@@ -93,7 +110,7 @@ async def list_tools() -> list[Tool]:
     return tools
 
 
-async def call_tool(name: str, arguments: dict) -> dict:
+async def call_tool(name: str, arguments: dict, current_user: AuthenticatedUser) -> dict:
     """Único ponto de entrada de execução de análises via MCP. Resolve a
     análise pelo nome recebido do protocolo e repassa o resultado (já
     estruturado por AnalysisService.execute()) ao cliente MCP. Nunca propaga
@@ -106,5 +123,18 @@ async def call_tool(name: str, arguments: dict) -> dict:
             "mensagem": f"Análise '{analysis_name}' não encontrada ou inativa.",
         }
 
+    # F12: revalida a permissão a cada chamada, ANTES de qualquer cache/execução —
+    # a tool pode ter aparecido num list_tools() anterior e o perfil mudado desde então.
+    if not await auth_service.is_analysis_allowed(current_user.id, analysis.id):
+        logger.warning(
+            "access_denied user_id=%s analysis_id=%s analysis_name=%s",
+            current_user.id,
+            analysis.id,
+            analysis.name,
+        )
+        return {"status": "error", "mensagem": "Acesso não autorizado a esta análise."}
+
     confirmar_volume_alto = arguments.pop("confirmar_volume_alto", False)
-    return await analysis_service.execute(analysis.id, arguments, confirmar_volume_alto)
+    return await analysis_service.execute(
+        analysis.id, arguments, confirmar_volume_alto, user_id=current_user.id
+    )

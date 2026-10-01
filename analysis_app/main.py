@@ -4,6 +4,7 @@ F1: transporte.
 F2: conexão com o Config DB no startup (fail-fast) e /health com check_postgres().
 F5: list_tools()/call_tool() reais — handlers registrados em mcp_transport/__init__.py,
     que delega para mcp_transport/tools.py (ver F5_MCP_TOOLS_INTEGRATION.md).
+F12: rotas /auth/* (routes/auth.py) e AuthMiddleware no /mcp (mcp_transport/__init__.py).
 F7 (ajuste retroativo, 2026-09-27): logging.basicConfig() — sem isso, os
     logger.info() de services/* (ex.: hit/miss de cache) são descartados
     silenciosamente, porque o logger raiz fica no nível WARNING por padrão
@@ -28,6 +29,7 @@ from database.connection import check_postgres, connect_config_db, disconnect_co
 from mcp_transport import configure_mcp
 from mcp_transport import lifespan as mcp_lifespan
 from mcp_transport.tools import analysis_service
+from routes.auth import router as auth_router
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(lifespan=lifespan)
 configure_mcp(app)
+app.include_router(auth_router)  # POST /auth/token, POST /auth/revoke — fora do /mcp, sem Bearer
 
 
 @app.get("/health")

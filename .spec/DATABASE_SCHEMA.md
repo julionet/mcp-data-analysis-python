@@ -4,7 +4,7 @@
 
 **Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.17)
 **Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
-**Data:** 2026-09-29 (atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
+**Data:** 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; bancos já criados aplicam `database/migrations/f12_autenticacao.sql`; modelo de cadastro em `database/seed_usuario_admin_f12.sql`; atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
 > Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 

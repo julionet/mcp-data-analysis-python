@@ -21,15 +21,17 @@ class ExecutionRepository:
         error_message: str | None,
         result_location: str | None,
         cached: bool,
+        user_id: UUID | None = None,
     ) -> None:
-        """Grava 1 linha em execution_history."""
+        """Grava 1 linha em execution_history. `user_id` (F12): quem executou; None em
+        linhas legadas/pré-F12."""
         await self.db.execute(
             """
             INSERT INTO execution_history
                 (analysis_id, parameters, status,
                  execution_time_ms, rows_affected, result_size_bytes,
-                 error_message, result_location, cached)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 error_message, result_location, cached, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             analysis_id,
             json.dumps(parameters, default=str),
@@ -40,6 +42,7 @@ class ExecutionRepository:
             error_message,
             result_location,
             cached,
+            user_id,
         )
 
     async def get_all(self, limit: int = 100) -> list[dict]:

@@ -1,4 +1,6 @@
-"""Testes unitários da F5 — ver F5_MCP_TOOLS_INTEGRATION.md §6.1 (TestMcpTools)."""
+"""Testes unitários da F5 — ver F5_MCP_TOOLS_INTEGRATION.md §6.1 (TestMcpTools).
+
+F12: list_tools()/call_tool() recebem o `current_user`; ver também test_mcp_tools_auth.py."""
 
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
@@ -8,6 +10,7 @@ import pytest
 
 from mcp_transport import tools
 from repositories.analysis_repo import Analysis
+from tests.helpers import make_user
 
 VENDAS_PARAMETERS = {"data_inicial": {"type": "date", "required": True, "description": "..."}}
 
@@ -29,8 +32,8 @@ class TestMcpTools:
     @pytest.mark.asyncio
     async def test_list_tools_returns_one_tool_per_active_analysis(self):
         analyses = [_make_analysis("vendas_por_regiao"), _make_analysis("vendas_por_produto")]
-        with patch.object(tools.analysis_service, "get_all_analyses", AsyncMock(return_value=analyses)):
-            result = await tools.list_tools()
+        with patch.object(tools.analysis_service, "get_allowed_analyses", AsyncMock(return_value=analyses)):
+            result = await tools.list_tools(make_user())
 
         assert len(result) == 2
         assert {tool.name for tool in result} == {
@@ -41,9 +44,9 @@ class TestMcpTools:
     @pytest.mark.asyncio
     async def test_list_tools_skips_analysis_with_invalid_name(self, caplog):
         analyses = [_make_analysis("Vendas Por Regiao")]  # maiúsculas/espaço — fora do padrão
-        with patch.object(tools.analysis_service, "get_all_analyses", AsyncMock(return_value=analyses)):
+        with patch.object(tools.analysis_service, "get_allowed_analyses", AsyncMock(return_value=analyses)):
             with caplog.at_level("WARNING"):
-                result = await tools.list_tools()
+                result = await tools.list_tools(make_user())
 
         assert result == []
         assert "Vendas Por Regiao" in caplog.text
@@ -51,8 +54,8 @@ class TestMcpTools:
     @pytest.mark.asyncio
     async def test_list_tools_injects_confirmar_volume_alto_in_every_schema(self):
         analyses = [_make_analysis("vendas_por_regiao")]
-        with patch.object(tools.analysis_service, "get_all_analyses", AsyncMock(return_value=analyses)):
-            result = await tools.list_tools()
+        with patch.object(tools.analysis_service, "get_allowed_analyses", AsyncMock(return_value=analyses)):
+            result = await tools.list_tools(make_user())
 
         schema = result[0].inputSchema
         assert schema["properties"]["confirmar_volume_alto"]["type"] == "boolean"
@@ -62,8 +65,10 @@ class TestMcpTools:
     @pytest.mark.asyncio
     async def test_call_tool_success_returns_status_success(self):
         analysis = _make_analysis("vendas_por_regiao")
+        user = make_user()
         with (
             patch.object(tools, "analysis_repo") as mock_repo,
+            patch.object(tools.auth_service, "is_analysis_allowed", AsyncMock(return_value=True)),
             patch.object(
                 tools.analysis_service,
                 "execute",
@@ -72,17 +77,21 @@ class TestMcpTools:
         ):
             mock_repo.get_by_name = AsyncMock(return_value=analysis)
             result = await tools.call_tool(
-                "execute_vendas_por_regiao", {"data_inicial": "2026-01-01"}
+                "execute_vendas_por_regiao", {"data_inicial": "2026-01-01"}, user
             )
 
         assert result == {"status": "success", "data": []}
-        mock_execute.assert_awaited_once_with(analysis.id, {"data_inicial": "2026-01-01"}, False)
+        mock_execute.assert_awaited_once_with(
+            analysis.id, {"data_inicial": "2026-01-01"}, False, user_id=user.id
+        )
 
     @pytest.mark.asyncio
     async def test_call_tool_passes_confirmar_volume_alto_and_strips_it_from_arguments(self):
         analysis = _make_analysis("vendas_por_regiao")
+        user = make_user()
         with (
             patch.object(tools, "analysis_repo") as mock_repo,
+            patch.object(tools.auth_service, "is_analysis_allowed", AsyncMock(return_value=True)),
             patch.object(
                 tools.analysis_service,
                 "execute",
@@ -93,26 +102,37 @@ class TestMcpTools:
             await tools.call_tool(
                 "execute_vendas_por_regiao",
                 {"data_inicial": "2026-01-01", "confirmar_volume_alto": True},
+                user,
             )
 
-        mock_execute.assert_awaited_once_with(analysis.id, {"data_inicial": "2026-01-01"}, True)
+        mock_execute.assert_awaited_once_with(
+            analysis.id, {"data_inicial": "2026-01-01"}, True, user_id=user.id
+        )
 
     @pytest.mark.asyncio
     async def test_call_tool_analysis_not_found_returns_status_error(self):
-        with patch.object(tools, "analysis_repo") as mock_repo:
+        with (
+            patch.object(tools, "analysis_repo") as mock_repo,
+            patch.object(tools.auth_service, "is_analysis_allowed", AsyncMock()) as mock_allowed,
+        ):
             mock_repo.get_by_name = AsyncMock(return_value=None)
-            result = await tools.call_tool("execute_analise_que_nao_existe", {})
+            result = await tools.call_tool("execute_analise_que_nao_existe", {}, make_user())
 
         assert result["status"] == "error"
+        mock_allowed.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_call_tool_inactive_analysis_returns_status_error(self):
         analysis = _make_analysis("vendas_por_regiao", is_active=False)
-        with patch.object(tools, "analysis_repo") as mock_repo:
+        with (
+            patch.object(tools, "analysis_repo") as mock_repo,
+            patch.object(tools.auth_service, "is_analysis_allowed", AsyncMock()) as mock_allowed,
+        ):
             mock_repo.get_by_name = AsyncMock(return_value=analysis)
-            result = await tools.call_tool("execute_vendas_por_regiao", {})
+            result = await tools.call_tool("execute_vendas_por_regiao", {}, make_user())
 
         assert result["status"] == "error"
+        mock_allowed.assert_not_awaited()  # a análise é resolvida antes da permissão
 
     @pytest.mark.asyncio
     async def test_call_tool_never_raises_on_internal_exception(self):
@@ -121,8 +141,10 @@ class TestMcpTools:
         # próprio (§4.2 passo 9); este teste confirma que nada nesse repasse
         # reintroduz uma exceção para o transporte MCP.
         analysis = _make_analysis("vendas_por_regiao")
+        user = make_user()
         with (
             patch.object(tools, "analysis_repo") as mock_repo,
+            patch.object(tools.auth_service, "is_analysis_allowed", AsyncMock(return_value=True)),
             patch.object(
                 tools.analysis_service,
                 "execute",
@@ -130,6 +152,6 @@ class TestMcpTools:
             ),
         ):
             mock_repo.get_by_name = AsyncMock(return_value=analysis)
-            result = await tools.call_tool("execute_vendas_por_regiao", {})
+            result = await tools.call_tool("execute_vendas_por_regiao", {}, user)
 
         assert result == {"status": "error", "mensagem": "Erro interno ao executar a análise."}

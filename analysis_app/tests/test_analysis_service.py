@@ -471,3 +471,19 @@ class TestAnalysisServiceSQLServer:
         # data_inicial, data_final, pago, pago (parâmetro repetido → valor repetido)
         assert len(query_call.args) == 1 + 4
         assert query_call.args[-2:] == (None, None)
+
+
+class TestAnalysisServiceAllowedAnalyses:
+    """F12 — get_allowed_analyses() delega ao repositório com o user_id."""
+
+    @pytest.mark.asyncio
+    async def test_get_allowed_analyses_delegates_to_repo(self):
+        analysis_repo = AsyncMock()
+        analyses = [_make_analysis()]
+        analysis_repo.get_allowed_for_user.return_value = analyses
+        user_id = uuid4()
+
+        result = await _service(analysis_repo).get_allowed_analyses(user_id)
+
+        assert result == analyses
+        analysis_repo.get_allowed_for_user.assert_awaited_once_with(user_id)

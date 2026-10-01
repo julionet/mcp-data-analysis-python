@@ -1,7 +1,7 @@
 """Audit Service — logs de execução em execution_history (F8).
 
 Responsável por registrar cada execução de análise que chega a resolver o ID,
-sem identificar usuário/cliente MCP.
+identificando o usuário autenticado (F12, `user_id`) mas não o cliente MCP.
 """
 
 import json
@@ -29,6 +29,7 @@ class AuditService:
         cached: bool,
         result: dict | None = None,
         error_message: str | None = None,
+        user_id: UUID | None = None,
     ) -> None:
         """Grava 1 linha em execution_history. Nunca propaga exceção — uma
         falha de auditoria não pode derrubar a resposta ao cliente MCP."""
@@ -56,6 +57,7 @@ class AuditService:
                 error_message=error_message if status == "error" else None,
                 result_location=None,
                 cached=cached,
+                user_id=user_id,
             )
         except Exception:
             logger.exception("Falha ao gravar execution_history (análise '%s')", analysis_id)

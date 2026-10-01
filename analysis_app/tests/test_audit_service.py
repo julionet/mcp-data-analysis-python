@@ -323,3 +323,126 @@ class TestAnalysisServiceAudit:
         call_args_hit = audit_service.log_execution.call_args_list[1]
         assert call_args_hit[1]["execution_time_ms"] == 0
         assert call_args_hit[1]["cached"] is True
+
+
+class TestAuditServiceUserId:
+    """F12 — user_id repassado ao ExecutionRepository."""
+
+    @pytest.mark.asyncio
+    async def test_user_id_is_passed_to_repo(self):
+        execution_repo = AsyncMock()
+        user_id = uuid4()
+
+        await AuditService(execution_repo).log_execution(
+            analysis_id=uuid4(),
+            parameters={},
+            status="success",
+            execution_time_ms=1,
+            cached=False,
+            result={"status": "success", "data": []},
+            user_id=user_id,
+        )
+
+        assert execution_repo.create.call_args[1]["user_id"] == user_id
+
+    @pytest.mark.asyncio
+    async def test_user_id_omitted_defaults_to_none(self):
+        execution_repo = AsyncMock()
+
+        await AuditService(execution_repo).log_execution(
+            analysis_id=uuid4(),
+            parameters={},
+            status="success",
+            execution_time_ms=1,
+            cached=False,
+            result={"status": "success", "data": []},
+        )
+
+        assert execution_repo.create.call_args[1]["user_id"] is None
+
+
+class TestAnalysisServiceAuditUserId:
+    """F12 — AnalysisService.execute(..., user_id=) chega ao log_execution em todos os caminhos."""
+
+    @staticmethod
+    def _build(count_or_dataset, cache_frequency="daily"):
+        analysis = _make_analysis(cache_frequency=cache_frequency)
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = [_make_step(analysis)]
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = _make_data_source(analysis)
+        fake_adapter = make_fake_adapter()
+        fake_adapter.execute_query.side_effect = count_or_dataset
+        audit_service = AsyncMock()
+        service = AnalysisService(
+            analysis_repo,
+            data_source_repo,
+            VolumeGuardService(500, 150),
+            CacheService(InMemoryBackend(1000, 100), 500, 150),
+            audit_service,
+        )
+        return analysis, service, fake_adapter, audit_service
+
+    _PARAMS = {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+
+    def _patches(self, fake_adapter):
+        return (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=fake_adapter),
+            patch("services.analysis_service.decrypt_password", return_value="senha"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_success_logs_user_id(self):
+        analysis, service, adapter, audit = self._build([1, [{"valor": 1}]])
+        user_id = uuid4()
+        p1, p2 = self._patches(adapter)
+        with p1, p2:
+            result = await service.execute(analysis.id, self._PARAMS, user_id=user_id)
+
+        assert result["status"] == "success"
+        assert audit.log_execution.call_args[1]["user_id"] == user_id
+
+    @pytest.mark.asyncio
+    async def test_error_logs_user_id(self):
+        analysis, service, _, audit = self._build([])
+        user_id = uuid4()
+
+        result = await service.execute(analysis.id, {"data_final": "2026-01-31"}, user_id=user_id)
+
+        assert result["status"] == "error"
+        assert audit.log_execution.call_args[1]["user_id"] == user_id
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_logs_user_id(self):
+        analysis, service, adapter, audit = self._build([])
+        user_id = uuid4()
+        with patch("services.analysis_service.to_pydantic_model", side_effect=RuntimeError("boom")):
+            result = await service.execute(analysis.id, self._PARAMS, user_id=user_id)
+
+        assert result["status"] == "error"
+        assert audit.log_execution.call_args[1]["user_id"] == user_id
+
+    @pytest.mark.asyncio
+    async def test_volume_exceeded_logs_user_id(self):
+        analysis, service, adapter, audit = self._build([100000])
+        user_id = uuid4()
+        p1, p2 = self._patches(adapter)
+        with p1, p2:
+            result = await service.execute(analysis.id, self._PARAMS, user_id=user_id)
+
+        assert result["status"] == "volume_exceeded"
+        assert audit.log_execution.call_args[1]["user_id"] == user_id
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_logs_user_id_of_who_asked(self):
+        """Cache hit de outro usuário grava o user_id de quem pediu, não de quem populou o cache."""
+        analysis, service, adapter, audit = self._build([1, [{"valor": 1}]])
+        user_a, user_b = uuid4(), uuid4()
+        p1, p2 = self._patches(adapter)
+        with p1, p2:
+            first = await service.execute(analysis.id, self._PARAMS, user_id=user_a)
+            second = await service.execute(analysis.id, self._PARAMS, user_id=user_b)
+
+        assert first["cached"] is False and second["cached"] is True
+        assert [c[1]["user_id"] for c in audit.log_execution.call_args_list] == [user_a, user_b]
