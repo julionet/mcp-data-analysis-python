@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.20 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Versão:** 1.21 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-09-29
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.20 → v1.21):** correção do **racional** do transporte stateless (sem mudança de decisão — `stateless=True` continua). A nota v1.19 dizia que, com sessão, um usuário bloqueado "continuaria usando uma sessão já aberta"; isso só vale se o token fosse validado apenas no `initialize` — o middleware do F12 valida toda requisição, então o bloqueio imediato funcionaria também em stateful. O motivo real, comprovado em teste no SDK `mcp` 1.x: em stateful o `StreamableHTTPSessionManager` cria a task do servidor uma única vez, no `initialize`, e ela reaproveita o contexto daquela requisição — o `contextvar` do `AuthenticatedUser` fica congelado no usuário que abriu a sessão, e requisições seguintes com outro token executariam com as permissões dele (confusão de identidade). Em stateless a task nasce dentro de cada requisição e herda o `contextvar` correto. Atualizados: nota técnica de §3.5, consequência v1.19 do ADR-006 (§7) e nova lição técnica §14.1 item 8. `expose_headers` do CORS passa a `["WWW-Authenticate"]` (F12) — `Mcp-Session-Id` nunca é enviado em stateless.
+>
 > **Nota de revisão (v1.19 → v1.20):** F12 passa a emitir token por **e-mail e senha**, pelo próprio usuário (revisão de ADR-007; sem mudança no formato do token nem na autorização por perfis). (1) Novos endpoints `POST /auth/token` (e-mail, senha, `label` e `expire_days` opcionais; `expire_days` limitado por `ACCESS_TOKEN_MAX_EXPIRATION_DAYS`) e `POST /auth/revoke` (e-mail, senha e token; credenciais validadas antes do token; 404 para token inexistente ou de outro usuário), em `routes/auth.py`, registrados em `main.py`, fora do middleware do `/mcp` — §3.5. (2) `users` ganha `password_hash` (bcrypt); `external_id` vira o e-mail de login (minúsculas, normalizado pela aplicação) — §2.2. (3) `scripts/generate_access_token.py` removido — §5.2, §8, §9. (4) Nova dependência `bcrypt` — §5.1; novas variáveis `ACCESS_TOKEN_MAX_EXPIRATION_DAYS` — §8.2. (5) ADR-007 revisado: emissão self-service em vez de administrativa; consequência registrada — os endpoints ampliam a superfície de ataque e V1.0 não tem proteção contra tentativas de senha (só log). (6) Falhas de login e revogação com log próprio (sem senha e sem e-mail) — F12 §4.5. (7) Revisão final do F12: datas de `access_tokens` em `TIMESTAMPTZ` (asyncpg devolve `TIMESTAMP` sem fuso e a comparação com `datetime.now(timezone.utc)` falharia); `users.is_blocked` e `profiles.is_active` `NOT NULL DEFAULT`; árvore de pastas §5.2 corrigida (sem `models.py`/Alembic — o schema é `database/schema.sql` + `database/migrations/f12_autenticacao.sql`).
 >
 > **Nota de revisão (v1.18 → v1.19):** transporte MCP passa a **stateless** (`StreamableHTTPSessionManager(app=mcp_server, stateless=True)`, `mcp_transport/__init__.py`) — pré-requisito do F12, já aplicado no código e validado (F6 com 2+ clientes reais + `TestStatelessTransport` em `tests/test_server_setup.py`, 189/189 testes ✅). Racional: com sessão (`stateless=False`, padrão do SDK) o servidor mantém `Mcp-Session-Id` entre requisições, e um usuário bloqueado ou token revogado continuaria usando uma sessão já aberta — contradiz o requisito de bloqueio imediato do F12. Em stateless cada requisição HTTP é independente e é autenticada por conta própria. Registrado em ADR-006 (nova consequência) e na nota técnica de §3.5 (threading do `AuthenticatedUser` decidido: middleware ASGI + `contextvar`). Nenhuma outra decisão arquitetural mudou.
@@ -674,10 +676,16 @@ Usuários (e-mail em minúsculas + hash bcrypt) continuam cadastrados por INSERT
 > — devolvendo 401 HTTP antes de o SDK processar qualquer coisa (o middleware fica dentro do
 > `CORSMiddleware`: preflight `OPTIONS` passa sem token e o 401 leva os headers CORS) — e guarda o
 > `AuthenticatedUser` num `contextvar` do projeto, lido por `list_tools()`/`call_tool()`.
-> Só é seguro porque o transporte é **stateless** (ADR-006, v1.19): sem sessão, a task do
-> servidor de cada requisição herda o contexto dela. Descartada a alternativa de ler
-> `mcp_server.request_context.request.headers` dentro dos handlers (existe no SDK 1.30,
-> mas depende de detalhe interno e só cobre `list_tools`/`call_tool`, não a recusa HTTP).
+> Só é seguro porque o transporte é **stateless** (ADR-006, v1.19/v1.21): a task do
+> servidor MCP é criada dentro de cada requisição HTTP e herda o `contextvar` gravado pelo
+> middleware. **Em stateful isso quebra:** a task é criada uma única vez, no `initialize`,
+> e reaproveita o contexto daquela requisição — o handler veria sempre o usuário que abriu
+> a sessão, mesmo quando uma requisição posterior traz o token de outro usuário (comprovado
+> em teste, ver §14.1 item 8). Trocar para `stateless=False` exige, portanto, abandonar o
+> `contextvar` — não é só uma mudança de flag.
+> Descartada a alternativa de ler `mcp_server.request_context.request.headers` dentro dos
+> handlers (funciona nos dois modos, mas depende de detalhe interno do SDK e só cobre
+> `list_tools`/`call_tool`, não a recusa HTTP).
 
 ---
 
@@ -1135,9 +1143,11 @@ agora "Controle de Volume de Resultado" — ver FEATURES_ROADMAP.md v1.6.
 **Consequência adicionada na v1.19 — transporte stateless:**
 - O `StreamableHTTPSessionManager` roda com `stateless=True`: cada requisição HTTP cria um transporte novo e não há `Mcp-Session-Id`. Clientes que seguem a especificação simplesmente não reenviam o header (validado no F6 com 2+ clientes MCP reais).
 - Custo aceito: o servidor não pode iniciar mensagens por conta própria (notificações, `list_changed`, streaming de progresso). Nenhuma feature atual usa isso — `call_tool()` devolve 1 resultado por chamada.
-- Ganho: nenhum estado de conexão entre chamadas, e o `AuthenticatedUser` do F12 (middleware ASGI + `contextvar`, §3.5) fica sempre coerente com a requisição corrente, já que a task do servidor é criada dentro dela e herda seu contexto.
+- Ganho: nenhum estado de conexão entre chamadas, e o `AuthenticatedUser` do F12 (middleware ASGI + `contextvar`, §3.5) fica sempre coerente com a requisição corrente, já que a task do servidor é criada dentro dela e herda seu contexto. *(v1.21)* Este é o **motivo determinante** da escolha: em stateful a task nasce só no `initialize` e o `contextvar` fica congelado no usuário que abriu a sessão (§14.1 item 8). O bloqueio imediato, sozinho, não exigiria stateless — o middleware valida toda requisição nos dois modos.
+- Ganhos operacionais: nada guardado em memória por cliente conectado (sem `_server_instances`, sem necessidade de `session_idle_timeout`); restart/deploy sem sessões perdidas (em stateful o cliente receberia 404 e teria de refazer o `initialize`); múltiplas réplicas (V1.2) sem sticky session.
+- Custo medido: ~1 ms/req de overhead de transporte a mais que em stateful (sem BD) — irrelevante perto das consultas de autenticação/permissão do F12.
 - Cache, `VolumeGuardService` e `AuditService` não mudam (são singletons de módulo em `mcp_transport/tools.py`, sem relação com sessão MCP).
-- Rollback: trocar `stateless=True` por `False` — mas o F12 então teria de ler o header via `request_context` do SDK dentro dos handlers, e a validação por requisição continuaria obrigatória.
+- Rollback: trocar `stateless=True` por `False` **não é seguro com o F12 como está** — o `contextvar` passaria a entregar o usuário errado aos handlers. Exigiria: (1) ler a identidade via `request_context.request` do SDK dentro dos handlers, no lugar do `contextvar`; (2) vincular a sessão ao usuário do `initialize` e recusar requisição com token de outro usuário; (3) configurar `session_idle_timeout`; (4) sticky session em múltiplas réplicas. O teste `test_contextvar_isolated_across_users_in_same_client` (F12 §6.1) falha se a flag for trocada sem essas mudanças.
 
 Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 
@@ -1569,6 +1579,12 @@ Consolidadas a partir do antigo `mcp_prototype/README.md` (o protótipo continua
 
 **7. Validar multi-cliente sem clientes desktop**
 - Abrir duas sessões independentes com `mcp.client.streamable_http` contra o mesmo `/mcp`, chamando `list_tools()`/`call_tool()` em cada uma — foi assim que o protótipo foi validado durante o desenvolvimento (base do F6).
+
+**8. Transporte stateless e `contextvar` (análise de 2026-09-30, F12)**
+- Sintoma que evitamos: com `stateless=False`, um middleware ASGI que grava o usuário autenticado num `contextvar` antes de `session_manager.handle_request()` **valida** o token de cada requisição, mas o handler `list_tools()`/`call_tool()` enxerga sempre o usuário do `initialize`.
+- Causa: em stateful o `StreamableHTTPSessionManager` inicia a task do servidor uma única vez (`self._task_group.start(run_server)` no `initialize`) e a guarda em `_server_instances`; as mensagens seguintes só são entregues a ela, que mantém o contexto copiado da primeira requisição. Em stateless, `_handle_stateless_request` inicia uma task nova por requisição, com o contexto dela.
+- Evidência (SDK `mcp` 1.27): `initialize` como MARIA + `tools/list` com tokens de JOAO e de um usuário bloqueado → em stateful o handler viu MARIA nas três; em stateless viu o usuário correto em cada uma. `mcp_server.request_context.request` mostrou o header correto nos dois modos.
+- Consequência: `stateless=True` é pré-requisito do desenho do F12 (§3.5). Custo medido: ~3,0 ms/req em stateless contra ~2,0 ms/req em stateful (só transporte).
 
 ---
 

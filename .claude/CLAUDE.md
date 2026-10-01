@@ -26,11 +26,11 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F11: SQL Server Adapter 🟩 Done (`aioodbc`+`pyodbc`, `@n`→`?` por ordem de ocorrência, contrato agnóstico testado nos 3 adapters, 185/185 testes ✅)
 
 ### Sprint 3: Production-Ready (⬜ não iniciada)
-- F12: Autenticação e Controle de Acesso via Perfis ⬜ Todo — **spec completa e revisada** (`.spec/features/F12_AUTENTICACAO_PERFIS.md`, 3.5d); pré-requisito já aplicado: transporte MCP **stateless** (`StreamableHTTPSessionManager(..., stateless=True)`, F6 revalidado, 189/189 testes ✅)
+- F12: Autenticação e Controle de Acesso via Perfis ⬜ Todo — **spec completa e revisada** (`.spec/features/F12_AUTENTICACAO_PERFIS.md`, 3.5d); pré-requisito já aplicado: transporte MCP **stateless** (`StreamableHTTPSessionManager(..., stateless=True)`, F6 revalidado, 189/189 testes ✅). **Stateless é obrigatório:** em stateful o `contextvar` do usuário fica congelado no `initialize` (ARQUITETURA.md §14.1 item 8) — não trocar a flag
 
 ## Documentos (Aprovados e Atualizados)
 - **NEGOCIO.md** (v1.10): Requisitos (RF1-RF5, T1-T5, RNF1-RNF5) — RF5 = autenticação por token + perfis (F12)
-- **ARQUITETURA.md** (v1.20): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
+- **ARQUITETURA.md** (v1.21): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
 - **FEATURES_ROADMAP.md** (v1.14): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12
 - **DATABASE_SCHEMA.md**: schema do Config DB (tabelas de auth do F12: `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`)
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
