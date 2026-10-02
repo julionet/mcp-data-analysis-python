@@ -294,6 +294,7 @@ class TestAnalysisService:
         query_sql, query_params = query_call.args[0], query_call.args[1]
 
         assert "$1" in count_sql and "$2" in count_sql and "$3" in count_sql
+        assert count_sql.endswith(") sub") and " AS sub" not in count_sql  # F9: Oracle rejeita AS
         assert ":data_inicial" not in query_sql and ":pago" not in query_sql
         assert list(query_params.keys()) == ["data_inicial", "data_final", "pago"]
 

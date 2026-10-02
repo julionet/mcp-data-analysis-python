@@ -16,6 +16,7 @@ import pytest
 
 from adapters.factory import AdapterFactory
 from adapters.mysql import MySQLAdapter
+from adapters.oracle import OracleAdapter
 from adapters.postgresql import PostgreSQLAdapter
 from adapters.sqlserver import SQLServerAdapter
 
@@ -40,6 +41,7 @@ _ADAPTERS = {
     "postgresql": PostgreSQLAdapter,
     "mysql": MySQLAdapter,
     "sqlserver": SQLServerAdapter,
+    "oracle": OracleAdapter,
 }
 
 
@@ -56,9 +58,11 @@ class AdapterCase:
     def bound_values(self, sql: str, param_names: list[str], params: dict) -> list:
         """Valores que o driver receberia em cada placeholder, na ordem do SQL."""
         translated = self.translated(sql, param_names)
-        if self.kind == "postgresql":
-            values = list(params.values())  # $n → n-ésima chave (ver docstring do módulo)
-            return [values[int(n) - 1] for n in re.findall(r"\$(\d+)", translated)]
+        if self.kind in ("postgresql", "oracle"):
+            # $n / :pN → n-ésima chave (ver docstring do módulo)
+            values = list(params.values())
+            marker = r"\$(\d+)" if self.kind == "postgresql" else r":p(\d+)"
+            return [values[int(n) - 1] for n in re.findall(marker, translated)]
         if self.kind == "mysql":
             return [params[name] for name in re.findall(r"%\((\w+)\)s", translated)]
         _, values = SQLServerAdapter._to_positional(translated, params)
@@ -79,7 +83,9 @@ class AdapterCase:
                 cursor.fetchall = AsyncMock(return_value=rows)
                 cursor.fetchone = AsyncMock(return_value=rows[0] if rows else None)
             else:
-                cursor.description = [(k,) for k in rows[0]]
+                # Oracle devolve nomes de coluna em MAIÚSCULAS; o adapter normaliza
+                name = str.upper if self.kind == "oracle" else str
+                cursor.description = [(name(k),) for k in rows[0]]
                 cursor.fetchall = AsyncMock(return_value=[tuple(r.values()) for r in rows])
                 cursor.fetchone = AsyncMock(return_value=tuple(rows[0].values()))
             conn.cursor.return_value.__aenter__.return_value = cursor

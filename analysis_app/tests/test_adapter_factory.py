@@ -6,6 +6,7 @@ from adapters.factory import AdapterFactory
 from adapters.postgresql import PostgreSQLAdapter
 from adapters.mysql import MySQLAdapter
 from adapters.sqlserver import SQLServerAdapter
+from adapters.oracle import OracleAdapter
 
 CONFIG = {
     "host": "localhost",
@@ -49,6 +50,19 @@ class TestAdapterFactory:
         assert isinstance(adapter, SQLServerAdapter)
         assert adapter.config == sqlserver_config
 
+    def test_create_adapter_oracle(self):
+        oracle_config = {
+            "host": "localhost",
+            "port": 1521,
+            "user": "readonly",
+            "password": "senha",
+            "service_name": "ORCLPDB1",
+        }
+        adapter = AdapterFactory.create_adapter("oracle", oracle_config)
+
+        assert isinstance(adapter, OracleAdapter)
+        assert adapter.config == oracle_config
+
     def test_create_adapter_unknown_type_raises(self):
-        with pytest.raises(ValueError, match="oracle"):
-            AdapterFactory.create_adapter("oracle", CONFIG)
+        with pytest.raises(ValueError, match="mongodb"):
+            AdapterFactory.create_adapter("mongodb", CONFIG)

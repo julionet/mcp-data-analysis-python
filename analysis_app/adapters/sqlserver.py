@@ -23,7 +23,7 @@ _SSLMODE_TO_ODBC = {
     "verify-full": "Encrypt=yes;TrustServerCertificate=no",
 }
 
-# Erros nativos do wrapper SELECT COUNT(*) FROM (<sql>) AS sub (F11 §8.4):
+# Erros nativos do wrapper SELECT COUNT(*) FROM (<sql>) sub (F11 §8.4):
 # 1033 = ORDER BY em subquery, 8155 = coluna sem nome, 8156 = coluna duplicada.
 _RESTRICTED_SQL_ERRORS = ("(1033)", "(8155)", "(8156)")
 _ORDER_BY_TEXT = "ORDER BY clause is invalid in views, inline functions, derived tables, subqueries"

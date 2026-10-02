@@ -6,7 +6,7 @@
 **Nome:** Oracle Adapter
 **Prioridade:** 🟡 Média
 **Esforço Estimado:** 1.5d (12h)
-**Status:** ⬜ Todo
+**Status:** 🟩 Done (2026-10-01, sem validação manual)
 
 > **Histórico:** o F9 era "MongoDB Adapter". Em 2026-09-28 o MongoDB foi removido de vez do escopo de V1.0 (sem Backlog Futuro) e o F9 passou a ser o Oracle Adapter — ver FEATURES_ROADMAP.md v1.11, NEGOCIO.md v1.8 e ARQUITETURA.md v1.15. **Implementar depois do F11** (SQL Server).
 
@@ -339,14 +339,14 @@ class TestOracleAdapter:
 **`tests/test_analysis_service.py`** — nova asserção: o `count_sql` enviado ao adapter termina com `) sub` e não contém ` AS sub`.
 
 ### 6.2 Checklist de Testes
-- [ ] Unitário: `translate_params` (single, múltiplos, índice, word boundary, palavra reservada, vazio, repetido)
-- [ ] Unitário: DSN por `service_name` / `sid` / porta padrão / erros de configuração
-- [ ] Unitário: binds por índice, chaves minúsculas, `fetch_lobs`/`fetch_decimals`, `call_timeout`, escalar
-- [ ] Unitário: tradução de ORA-00911 / ORA-00918
-- [ ] Unitário: `execute()` com commit, `test_connection` (DUAL), `disconnect`
-- [ ] Contrato: 4 adapters × cenários de parâmetros
-- [ ] Factory: `oracle` registrado; tipo desconhecido continua levantando `ValueError`
-- [ ] Regressão: suíte completa (PostgreSQL, MySQL, SQL Server) passa com `AS sub` → `sub`
+- [x] Unitário: `translate_params` (single, múltiplos, índice, word boundary, palavra reservada, vazio, repetido)
+- [x] Unitário: DSN por `service_name` / `sid` / porta padrão / erros de configuração
+- [x] Unitário: binds por índice, chaves minúsculas, `fetch_lobs`/`fetch_decimals`, `call_timeout`, escalar
+- [x] Unitário: tradução de ORA-00911 / ORA-00918
+- [x] Unitário: `execute()` com commit, `test_connection` (DUAL), `disconnect`
+- [x] Contrato: 4 adapters × cenários de parâmetros
+- [x] Factory: `oracle` registrado; tipo desconhecido continua levantando `ValueError`
+- [x] Regressão: suíte completa (PostgreSQL, MySQL, SQL Server) passa com `AS sub` → `sub`
 - [ ] Manual (quando houver instância — **pendente**): `test_connection()` True
 - [ ] Manual (pendente): parâmetro repetido e filtro opcional `(:x IS NULL OR ...)`
 - [ ] Manual (pendente): tipos NUMBER (int/decimal), DATE (datetime), CLOB (str) no JSON final
@@ -435,22 +435,22 @@ Novo adapter = herdar `DatabaseAdapter`, implementar os 6 métodos, registrar no
 ## 9. Checklist de Implementação
 
 **Código:**
-- [ ] `adapters/oracle.py` — `OracleAdapter` completo
-- [ ] `adapters/factory.py` — registrar `oracle`
-- [ ] `services/analysis_service.py` — `AS sub` → `sub`
-- [ ] `requirements.txt` — `oracledb>=2.0.0`
-- [ ] `tests/test_oracle_adapter.py`
-- [ ] `tests/test_adapter_contract.py` — incluir Oracle
-- [ ] `tests/test_analysis_service.py` — asserção do alias
-- [ ] `tests/test_adapter_factory.py` — caso oracle
-- [ ] Docstrings (módulo e métodos públicos)
+- [x] `adapters/oracle.py` — `OracleAdapter` completo
+- [x] `adapters/factory.py` — registrar `oracle`
+- [x] `services/analysis_service.py` — `AS sub` → `sub`
+- [x] `requirements.txt` — `oracledb>=2.0.0`
+- [x] `tests/test_oracle_adapter.py`
+- [x] `tests/test_adapter_contract.py` — incluir Oracle
+- [x] `tests/test_analysis_service.py` — asserção do alias
+- [x] `tests/test_adapter_factory.py` — caso oracle
+- [x] Docstrings (módulo e métodos públicos)
 - [ ] Code review completo
-- [ ] Testes passing (100% dos casos, suíte existente sem regressão)
+- [x] Testes passing (100% dos casos, suíte existente sem regressão)
 
 **Docs:**
-- [ ] `FEATURES_ROADMAP.md`, `ARQUITETURA.md`, `CLAUDE.md`
-- [ ] Esta spec: status 🟩 Done (sem validação manual) + histórico de implementação
-- [ ] `adapters/base.py` — acrescentar exemplos SQL Server/Oracle em `translate_params` (docstring)
+- [x] `FEATURES_ROADMAP.md`, `ARQUITETURA.md`, `CLAUDE.md`
+- [x] Esta spec: status 🟩 Done (sem validação manual) + histórico de implementação
+- [x] `adapters/base.py` — acrescentar exemplos SQL Server/Oracle em `translate_params` (docstring)
 
 **QA:**
 - [ ] Validação manual contra Oracle real — **pendente até existir instância**
@@ -471,6 +471,37 @@ Novo adapter = herdar `DatabaseAdapter`, implementar os 6 métodos, registrar no
 | 6 | `fetch_decimals=True` faz `NUMBER` voltar como `Decimal` (serializado como string por `default=str`, igual aos outros bancos). Comportamento para colunas `NUMBER` inteiras a confirmar na instância real. | Validar no teste manual |
 | 7 | MongoDB removido de V1.0 sem Backlog Futuro (decisão de 2026-09-28). | Registrado em ROADMAP v1.11 / NEGOCIO v1.8 / ARQUITETURA v1.15 |
 | 8 | Specs históricas (F2, F4, F10) ainda citam MongoDB como exemplo de adapter futuro. | Mantidas — refletem o momento em que foram escritas |
+
+---
+
+## 11. Histórico de Implementação
+
+### ✅ Implementação Completada (2026-10-01)
+
+**Arquivos criados:**
+- ✅ `analysis_app/adapters/oracle.py` — `OracleAdapter`: `_build_dsn()`, `connect()`/`disconnect()`, `_to_binds()`, `execute_query()`, `execute()`, `test_connection()`, `translate_params()`
+- ✅ `analysis_app/tests/test_oracle_adapter.py` — 27 testes unitários com `oracledb` mockado
+
+**Arquivos modificados:**
+- ✅ `analysis_app/adapters/factory.py` — `"oracle": OracleAdapter`
+- ✅ `analysis_app/services/analysis_service.py` — `count_sql` com alias `sub` (sem `AS`)
+- ✅ `analysis_app/requirements.txt` — `oracledb>=2.0.0` (instalado: 26.0.1)
+- ✅ `analysis_app/adapters/base.py` e `sqlserver.py` — só docstrings/comentários (exemplos SQL Server/Oracle; alias do wrapper)
+- ✅ `analysis_app/tests/test_adapter_contract.py` — fixture com 4 adapters (o mock do Oracle devolve colunas em MAIÚSCULAS para provar a normalização)
+- ✅ `analysis_app/tests/test_adapter_factory.py` — caso `oracle`; o teste de "tipo desconhecido" passou a usar `mongodb` (antes usava `oracle`, que agora é válido)
+- ✅ `analysis_app/tests/test_analysis_service.py` — asserção `) sub` / sem ` AS sub`
+- ✅ `.spec/FEATURES_ROADMAP.md` (v1.16), `.spec/ARQUITETURA.md` (v1.23), `.claude/CLAUDE.md`
+
+**Testes:** 334/334 na suíte completa (27 novos em `test_oracle_adapter.py` + Oracle nos testes de contrato e de factory), sem regressão.
+
+### Decisões de implementação (dentro do que a spec definiu)
+- `connect()` valida o DSN **antes** de abrir o pool e, depois de `create_pool_async` (preguiçoso), faz um `acquire` de teste para o fail-fast do §5 valer de fato; se falhar, o pool é fechado com `force=True` e o erro é relançado (`_pool` fica `None`).
+- `translate_params` substitui em **passo único** (regex `(?<![\w:]):(\w+)` + mapa nome→índice), em vez de um `re.sub` por nome: um parâmetro chamado `p1` não corrompe um `:p1` já gerado. Placeholder fora de `param_names` fica intacto (exigência do teste de contrato).
+- ORA-00911/ORA-00918 viram `RuntimeError` com a explicação do §8.4 (erro nativo em `__cause__`), como no SQL Server; demais erros são relançados sem alteração.
+- A spec não pedia o `acquire` de validação nem `force=True` no fechamento do pool — são ajustes de implementação.
+
+### Validação manual
+⏳ **Pendente** — sem instância Oracle (itens "Manual" do §6.2 e Observação 1 do §10).
 
 ---
 

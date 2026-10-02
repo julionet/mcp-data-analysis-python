@@ -8,7 +8,7 @@ Plataforma agnóstica de LLM para análise de dados conversacional, **multi-clie
 ## Stack
 FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, porta 3000) + PostgreSQL + Python. Cache em memória local (Redis só em ambiente remoto/futuro).
 
-## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — 🟨 Em Progresso | Sprint 3 — 🟨 F12 ✅)
+## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — ✅ 100% Completo | Sprint 3 — 🟨 F12 ✅)
 
 ### Sprint 1: MVP Local Multi-Cliente (✅ 100%)
 - F1: FastAPI + MCP Server via Streamable HTTP com TLS 🟩 Done
@@ -20,8 +20,8 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F7: Cache Service (in-memory) 🟩 Done
 - F8: Log de Execução (analysis_id, params, status, time, rows, size, cached flag; o `user_id` entrou com o F12) 🟩 Done
 
-### Sprint 2: Multi-DB Adapters (2/3 concluído)
-- F9: Oracle Adapter ⬜ Todo (próximo; reutiliza `tests/test_adapter_contract.py` do F11)
+### Sprint 2: Multi-DB Adapters (✅ 3/3)
+- F9: Oracle Adapter 🟩 Done (2026-10-01) (`oracledb` thin, `:x`→`:pN` por índice de `param_names`, colunas em minúsculas, wrapper `COUNT(*)` com alias `sub` sem `AS`; 4 adapters no contrato; 334/334 testes ✅, sem validação manual — sem instância Oracle)
 - F10: MySQL Adapter 🟩 Done (named parameters `%(name)s`, 3 correções, 23/23 testes ✅)
 - F11: SQL Server Adapter 🟩 Done (`aioodbc`+`pyodbc`, `@n`→`?` por ordem de ocorrência, contrato agnóstico testado nos 3 adapters, 185/185 testes ✅)
 
@@ -30,20 +30,20 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 
 ## Documentos (Aprovados e Atualizados)
 - **NEGOCIO.md** (v1.10): Requisitos (RF1-RF5, T1-T5, RNF1-RNF5) — RF5 = autenticação por token + perfis (F12)
-- **ARQUITETURA.md** (v1.22): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
-- **FEATURES_ROADMAP.md** (v1.15): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12
+- **ARQUITETURA.md** (v1.23): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
+- **FEATURES_ROADMAP.md** (v1.16): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12
 - **DATABASE_SCHEMA.md**: schema do Config DB (tabelas de auth do F12: `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`)
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
 - **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional da remoção de Handlers e Controle de Volume
 
 > `IDENTIFICATION_SERVICES_V1_0.md`, `EXECUTIVE_SUMMARY_V1_0.md`, `README_V1_0.md` e `MANIFEST_V1_0.md` foram descontinuados. A autenticação voltou ao escopo de V1.0 como **F12**, com desenho novo (token opaco + perfis N:N, ver ADR-007), e não a partir daqueles documentos.
 
-## Requisitos V1.0 (Sprint 1 — Concluído | Sprint 2 — Em Progresso)
+## Requisitos V1.0 (Sprint 1 — Concluído | Sprint 2 — Concluído)
 ✅ Multi-cliente MCP simultâneo, via Streamable HTTP (stateless) com TLS obrigatório — token exigido em toda chamada `/mcp` (F12)
 ✅ PostgreSQL Adapter (completo com DML: INSERT/UPDATE/DELETE)
 ✅ MySQL Adapter (F10, com tradução agnóstica de placeholders — `:param` → `%(param)s`)
 ✅ SQL Server Adapter (F11, `:param` → `@param` → `?` na execução; driver ODBC 17/18 do SO)
-🟨 Oracle Adapter em progresso (Sprint 2, F9)
+✅ Oracle Adapter (F9, `oracledb` thin mode — sem dependência de SO; sem validação manual por falta de instância)
 ✅ Servidor entrega dataset bruto (sem handlers); Controle de Volume recusa/pede refinamento se exceder limites (.env)
 ✅ Log de execução completo (analysis_id, params, status, execution_time_ms, rows_affected, result_size_bytes, cached flag, user_id — sem identificar o cliente MCP)
 ✅ Cache in-memory com TTL configurável por análise

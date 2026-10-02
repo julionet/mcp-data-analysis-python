@@ -219,7 +219,7 @@ class AnalysisService:
 
         param_names = step.definition["params"]
         translated_sql = adapter.translate_params(step.definition["sql"], param_names)
-        count_sql = f"SELECT COUNT(*) FROM ({translated_sql}) AS sub"
+        count_sql = f"SELECT COUNT(*) FROM ({translated_sql}) sub"
 
         values = validated_params.model_dump()
         ordered_values = {name: values[name] for name in param_names}

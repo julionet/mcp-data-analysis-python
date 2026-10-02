@@ -1,7 +1,7 @@
 """Interface abstrata de acesso a banco de dados (Factory Pattern, ARQUITETURA.md §4.2).
 
 Base para todos os adapters de data source (PostgreSQL, MySQL e,
-futuramente, SQL Server e Oracle).
+SQL Server e Oracle).
 """
 
 from abc import ABC, abstractmethod
@@ -43,4 +43,6 @@ class DatabaseAdapter(ABC):
         Exemplos:
         - PostgreSQL: :data_inicial → $1, :data_final → $2
         - MySQL: :data_inicial → %(data_inicial)s, :data_final → %(data_final)s
+        - SQL Server: :data_inicial → @data_inicial (convertido para ? na execução)
+        - Oracle: :data_inicial → :p1, :data_final → :p2 (índice em param_names)
         """

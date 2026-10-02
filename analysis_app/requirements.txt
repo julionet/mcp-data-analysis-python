@@ -8,4 +8,5 @@ aiomysql
 cryptography
 aioodbc>=0.4.0
 pyodbc>=5.2.0
+oracledb>=2.0.0
 bcrypt>=5.0.0

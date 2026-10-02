@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.15 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle, TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-30 (atualizado 2026-09-30 — F12 implementada)
+**Versão:** 1.16 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-01 (atualizado 2026-10-01 — F9 implementada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
+> **Nota de revisão (v1.15 → v1.16):** F9 (Oracle Adapter) **implementada** (2026-10-01). `OracleAdapter` (`adapters/oracle.py`, `python-oracledb` em modo thin, pool async 1/10 com `acquire` de validação no `connect()`) traduz `:x` → `:pN` por índice de `param_names` em passo único, liga `params.values()` a `pN` em `execute_query()`, normaliza chaves de coluna para minúsculas e usa `fetch_lobs=False`/`fetch_decimals=True`; ORA-00911/ORA-00918 são relançados com a explicação do subconjunto comum de SQL. O wrapper do `COUNT(*)` do Volume Guard passou de `AS sub` para `sub` (`analysis_service.py`). Oracle entrou na fixture de `tests/test_adapter_contract.py` (4 adapters × mesmos cenários). Testes: 334 ✅ (27 novos em `tests/test_oracle_adapter.py`). **Sprint 2: 3/3 concluída.** Sem validação manual — não há instância Oracle (F9 §10). Bancos suportados: 3 → 4. Spec e histórico: `features/F9_ORACLE_ADAPTER.md` §11. Próxima: F13 (Docker) e demais da Sprint 3.
+>
 > **Nota de revisão (v1.14 → v1.15):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Migration: `analysis_app/database/migrations/f12_autenticacao.sql`; seed de exemplo: `analysis_app/database/seed_usuario_admin_f12.sql`. Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Sprint 3: 1/7 features concluídas. Próximas: F9 (Oracle, Sprint 2) e F13 (Docker, que já deve sair com autenticação obrigatória).
 >
 > **Nota de revisão (v1.13 → v1.14):** F12 revisada — a emissão de token deixa de ser administrativa (script) e passa a ser **self-service por endpoint**: `POST /auth/token` (e-mail + senha, `label` e `expire_days` opcionais) e `POST /auth/revoke`, em `routes/auth.py`. `users` ganha `password_hash` (bcrypt) e `external_id` vira o e-mail de login. Sem proteção contra tentativas de senha em V1.0 (só log). Esforço de F12: 2.5d → **3.5d** (+1d: endpoints, bcrypt, testes); Sprint 3: ~11.5 → ~12.5 dias; total do projeto: ~30 → ~31 dias. Ver ARQUITETURA.md v1.20 (ADR-007 revisado) e `features/F12_AUTENTICACAO_PERFIS.md`.
@@ -123,17 +125,17 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
-| F9 | Oracle Adapter (via `oracledb`, thin mode) | 🟡 Média | 1.5d | F2, F11 | ⬜ Todo |
+| F9 | Oracle Adapter (via `oracledb`, thin mode) | 🟡 Média | 1.5d | F2, F11 | 🟩 Done |
 | F10 | MySQL Adapter | 🟡 Média | 1d | F2 | 🟩 Done |
 | F11 | SQL Server Adapter (via ODBC/`aioodbc`) | 🟡 Média | 1.5d | F2 | 🟩 Done |
 
-**Total Sprint 2:** ~3 dias (F10 concluído em 2026-09-27; F11 em 2026-09-29)
+**Total Sprint 2:** ~3 dias (F10 concluído em 2026-09-27; F11 em 2026-09-29; F9 em 2026-10-01) — ✅ Sprint 2 completa
 
-**Ordem de implementação:** F10 ✅ → F11 ✅ → F9 (o F9 reutiliza `tests/test_adapter_contract.py`, criado no F11).
+**Ordem de implementação:** F10 ✅ → F11 ✅ → F9 ✅ (o F9 reutiliza `tests/test_adapter_contract.py`, criado no F11).
 
 **F11 em detalhe (SQL Server Adapter):** requer instalar o driver ODBC nativo da Microsoft (`msodbcsql17`/`18`) no ambiente/imagem Docker antes de usar `pyodbc`/`aioodbc` — isso é uma dependência de sistema operacional, não só de `pip install` (ver ARQUITETURA.md §5.1).
 
-**F9 em detalhe (Oracle Adapter):** `python-oracledb` em modo thin (async nativo, sem Oracle Client no SO), Oracle Database 12.1+. Conexão por DSN montado a partir de `host`/`port`/`service_name` (ou `sid` para bancos antigos); parâmetros `:x` → `:pN` por índice de `param_names` (como o `$n` do PostgreSQL); chaves de coluna normalizadas para minúsculas; `SELECT 1 FROM DUAL` no `test_connection`. `sslmode`/TCPS fora do escopo. Sem instância Oracle no momento — validação manual pendente. Ver `features/F9_ORACLE_ADAPTER.md`.
+**F9 em detalhe (Oracle Adapter):** `python-oracledb` em modo thin (async nativo, sem Oracle Client no SO), Oracle Database 12.1+. Conexão por DSN montado a partir de `host`/`port`/`service_name` (ou `sid` para bancos antigos); parâmetros `:x` → `:pN` por índice de `param_names` (como o `$n` do PostgreSQL); chaves de coluna normalizadas para minúsculas; `SELECT 1 FROM DUAL` no `test_connection`. `sslmode`/TCPS fora do escopo. Implementada em 2026-10-01 (334 testes ✅, drivers mockados); sem instância Oracle — validação manual pendente. Ver `features/F9_ORACLE_ADAPTER.md`.
 
 > **Nota:** F9 e F10 do roadmap anterior (Version Management + Rollback Mechanism) foram removidos na revisão v1.8→v1.9 — como a plataforma não implementa Handlers, não há necessidade de versionamento de análises. O histórico de execuções (F8, já implementado) fornece auditoria suficiente para V1.0. Versionamento pode ser reintroduzido futuro (FB6/FB7) se a gestão de mudanças em análises se tornar crítica.
 
@@ -398,10 +400,10 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 22/22 | 10/22 🟩 |
+| **Features Implementadas** | 22/22 | 12/22 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
-| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 3 (PostgreSQL, MySQL, SQL Server) ✅ |
+| **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 4 (PostgreSQL, MySQL, SQL Server, Oracle) ✅ |
 | **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |
 | **Tempo de Análise** | < 30s | < 5s ✅ |
 | **Uptime Local** | 99%+ | TBD |
@@ -428,7 +430,7 @@ Sprint 1 (Dias 1-10): MVP Local Multi-Cliente
 Sprint 2 (Dias 10-14): Multi-DB
 ├─ Dia 10:    F10 (MySQL Adapter) ✅
 ├─ Dia 11-12: F11 (SQL Server Adapter) ✅
-└─ Dia 13-14: F9  (Oracle Adapter)
+└─ Dia 13-14: F9  (Oracle Adapter) ✅
 
 Sprint 3 (Dias 15-27): Production-Ready
 ├─ Dia 15-18: F12 (Autenticação e Controle de Acesso via Perfis) ✅
@@ -504,4 +506,4 @@ A especificação técnica completa (código de middleware, schema SQL, fluxos) 
 ---
 
 **Documento de Roadmap Completo — Multi-Cliente, Com Autenticação por Token + Perfis (F12), Sem Versionamento de Análises.**
-**Sprint 1 concluído (8/8 features). Próximas: Sprint 2 (Multi-DB) + Sprint 3 (Production, incluindo F12 Autenticação) + Sprint 4 (Deploy).**
+**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Próximas: Sprint 3 (Production, incluindo F12 Autenticação) + Sprint 4 (Deploy).**

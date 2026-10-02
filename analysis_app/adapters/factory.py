@@ -7,6 +7,7 @@ from adapters.base import DatabaseAdapter
 from adapters.postgresql import PostgreSQLAdapter
 from adapters.mysql import MySQLAdapter
 from adapters.sqlserver import SQLServerAdapter
+from adapters.oracle import OracleAdapter
 
 
 class AdapterFactory:
@@ -14,12 +15,13 @@ class AdapterFactory:
         "postgresql": PostgreSQLAdapter,
         "mysql": MySQLAdapter,
         "sqlserver": SQLServerAdapter,
+        "oracle": OracleAdapter,
     }
 
     @classmethod
     def create_adapter(cls, source_type: str, config: dict) -> DatabaseAdapter:
         """Levanta ValueError com mensagem clara se source_type não estiver
-        registrado (ex.: 'oracle' antes do F9)."""
+        registrado."""
         adapter_cls = cls._adapters.get(source_type)
         if adapter_cls is None:
             raise ValueError(
