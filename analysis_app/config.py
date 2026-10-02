@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     server_host: str = "0.0.0.0"
     server_port: int = 3000
+    tls_enabled: bool = True  # False só em desenvolvimento local (HTTP puro)
     tls_cert_file: str = "certs/server.pem"
     tls_key_file: str = "certs/server-key.pem"
 

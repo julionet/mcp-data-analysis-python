@@ -20,11 +20,16 @@ def alpn_ssl_context_factory(config: Config, default_factory):
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host=settings.server_host,
-        port=settings.server_port,
-        ssl_keyfile=settings.tls_key_file,
-        ssl_certfile=settings.tls_cert_file,
-        ssl_context_factory=alpn_ssl_context_factory,
-    )
+    if settings.tls_enabled:
+        uvicorn.run(
+            "main:app",
+            host=settings.server_host,
+            port=settings.server_port,
+            ssl_keyfile=settings.tls_key_file,
+            ssl_certfile=settings.tls_cert_file,
+            ssl_context_factory=alpn_ssl_context_factory,
+        )
+    else:
+        # TLS_ENABLED=false: HTTP puro, só para desenvolvimento local. Login e token
+        # trafegam em texto puro — não expor fora de 127.0.0.1.
+        uvicorn.run("main:app", host=settings.server_host, port=settings.server_port)

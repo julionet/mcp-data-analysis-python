@@ -34,3 +34,13 @@ class TestAccessTokenExpirationSettings:
     def test_expiration_above_max_raises(self):
         with pytest.raises(ValueError, match="ACCESS_TOKEN"):
             Settings(access_token_expiration_days=100, access_token_max_expiration_days=30)
+
+
+class TestTlsEnabledSetting:
+    """TLS_ENABLED — HTTP puro só em desenvolvimento local (run_https.py)."""
+
+    def test_enabled_by_default(self):
+        assert Settings.model_fields["tls_enabled"].default is True
+
+    def test_can_be_disabled(self):
+        assert Settings(tls_enabled=False).tls_enabled is False
