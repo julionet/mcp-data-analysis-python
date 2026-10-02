@@ -1,24 +1,24 @@
 # ROADMAP — Ordem de implementação
 
 Documentos relacionados: [NEGOCIO.md](NEGOCIO.md) (o quê e por quê) e [ARQUITETURA.md](ARQUITETURA.md) (como).
-Cada feature terá sua especificação em `.spec/features/NNN-nome.md`.
+Cada feature terá sua especificação em `.spec/features/FNN-nome-curto.md` (ex.: `F05-cadastro-de-documento.md`), sempre criada a partir do template [features/_TEMPLATE.md](features/_TEMPLATE.md).
 
-**Status:** este roadmap é uma **proposta para aprovação**. Nenhuma feature foi especificada ou implementada.
+**Status:** roadmap **aprovado**. Nenhuma feature foi especificada ou implementada.
 
 ## Como trabalharemos (SDD)
 
 Para cada feature, nesta ordem:
-1. Escrever a spec em `.spec/features/` (objetivo, regras de negócio, comportamento, critérios de aceite, fora de escopo, dependências).
+1. Copiar `.spec/features/_TEMPLATE.md` para `.spec/features/FNN-nome-curto.md` e preenchê-lo por inteiro (objetivo, escopo, regras de negócio, comportamento, interface, dados, configuração, roteiro de teste manual, impacto, riscos). Seção sem mudanças recebe "Sem mudanças", nunca fica em branco. Dúvidas vão em "Pontos em aberto", sem inventar.
 2. **Você aprova a spec.**
 3. Implementar apenas o que a spec descreve.
-4. Verificar **manualmente** os critérios de aceite (roteiro com passos e resultado esperado) e registrar o resultado.
-5. Atualizar o status aqui e confirmar com você antes da próxima.
+4. Executar o **roteiro de teste manual** da spec (seção 9), repetir os roteiros de regressão (seção 10) e registrar o resultado na seção 14 da spec.
+5. Atualizar o status na spec e na tabela de status deste roadmap, e confirmar com você antes da próxima.
 
 Se a implementação revelar algo novo, a spec é atualizada **antes** do código.
 
 ## Testes: somente manuais
 
-Não haverá testes unitários nem automatizados. Cada spec terá um **roteiro de teste manual** (passos, comando e resultado esperado). Ao fechar uma feature, repetimos os roteiros das features anteriores que ela possa ter afetado. Detalhes na seção 14 da ARQUITETURA.
+Não haverá testes unitários nem automatizados. Cada spec terá um **roteiro de teste manual** na seção 9 do template (passos, comando e resultado esperado). Ao fechar uma feature, repetimos os roteiros das features anteriores que ela possa ter afetado. Detalhes na seção 14 da ARQUITETURA.
 
 ## Estratégia: fatia vertical primeiro
 

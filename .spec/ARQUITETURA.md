@@ -240,6 +240,7 @@ Adicionar a `requirements.txt`: `psycopg[binary]`, `psycopg_pool`, `pgvector`, `
 ## 10. Estrutura alvo
 
 ```
+.spec/                 (NEGOCIO.md, ARQUITETURA.md, ROADMAP.md, features/_TEMPLATE.md e as specs FNN-*.md)
 src/
   config.py  loaders.py  chunking.py  embeddings.py
   db.py  repository.py  retrieval.py  generation.py  pipeline.py  cli.py
@@ -285,7 +286,7 @@ Resolvidos: banco `rag_training_db`, usuário `rag_user` (senha só no `.env`); 
 
 **Decisão:** não haverá testes unitários nem automatizados (sem `pytest` e sem pasta `tests/`). Toda validação é **manual**.
 
-- Cada spec de feature traz **critérios de aceite escritos como roteiro manual**: passos, comando a executar e resultado esperado.
+- Cada spec de feature segue o template `.spec/features/_TEMPLATE.md`, cuja **seção 9** traz os **critérios de aceite escritos como roteiro manual**: passos, comando a executar e resultado esperado. A seção 10 lista os roteiros de outras features a repetir (regressão) e a seção 14 registra a execução.
 - Os roteiros usam arquivos de exemplo versionados (`data/manual_colaborador.txt`) e PDFs de amostra, incluindo um PDF sem texto e um arquivo corrompido.
 - Um banco separado para experimentos pode ser criado manualmente quando for preciso testar sem afetar a base principal.
 - Como não há rede de segurança automática, o código deve falhar de forma **clara** (mensagens explícitas) e cada feature deve ser verificada logo após implementada, antes de seguir para a próxima.
