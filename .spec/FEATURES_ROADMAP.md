@@ -7,6 +7,8 @@
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
+> **Nota de revisão (v1.16 → v1.17):** requisitos da F13 (Docker Setup) detalhados: um container por artefato — `app`, `postgres`, `mysql` e `oracle`. O container Oracle fica **criado, mas fora da execução do docker-compose** por ora. Ver "F13 em detalhe" na Sprint 3. Esforço (2d) e dependências inalterados.
+>
 > **Nota de revisão (v1.15 → v1.16):** F9 (Oracle Adapter) **implementada** (2026-10-01). `OracleAdapter` (`adapters/oracle.py`, `python-oracledb` em modo thin, pool async 1/10 com `acquire` de validação no `connect()`) traduz `:x` → `:pN` por índice de `param_names` em passo único, liga `params.values()` a `pN` em `execute_query()`, normaliza chaves de coluna para minúsculas e usa `fetch_lobs=False`/`fetch_decimals=True`; ORA-00911/ORA-00918 são relançados com a explicação do subconjunto comum de SQL. O wrapper do `COUNT(*)` do Volume Guard passou de `AS sub` para `sub` (`analysis_service.py`). Oracle entrou na fixture de `tests/test_adapter_contract.py` (4 adapters × mesmos cenários). Testes: 334 ✅ (27 novos em `tests/test_oracle_adapter.py`). **Sprint 2: 3/3 concluída.** Sem validação manual — não há instância Oracle (F9 §10). Bancos suportados: 3 → 4. Spec e histórico: `features/F9_ORACLE_ADAPTER.md` §11. Próxima: F13 (Docker) e demais da Sprint 3.
 >
 > **Nota de revisão (v1.14 → v1.15):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Migration: `analysis_app/database/migrations/f12_autenticacao.sql`; seed de exemplo: `analysis_app/database/seed_usuario_admin_f12.sql`. Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Sprint 3: 1/7 features concluídas. Próximas: F9 (Oracle, Sprint 2) e F13 (Docker, que já deve sair com autenticação obrigatória).
@@ -192,6 +194,32 @@ Sem JWT, sem OAuth2 — ver ADR-007 (ARQUITETURA.md §7)
 para as 3 alternativas comparadas e por que token opaco venceu para este
 projeto (multi-cliente heterogêneo, rede interna confiável, bloqueio precisa
 ter efeito imediato). Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
+```
+
+**F13 em detalhe (Docker Setup — um container por artefato):**
+```
+Objetivo: empacotar cada artefato do ambiente em seu próprio container, com
+config por .env (RNF2 — zero mudança de código entre local e remoto).
+
+Artefatos / containers:
+├─ app     → Dockerfile do servidor MCP (FastAPI, porta 3000, TLS via run_https.py)
+│            inclui driver ODBC msodbcsql17/18 (apt, antes do pip) para o SQL Server (F11);
+│            Oracle (thin mode) e MySQL/PostgreSQL não exigem nada de SO
+├─ postgres → container PostgreSQL (Config DB: schema.sql + migration F12 via initdb.d)
+├─ mysql    → container MySQL (data source de análises)
+└─ oracle   → container Oracle — CRIADO (Dockerfile/definição + env), mas
+              NÃO incluído na execução do docker-compose por enquanto
+              (fora do `up` padrão: sem serviço ativo no compose, ou atrás de
+              profile desabilitado — forma exata a definir na spec)
+
+Escopo transversal:
+├─ docker-compose.local.yml / docker-compose.remote.yml (app + postgres + mysql)
+├─ .env.example completo (variáveis de config.py), .dockerignore, healthcheck em /health
+├─ certs/ montado como volume (nunca dentro da imagem); secrets só via .env
+└─ Autenticação já obrigatória (F12) — migration f12_autenticacao.sql aplicada no init
+
+Em aberto (a decidir na spec): container de SQL Server (não pedido), nginx/Certbot no
+remote, Redis (fora no V1.0), versão do driver ODBC, seed do usuário admin.
 ```
 
 ---
