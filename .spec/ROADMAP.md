@@ -77,4 +77,5 @@ Ordem sugerida, a planejar depois de M4:
 
 | ID | Spec | Implementação |
 |---|---|---|
-| F01 a F12 | Pendente | Pendente |
+| F01 | Aprovada | Verificada (2026-10-02) |
+| F02 a F12 | Pendente | Pendente |

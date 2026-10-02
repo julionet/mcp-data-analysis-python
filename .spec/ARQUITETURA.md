@@ -189,14 +189,14 @@ Mantém o `Generator` e o prompt atuais, com ajustes:
 
 | Comando | Função |
 |---|---|
-| `init-db` | Aplica `sql/001_init.sql` e grava o modelo de embeddings em `app_meta`. |
+| `init-db` | Confere conexão e extensão `vector` e aplica `sql/001_init.sql` (idempotente, em uma transação). O modelo de embeddings é gravado em `app_meta` pela **F04**, não aqui. |
 | `ingest <arquivo\|pasta> [--recursive/--no-recursive] [--force] [--prune]` | Indexa um arquivo ou uma pasta (incremental, ver seção 4). Pastas são registradas em `sources`. |
 | `reindex [<pasta>\|--all] [--prune]` | Reprocessa as pastas registradas, só arquivos novos ou alterados. |
 | `ask "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--folder <pasta>]` | Recupera e responde sobre **todas** as pastas (ou só a filtrada), mostrando fontes (arquivo, página, score). |
 | `folders` | Lista pastas registradas, nº de documentos e data da última indexação. |
 | `list [--folder <pasta>]` | Lista documentos, status e quantidade de chunks. |
 | `delete <arquivo\|pasta>` | Remove o documento (ou todos os da pasta) e seus chunks. Pede confirmação. |
-| `check` | Verifica Claude, embeddings e conexão com o Postgres/pgvector. |
+| `check` | Verifica variáveis do `.env`, conexão, extensão, tabelas e índices (F01). A verificação dos embeddings entra na **F04** e a do Claude na **F07**. |
 | `menu` (padrão sem argumentos) | Menu interativo (abaixo). |
 
 ### Menu interativo
@@ -235,7 +235,7 @@ Banco: `rag_training_db`; usuário: `rag_user`. A **senha fica só no `.env`** (
 
 (O `.env.example` já usa `LLM_MODEL`; a variável antiga `MODEL` foi corrigida.)
 
-Adicionar a `requirements.txt`: `psycopg[binary]`, `psycopg_pool`, `pgvector`, `pymupdf4llm`. Remover `rank-bm25` ao final.
+Adicionar a `requirements.txt`, cada pacote junto da feature que o usa: `psycopg[binary]` (F01), `psycopg_pool` e `pgvector` (F05/F06) e `pymupdf4llm` (F02). Remover `rank-bm25` ao final.
 
 ## 10. Estrutura alvo
 
@@ -244,6 +244,7 @@ Adicionar a `requirements.txt`: `psycopg[binary]`, `psycopg_pool`, `pgvector`, `
 src/
   config.py  loaders.py  chunking.py  embeddings.py
   db.py  repository.py  retrieval.py  generation.py  pipeline.py  cli.py
+sql/setup_admin.sql    (preparação manual, uma vez: usuário, banco e extensão; exige superusuário)
 sql/001_init.sql
 scripts/experiments/   (compare_chunking, compare_methods, eval_retrieval…)
 data/                  (documentos de exemplo)
