@@ -1,0 +1,27 @@
+# F13 — Oracle Free: criado, mas FORA dos compose local/remote (decisão 2 da spec).
+# Subida manual:  docker compose -f docker/oracle/docker-compose.oracle.yml up -d
+# Imagem sem login (gvenzl/oracle-free). service_name = FREEPDB1, usuário SYSTEM.
+# Primeira subida demora alguns minutos. A compatibilidade do OracleAdapter (thin, Oracle 12.1+)
+# com a 23ai é a validação manual que a F9 deixou pendente (F9 §10).
+# Para incluir no ambiente depois: copiar o serviço para o compose desejado ou usar `include:`.
+
+name: mcp-analysis-oracle
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:slim
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?defina ORACLE_PASSWORD no .env}
+    ports:
+      - "${ORACLE_HOST_PORT:-1521}:1521"
+    volumes:
+      - oradata:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  oradata:

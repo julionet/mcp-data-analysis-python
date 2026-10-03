@@ -3,7 +3,7 @@
 `AnalysisRepository.get_allowed_for_user()` (list_tools) e
 `ProfileRepository.get_allowed_analysis_ids()` (revalidação do call_tool) precisam
 concordar. Pula sozinho se as tabelas do F12 ainda não existem no banco
-(aplicar database/migrations/f12_autenticacao.sql). Os dados criados são removidos no fim.
+(aplicar database/schema.sql). Os dados criados são removidos no fim.
 """
 
 import pytest
@@ -30,7 +30,7 @@ async def db():
     try:
         has_tables = await adapter.execute_query("SELECT to_regclass('public.profile_analyses')", scalar=True)
         if has_tables is None:
-            pytest.skip("Tabelas do F12 ausentes — aplique database/migrations/f12_autenticacao.sql")
+            pytest.skip("Tabelas do F12 ausentes — aplique database/schema.sql")
         yield adapter
     finally:
         await adapter.disconnect()

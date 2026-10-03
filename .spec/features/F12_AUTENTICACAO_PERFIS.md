@@ -92,7 +92,6 @@ Componentes modificados:
 ├─ services/audit_service.py         # log_execution(..., user_id=)
 ├─ repositories/execution_repo.py    # grava execution_history.user_id
 ├─ database/schema.sql               # + tabelas users (com password_hash), profiles, user_profiles, profile_analyses, access_tokens; + execution_history.user_id; + índices
-├─ database/migrations/f12_autenticacao.sql  # NOVO — CREATE/ALTER equivalentes para bancos já criados (aplicado à mão; ver §4.3)
 ├─ config.py                         # ACCESS_TOKEN_EXPIRATION_DAYS (default 90), ACCESS_TOKEN_MAX_EXPIRATION_DAYS (default 365)
 ├─ requirements.txt                  # + bcrypt
 └─ .spec/{NEGOCIO,ARQUITETURA,DATABASE_SCHEMA,FEATURES_ROADMAP}.md — já atualizados nesta revisão
@@ -107,7 +106,7 @@ Removidos do desenho anterior: scripts/generate_access_token.py e tests/test_gen
 
 As rotas HTTP ficam numa pasta própria (`routes/`), uma por assunto, e são registradas em `main.py` com `include_router`. `/health` continua em `main.py` (fora do escopo deste ajuste).
 
-**Sem SQLAlchemy/Alembic:** o projeto acessa o Config DB direto com asyncpg (`PostgreSQLAdapter`) e o schema vive em `database/schema.sql`, aplicado à mão — não há `models.py` nem migrations Alembic. O F12 segue esse padrão: acrescenta as tabelas ao `schema.sql` e entrega `database/migrations/f12_autenticacao.sql` (CREATE das 5 tabelas + `ALTER TABLE execution_history ADD COLUMN user_id` + índices, com `IF NOT EXISTS`) para quem já tem o banco criado. (A árvore de pastas de ARQUITETURA §5.2 citava `models.py`/Alembic como planejado; foi corrigida.)
+**Sem SQLAlchemy/Alembic:** o projeto acessa o Config DB direto com asyncpg (`PostgreSQLAdapter`) e o schema vive em `database/schema.sql`, aplicado à mão — não há `models.py` nem migrations Alembic. O F12 segue esse padrão: acrescenta as tabelas ao `schema.sql`. (A migration `f12_autenticacao.sql` prevista inicialmente foi cancelada — F13, decisão 7.) (A árvore de pastas de ARQUITETURA §5.2 citava `models.py`/Alembic como planejado; foi corrigida.)
 
 **Instância única do `AuthService`:** o middleware, as rotas `/auth/*` e `mcp_transport/tools.py` precisam do mesmo `AuthService`. Ele é criado uma vez em `mcp_transport/tools.py` (onde já vivem os singletons `analysis_service`, `_audit_service` etc.), `routes/auth.py::get_auth_service()` devolve essa instância, e `configure_mcp()` entrega `auth_service.authenticate` ao middleware. É o ponto que os testes patcham (`tools.auth_service.is_analysis_allowed`, §6.3).
 
@@ -278,7 +277,7 @@ CREATE INDEX idx_execution_history_user ON execution_history(user_id);
 - Sem `idx_access_tokens_hash`: o `UNIQUE` em `token_hash` já cria o índice usado por `get_by_hash()`.
 - **Datas de `access_tokens` são `TIMESTAMPTZ`** (o resto do schema usa `TIMESTAMP`): o asyncpg devolve `TIMESTAMP` como `datetime` **sem fuso**, e `expires_at < datetime.now(timezone.utc)` levantaria `TypeError` (naive × aware); com `TIMESTAMPTZ` volta um `datetime` com fuso e a comparação em Python funciona. `expires_at` sai na resposta de `/auth/token` em UTC (`...Z`).
 - **`users.is_blocked` e `profiles.is_active` são `NOT NULL DEFAULT`:** sem isso, um INSERT manual com `is_blocked = NULL` contaria como "não bloqueado" (falha aberta). As tabelas antigas (`analyses`, `data_sources`) não mudam.
-- **Aplicação do schema:** `database/schema.sql` (bancos novos) e `database/migrations/f12_autenticacao.sql` (bancos existentes) — ver §4.1.
+- **Aplicação do schema:** `database/schema.sql` (única fonte; migration cancelada — F13) — ver §4.1.
 
 Ver DATABASE_SCHEMA.md §2.6-§2.10 para a descrição campo a campo, e ARQUITETURA.md §2.2 para o schema completo em ordem de criação.
 
@@ -846,7 +845,7 @@ Um novo requisito de negócio (ex.: rate limiting por usuário — FB3) consome 
 - [x] `security/auth_middleware.py` — middleware + `contextvar` + log de falhas (§4.5)
 - [x] `routes/__init__.py` + `routes/auth.py` — `POST /auth/token`, `POST /auth/revoke`; registrar em `main.py` (`include_router`)
 - [x] `mcp_transport/tools.py` — `list_tools()`/`call_tool()` exigem `AuthenticatedUser`; log `access_denied`
-- [x] `database/schema.sql` (tabelas F12, `users.password_hash`, `execution_history.user_id`, índices) + `database/migrations/f12_autenticacao.sql` para bancos existentes
+- [x] `database/schema.sql` (tabelas F12, `users.password_hash`, `execution_history.user_id`, índices) (migration para bancos existentes cancelada — F13)
 - [x] `mcp_transport/tools.py` cria a instância única de `AuthService`; `routes/auth.py::get_auth_service()` e o middleware a reutilizam
 - [x] `config.py` — `ACCESS_TOKEN_EXPIRATION_DAYS`, `ACCESS_TOKEN_MAX_EXPIRATION_DAYS`
 - [x] `requirements.txt` — `bcrypt`
@@ -887,7 +886,7 @@ Um novo requisito de negócio (ex.: rate limiting por usuário — FB3) consome 
 
 **Resultado:** 295 testes ✅ (189 anteriores, com os 13 ajustados conforme §6.3, + 106 novos); 1 teste de integração (`tests/test_permission_queries_integration.py`) pula sozinho se a migration ainda não foi aplicada ao banco.
 
-**Arquivos novos:** `security/{token_auth,password_hash,auth_middleware}.py`, `schemas/auth.py`, `repositories/{user,profile,access_token}_repo.py`, `services/auth_service.py`, `routes/{__init__,auth}.py`, `database/migrations/f12_autenticacao.sql`, `database/seed_usuario_admin_f12.sql` (exemplo de cadastro), `tests/{conftest,test_token_auth,test_password_hash,test_auth_service,test_auth_middleware,test_auth_routes,test_mcp_tools_auth,test_permission_queries_integration}.py`.
+**Arquivos novos:** `security/{token_auth,password_hash,auth_middleware}.py`, `schemas/auth.py`, `repositories/{user,profile,access_token}_repo.py`, `services/auth_service.py`, `routes/{__init__,auth}.py`, `tests/{conftest,test_token_auth,test_password_hash,test_auth_service,test_auth_middleware,test_auth_routes,test_mcp_tools_auth,test_permission_queries_integration}.py`.
 
 **Desvios em relação ao desenho acima (decididos na implementação):**
 1. **O middleware envolve diretamente os endpoints do `/mcp`** (`add_route("/mcp", AuthMiddleware(...))` e `mount("/mcp", AuthMiddleware(...))`), sem filtro por path dentro dele. Tudo que chega ao middleware é `/mcp`; assim um path reescrito pelo `Mount` do Starlette nunca vira bypass de autenticação (fail-closed). `/health` e `/auth/*` nunca passam por ele; o `CORSMiddleware` continua mais externo.
@@ -899,7 +898,7 @@ Um novo requisito de negócio (ex.: rate limiting por usuário — FB3) consome 
 7. **`AccessTokenRepository.revoke()` é idempotente** (`WHERE revoked_at IS NULL`): revogar de novo mantém o `revoked_at` original.
 8. **Config:** `Settings` valida no startup `ACCESS_TOKEN_EXPIRATION_DAYS >= 1`, `ACCESS_TOKEN_MAX_EXPIRATION_DAYS >= 1` e `EXPIRATION <= MAX`.
 
-**Como rodar:** aplicar `database/migrations/f12_autenticacao.sql` (bancos já criados) → cadastrar usuário/perfil/vínculos (modelo: `database/seed_usuario_admin_f12.sql`) → `python run_https.py` → `POST /auth/token` → configurar o cliente (ver §8.2). Exemplo de conector Claude Desktop com `mcp-remote`:
+**Como rodar:** aplicar `database/schema.sql` → cadastrar usuário/perfil/vínculos por INSERT direto → `python run_https.py` → `POST /auth/token` → configurar o cliente (ver §8.2). Exemplo de conector Claude Desktop com `mcp-remote`:
 ```json
 "analise-dados": {
   "command": "npx",

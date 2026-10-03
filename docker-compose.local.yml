@@ -1,0 +1,85 @@
+# F13 — ambiente LOCAL: app + postgres (Config DB) + mysql.
+# TLS terminado no próprio app (uvicorn + mkcert montado em /app/certs, somente leitura).
+# Oracle e SQL Server ficam FORA daqui de propósito (subida manual):
+# docker/oracle/docker-compose.oracle.yml e docker/sqlserver/docker-compose.sqlserver.yml.
+#
+# Uso:  cp analysis_app/.env.example .env   (e preencher)  →  docker compose -f docker-compose.local.yml up -d
+# O .env da raiz alimenta só a interpolação deste arquivo; o app NÃO lê .env (está no .dockerignore).
+
+name: mcp-analysis-local
+
+services:
+  app:
+    build:
+      context: analysis_app
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      TLS_ENABLED: ${TLS_ENABLED:-true}
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-certs/server.pem}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-certs/server-key.pem}
+      # Dentro do compose o Config DB é o serviço "postgres" (não "localhost")
+      POSTGRES_CONFIG_HOST: postgres
+      POSTGRES_CONFIG_PORT: 5432
+      POSTGRES_CONFIG_DATABASE: ${POSTGRES_CONFIG_DATABASE:-analysis_config}
+      POSTGRES_CONFIG_USER: ${POSTGRES_CONFIG_USER:-postgres}
+      POSTGRES_CONFIG_PASSWORD: ${POSTGRES_CONFIG_PASSWORD:?defina POSTGRES_CONFIG_PASSWORD no .env}
+      FERNET_KEY: ${FERNET_KEY:?defina FERNET_KEY no .env}
+      DEFAULT_MAX_RESULT_ROWS: ${DEFAULT_MAX_RESULT_ROWS:-500}
+      DEFAULT_MAX_RESULT_SIZE_KB: ${DEFAULT_MAX_RESULT_SIZE_KB:-150}
+      QUERY_TIMEOUT_SECONDS: ${QUERY_TIMEOUT_SECONDS:-30}
+      CACHE_BACKEND: ${CACHE_BACKEND:-memory}
+      CACHE_MAX_ENTRIES: ${CACHE_MAX_ENTRIES:-200}
+      CACHE_MAX_SIZE_MB: ${CACHE_MAX_SIZE_MB:-100}
+      ACCESS_TOKEN_EXPIRATION_DAYS: ${ACCESS_TOKEN_EXPIRATION_DAYS:-90}
+      ACCESS_TOKEN_MAX_EXPIRATION_DAYS: ${ACCESS_TOKEN_MAX_EXPIRATION_DAYS:-365}
+    volumes:
+      # Certificados mkcert entram só em runtime, nunca na imagem
+      - ./analysis_app/certs:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_CONFIG_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_CONFIG_PASSWORD:?defina POSTGRES_CONFIG_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_CONFIG_DATABASE:-analysis_config}
+    ports:
+      # 5433 por padrão para não colidir com um PostgreSQL já instalado no host
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Roda uma única vez, com o volume vazio. schema.sql já inclui as tabelas da F12.
+      - ./analysis_app/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-analysis_data}
+    ports:
+      - "${MYSQL_HOST_PORT:-3306}:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  mysqldata:

@@ -1,0 +1,119 @@
+# F13 — ambiente REMOTE: nginx (TLS) → app (HTTP interno) + postgres + mysql.
+# Diferenças para o local: TLS terminado no nginx (app com TLS_ENABLED=false, porta 3000 NÃO
+# publicada) e bancos só na rede interna do compose (nenhuma porta publicada no host).
+# Oracle e SQL Server ficam FORA: docker/oracle/ e docker/sqlserver/ (compose próprios).
+#
+# Certificado: por ora montado de analysis_app/certs (mkcert), sem DNS (decisão 8 da spec F13).
+# Certbot (DNS-01) é um profile opcional, desligado por padrão:
+#   docker compose -f docker-compose.remote.yml --profile certbot up -d
+# Ao ligá-lo, aponte NGINX_CERT_FILE/NGINX_KEY_FILE para /etc/letsencrypt/live/<domínio>/{fullchain,privkey}.pem.
+
+name: mcp-analysis-remote
+
+services:
+  nginx:
+    image: nginx:stable
+    ports:
+      - "${NGINX_HTTPS_PORT:-443}:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-_}
+      NGINX_CERT_FILE: ${NGINX_CERT_FILE:-/etc/nginx/certs/server.pem}
+      NGINX_KEY_FILE: ${NGINX_KEY_FILE:-/etc/nginx/certs/server-key.pem}
+    volumes:
+      - ./docker/nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${NGINX_CERTS_DIR:-./analysis_app/certs}:/etc/nginx/certs:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  app:
+    build:
+      context: analysis_app
+    # Sem "ports": o app só é alcançável pelo nginx (http://app:3000 na rede interna)
+    expose:
+      - "3000"
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      TLS_ENABLED: "false"   # nginx termina o TLS; ALPN do run_https.py é desnecessário (§9.2)
+      POSTGRES_CONFIG_HOST: postgres
+      POSTGRES_CONFIG_PORT: 5432
+      POSTGRES_CONFIG_DATABASE: ${POSTGRES_CONFIG_DATABASE:-analysis_config}
+      POSTGRES_CONFIG_USER: ${POSTGRES_CONFIG_USER:-postgres}
+      POSTGRES_CONFIG_PASSWORD: ${POSTGRES_CONFIG_PASSWORD:?defina POSTGRES_CONFIG_PASSWORD no .env}
+      FERNET_KEY: ${FERNET_KEY:?defina FERNET_KEY no .env}
+      DEFAULT_MAX_RESULT_ROWS: ${DEFAULT_MAX_RESULT_ROWS:-500}
+      DEFAULT_MAX_RESULT_SIZE_KB: ${DEFAULT_MAX_RESULT_SIZE_KB:-150}
+      QUERY_TIMEOUT_SECONDS: ${QUERY_TIMEOUT_SECONDS:-30}
+      CACHE_BACKEND: ${CACHE_BACKEND:-memory}
+      CACHE_MAX_ENTRIES: ${CACHE_MAX_ENTRIES:-200}
+      CACHE_MAX_SIZE_MB: ${CACHE_MAX_SIZE_MB:-100}
+      ACCESS_TOKEN_EXPIRATION_DAYS: ${ACCESS_TOKEN_EXPIRATION_DAYS:-90}
+      ACCESS_TOKEN_MAX_EXPIRATION_DAYS: ${ACCESS_TOKEN_MAX_EXPIRATION_DAYS:-365}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_CONFIG_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_CONFIG_PASSWORD:?defina POSTGRES_CONFIG_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_CONFIG_DATABASE:-analysis_config}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./analysis_app/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-analysis_data}
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # Opcional (profile "certbot"): emite/renova o certificado Let's Encrypt por DNS-01.
+  # Exige DOMAIN_NAME, CERTBOT_EMAIL, CERTBOT_DNS_PROVIDER e CERTBOT_DNS_CREDENTIALS no .env.
+  # As credenciais DNS ficam num arquivo montado — fora da imagem e do repositório.
+  # Após renovar, o nginx precisa recarregar (ex.: docker compose exec nginx nginx -s reload).
+  certbot:
+    profiles: ["certbot"]
+    image: certbot/dns-${CERTBOT_DNS_PROVIDER:-cloudflare}
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        trap exit TERM
+        certbot certonly --non-interactive --agree-tos \
+          --dns-$${CERTBOT_DNS_PROVIDER} --dns-$${CERTBOT_DNS_PROVIDER}-credentials /run/secrets/dns.ini \
+          -m "$${CERTBOT_EMAIL}" -d "$${DOMAIN_NAME}" || true
+        while :; do certbot renew --quiet; sleep 12h & wait $${!}; done
+    environment:
+      CERTBOT_DNS_PROVIDER: ${CERTBOT_DNS_PROVIDER:-cloudflare}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+      DOMAIN_NAME: ${DOMAIN_NAME:-}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - ${CERTBOT_DNS_CREDENTIALS:-./secrets/certbot-dns.ini}:/run/secrets/dns.ini:ro
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  mysqldata:
+  letsencrypt:

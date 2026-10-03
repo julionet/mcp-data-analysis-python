@@ -1,0 +1,20 @@
+# Secrets e certificados nunca entram na imagem (F13 §2)
+.env
+.env.*
+!.env.example
+certs/
+
+# Ambiente e artefatos locais
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+
+# Testes e scripts de dev não são necessários em runtime
+tests/
+pytest.ini
+requirements-dev.txt
+scripts/
+logs/

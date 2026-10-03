@@ -2,16 +2,18 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.16 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-01 (atualizado 2026-10-01 — F9 implementada)
+**Versão:** 1.18 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-03 (atualizado 2026-10-03 — F13 implementada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.17 → v1.18):** F13 (Docker Setup) **implementada** (2026-10-03). `analysis_app/Dockerfile` (python:3.13-slim-bookworm + `msodbcsql18`, usuário não-root, `HEALTHCHECK`), `docker-compose.local.yml` (`app` + `postgres` + `mysql`, TLS no uvicorn com mkcert montado) e `docker-compose.remote.yml` (`nginx` + `app` + `postgres` + `mysql`; TLS no nginx com certificado montado; `certbot` DNS-01 como **profile opcional**, desligado por falta de domínio/DNS). **SQL Server e Oracle ficam fora dos compose** (opcionais, subida manual: `docker/sqlserver/` e `docker/oracle/`). Migrations/seed da F12 **canceladas** — `schema.sql` é a única fonte do schema (referências removidas dos docs). `SQLServerAdapter` não mudou: `sslmode` omitido/`prefer` aceita o certificado autoassinado. Validado: 3 containers healthy, `/health` ok, ALPN `http/1.1`, schema da F12 criado, MySQL e SQL Server conectam a partir do container, nginx roteia `/mcp`, `/auth/` e `/health`; suíte 336/336. **Pendente de validação manual:** fluxo `/auth/token` → `/mcp` com cliente real, análise completa em MySQL/SQL Server, streaming SSE pelo nginx, Oracle 23ai (pendência da F9) e profile `certbot`. Spec: `features/F13_DOCKER_SETUP.md`.
 
 > **Nota de revisão (v1.16 → v1.17):** requisitos da F13 (Docker Setup) detalhados: um container por artefato — `app`, `postgres`, `mysql` e `oracle`. O container Oracle fica **criado, mas fora da execução do docker-compose** por ora. Ver "F13 em detalhe" na Sprint 3. Esforço (2d) e dependências inalterados.
 >
 > **Nota de revisão (v1.15 → v1.16):** F9 (Oracle Adapter) **implementada** (2026-10-01). `OracleAdapter` (`adapters/oracle.py`, `python-oracledb` em modo thin, pool async 1/10 com `acquire` de validação no `connect()`) traduz `:x` → `:pN` por índice de `param_names` em passo único, liga `params.values()` a `pN` em `execute_query()`, normaliza chaves de coluna para minúsculas e usa `fetch_lobs=False`/`fetch_decimals=True`; ORA-00911/ORA-00918 são relançados com a explicação do subconjunto comum de SQL. O wrapper do `COUNT(*)` do Volume Guard passou de `AS sub` para `sub` (`analysis_service.py`). Oracle entrou na fixture de `tests/test_adapter_contract.py` (4 adapters × mesmos cenários). Testes: 334 ✅ (27 novos em `tests/test_oracle_adapter.py`). **Sprint 2: 3/3 concluída.** Sem validação manual — não há instância Oracle (F9 §10). Bancos suportados: 3 → 4. Spec e histórico: `features/F9_ORACLE_ADAPTER.md` §11. Próxima: F13 (Docker) e demais da Sprint 3.
 >
-> **Nota de revisão (v1.14 → v1.15):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Migration: `analysis_app/database/migrations/f12_autenticacao.sql`; seed de exemplo: `analysis_app/database/seed_usuario_admin_f12.sql`. Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Sprint 3: 1/7 features concluídas. Próximas: F9 (Oracle, Sprint 2) e F13 (Docker, que já deve sair com autenticação obrigatória).
+> **Nota de revisão (v1.14 → v1.15):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Schema em `analysis_app/database/schema.sql` (migration e seed da F12 canceladas — F13, decisão 7). Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Sprint 3: 1/7 features concluídas. Próximas: F9 (Oracle, Sprint 2) e F13 (Docker, que já deve sair com autenticação obrigatória).
 >
 > **Nota de revisão (v1.13 → v1.14):** F12 revisada — a emissão de token deixa de ser administrativa (script) e passa a ser **self-service por endpoint**: `POST /auth/token` (e-mail + senha, `label` e `expire_days` opcionais) e `POST /auth/revoke`, em `routes/auth.py`. `users` ganha `password_hash` (bcrypt) e `external_id` vira o e-mail de login. Sem proteção contra tentativas de senha em V1.0 (só log). Esforço de F12: 2.5d → **3.5d** (+1d: endpoints, bcrypt, testes); Sprint 3: ~11.5 → ~12.5 dias; total do projeto: ~30 → ~31 dias. Ver ARQUITETURA.md v1.20 (ADR-007 revisado) e `features/F12_AUTENTICACAO_PERFIS.md`.
 >
@@ -148,7 +150,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | # | Feature | Prioridade | Esforço | Depende de | Status |
 |---|---------|-----------|--------|-----------|--------|
 | F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 3.5d | F5 | 🟩 Done (2026-09-30) |
-| F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | ⬜ Todo |
+| F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | 🟩 Done (2026-10-03) |
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
@@ -196,7 +198,7 @@ projeto (multi-cliente heterogêneo, rede interna confiável, bloqueio precisa
 ter efeito imediato). Spec completa: `features/F12_AUTENTICACAO_PERFIS.md`.
 ```
 
-**F13 em detalhe (Docker Setup — um container por artefato):**
+**F13 em detalhe (Docker Setup — um container por artefato) — ✅ implementada em 2026-10-03; abaixo o escopo original, ajustado: SQL Server e Oracle ficaram fora do compose (`docker/sqlserver/`, `docker/oracle/`); nginx + Certbot (profile opcional) entraram no remote; migration F12 cancelada:**
 ```
 Objetivo: empacotar cada artefato do ambiente em seu próprio container, com
 config por .env (RNF2 — zero mudança de código entre local e remoto).
@@ -216,7 +218,7 @@ Escopo transversal:
 ├─ docker-compose.local.yml / docker-compose.remote.yml (app + postgres + mysql)
 ├─ .env.example completo (variáveis de config.py), .dockerignore, healthcheck em /health
 ├─ certs/ montado como volume (nunca dentro da imagem); secrets só via .env
-└─ Autenticação já obrigatória (F12) — migration f12_autenticacao.sql aplicada no init
+└─ Autenticação já obrigatória (F12) — schema.sql (com as tabelas da F12) aplicado no init do container postgres
 
 Em aberto (a decidir na spec): container de SQL Server (não pedido), nginx/Certbot no
 remote, Redis (fora no V1.0), versão do driver ODBC, seed do usuário admin.
@@ -534,4 +536,4 @@ A especificação técnica completa (código de middleware, schema SQL, fluxos) 
 ---
 
 **Documento de Roadmap Completo — Multi-Cliente, Com Autenticação por Token + Perfis (F12), Sem Versionamento de Análises.**
-**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Próximas: Sprint 3 (Production, incluindo F12 Autenticação) + Sprint 4 (Deploy).**
+**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3: F12 ✅ e F13 ✅ concluídas; próximas F14 (Error Handling) e demais da Sprint 3, depois Sprint 4 (Deploy).**

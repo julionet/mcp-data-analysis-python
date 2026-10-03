@@ -1,0 +1,30 @@
+# F13 — SQL Server: criado, mas FORA dos compose local/remote (opcional, como o Oracle).
+# Subida manual:  docker compose --env-file .env -f docker/sqlserver/docker-compose.sqlserver.yml up -d
+# O app (container) alcança este banco pelo host do data_source: host.docker.internal:1433
+# (ou ponha o app na mesma rede: docker network connect <rede-do-compose> <container-sqlserver>).
+# sslmode do data_source omitido/"prefer": aceita o certificado autoassinado do container.
+# Para incluir no ambiente depois: copiar o serviço para o compose desejado ou usar `include:`.
+
+name: mcp-analysis-sqlserver
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      # Exige senha forte (maiúscula, minúscula, número e símbolo; >= 8)
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?defina MSSQL_SA_PASSWORD no .env}
+    ports:
+      - "${MSSQL_HOST_PORT:-1433}:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+    healthcheck:
+      # -C: confia no certificado autoassinado do container
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q \"SELECT 1\" -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mssqldata:
