@@ -1,3 +1,0 @@
-fastapi
-uvicorn[standard]
-mcp==1.30.0
