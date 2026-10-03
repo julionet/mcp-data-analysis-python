@@ -3,7 +3,7 @@
 Documentos relacionados: [NEGOCIO.md](NEGOCIO.md) (o quê e por quê) e [ARQUITETURA.md](ARQUITETURA.md) (como).
 Cada feature terá sua especificação em `.spec/features/FNN-nome-curto.md` (ex.: `F05-cadastro-de-documento.md`), sempre criada a partir do template [features/_TEMPLATE.md](features/_TEMPLATE.md).
 
-**Status:** roadmap **aprovado**. Nenhuma feature foi especificada ou implementada.
+**Status:** roadmap **aprovado**. Veja a tabela "Status das features" no fim deste documento.
 
 ## Como trabalharemos (SDD)
 
@@ -31,7 +31,7 @@ Em vez de construir cada camada inteira, o primeiro marco entrega o caminho comp
 | F01 | **Ambiente e banco de dados** | Banco e usuário criados, extensão vetorial ativa, esquema aplicado, configuração por `.env`, verificação do ambiente. | — | — |
 | F02 | **Leitura de documentos (TXT e PDF)** | Ler TXT e PDF página a página, rejeitar formatos não aceitos e PDF sem texto. | R7, R8 | — |
 | F03 | **Divisão em trechos** | Dividir o texto em trechos que preservam seção e página; corrigir as falhas atuais do chunking. | R2 (base para citar página) | F02 |
-| F04 | **Vetorização dos trechos** | Gerar os vetores de cada trecho e registrar o modelo usado; avisar se o modelo mudar sem reindexar. | — | F01 |
+| F04 | **Vetorização dos trechos** | Gerar os vetores de cada trecho e registrar o modelo usado; bloquear e orientar a reindexar se o modelo mudar. | — | F01, F03 |
 | F05 | **Cadastro de documento** | Gravar um documento e seus trechos no banco numa única transação, ignorar duplicados, tratar arquivos grandes com progresso. | R4, R9 | F01–F04 |
 | F06 | **Busca de trechos** | Busca que combina significado e palavras exatas, com filtro opcional por pasta. | — | F05 |
 | F07 | **Resposta com fontes** | Gerar a resposta só com os trechos recuperados, citar documento e página, e admitir quando não sabe. | R1, R2, R3, R11 | F06 |
@@ -80,4 +80,5 @@ Ordem sugerida, a planejar depois de M4:
 | F01 | Aprovada | Verificada (2026-10-02) |
 | F02 | Aprovada | Verificada (2026-10-02) |
 | F03 | Aprovada | Verificada (2026-10-03) |
-| F04 a F12 | Pendente | Pendente |
+| F04 | Aprovada | Verificada (2026-10-03) |
+| F05 a F12 | Pendente | Pendente |

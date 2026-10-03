@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
-import pymupdf
-import pymupdf4llm
+if TYPE_CHECKING:
+    import pymupdf
 
 ACCEPTED_TYPES = {".txt": "txt", ".pdf": "pdf"}
 HASH_BLOCK_SIZE = 1024 * 1024
@@ -68,6 +70,8 @@ def _read_txt(path: Path) -> str:
 
 def _open_pdf(path: Path) -> pymupdf.Document:
     """Abre o PDF e confere que é legível e sem senha; quem chama fecha."""
+    import pymupdf  # import tardio: ver F04, seção 11
+
     try:
         doc = pymupdf.open(path, filetype="pdf")
     except Exception:
@@ -129,6 +133,8 @@ def _pages(path: Path, file_type: str) -> Iterator[Page]:
     try:
         for index in range(len(doc)):
             try:
+                import pymupdf4llm
+
                 markdown = pymupdf4llm.to_markdown(doc, pages=[index])
             except Exception:
                 raise LoaderError(

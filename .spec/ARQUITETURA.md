@@ -34,7 +34,8 @@ O modelo é adequado: multilíngue (bom em português), 1024 dimensões, context
 
 - `Embedder` com `device` automático (MPS no Mac, senão CPU), `batch_size` configurável e `max_seq_length` explícito.
 - Carregar o modelo **uma vez** por processo.
-- Gravar nome e dimensão do modelo em `app_meta`. Se `EMBEDDING_MODEL` mudar, a aplicação avisa que é preciso **reindexar** (vetores de modelos diferentes não são comparáveis).
+- Gravar nome e dimensão do modelo em `app_meta` na **primeira** vetorização, sem nunca sobrescrever. Se `EMBEDDING_MODEL` mudar, a vetorização é **bloqueada** com a orientação de **reindexar** (vetores de modelos diferentes não são comparáveis); a checagem do nome ocorre antes de carregar o modelo (F04).
+- `embed_chunks(embedder, chunks)` vetoriza `Chunk.embedding_text` em fluxo e lotes (padrão 64). Trecho acima de `max_seq_length` (8192 tokens) gera **aviso**, sem bloquear (F04).
 - Observação: o bge-m3 também tem modos esparso e multi-vetor, mas isso exige outra biblioteca (FlagEmbedding). Fica **fora do escopo**; a parte lexical é coberta pelo Postgres.
 
 ## 4. Ingestão de arquivos
@@ -197,7 +198,7 @@ Mantém o `Generator` e o prompt atuais, com ajustes:
 | `folders` | Lista pastas registradas, nº de documentos e data da última indexação. |
 | `list [--folder <pasta>]` | Lista documentos, status e quantidade de chunks. |
 | `delete <arquivo\|pasta>` | Remove o documento (ou todos os da pasta) e seus chunks. Pede confirmação. |
-| `check` | Verifica variáveis do `.env`, conexão, extensão, tabelas e índices (F01). A verificação dos embeddings entra na **F04** e a do Claude na **F07**. |
+| `check` | Verifica variáveis do `.env`, conexão, extensão, tabelas e índices (F01). A verificação dos embeddings (F04) compara o `EMBEDDING_MODEL` do `.env` com o registrado em `app_meta` e a dimensão, sem carregar o modelo; a do Claude entra na **F07**. |
 | `menu` (padrão sem argumentos) | Menu interativo (abaixo). |
 
 ### Menu interativo

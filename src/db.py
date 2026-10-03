@@ -79,6 +79,61 @@ def _existing(conn: psycopg.Connection, kind: str) -> set[str]:
     return {r[0] for r in conn.execute(query).fetchall()}
 
 
+def mismatch_message(configured: str, registered: str) -> str:
+    return (
+        f'O modelo de embeddings configurado ("{configured}") é diferente do registrado no banco '
+        f'("{registered}"). Os vetores existentes não são comparáveis. '
+        "Reindexe a base ou restaure EMBEDDING_MODEL no .env."
+    )
+
+
+def get_embedding_meta(conn: psycopg.Connection) -> tuple[str, int] | None:
+    """(modelo, dimensão) registrados em app_meta, ou None se ainda não há registro."""
+    try:
+        rows = dict(
+            conn.execute(
+                "SELECT key, value FROM app_meta WHERE key IN ('embedding_model', 'embedding_dim')"
+            ).fetchall()
+        )
+    except psycopg.errors.UndefinedTable:
+        raise DbError("Tabela app_meta ausente. Execute init-db.") from None
+    if "embedding_model" not in rows:
+        return None
+    try:
+        dim = int(rows.get("embedding_dim", 0))
+    except ValueError:
+        dim = 0
+    return rows["embedding_model"], dim
+
+
+def ensure_embedding_model(conn: psycopg.Connection, model_name: str) -> bool:
+    """True se o modelo já está registrado e confere; False se ainda não há registro.
+
+    Levanta DbError se o modelo registrado for outro (T6 da F04).
+    """
+    meta = get_embedding_meta(conn)
+    if meta is None:
+        return False
+    if meta[0] != model_name:
+        raise DbError(mismatch_message(model_name, meta[0]))
+    return True
+
+
+def register_embedding_model(conn: psycopg.Connection, model_name: str, dim: int) -> bool:
+    """Grava o modelo em app_meta só se ainda não existir (nunca sobrescreve). True se gravou."""
+    with conn.transaction():
+        cur = conn.execute(
+            "INSERT INTO app_meta (key, value) VALUES ('embedding_model', %s) ON CONFLICT DO NOTHING",
+            (model_name,),
+        )
+        inserted = cur.rowcount == 1
+        conn.execute(
+            "INSERT INTO app_meta (key, value) VALUES ('embedding_dim', %s) ON CONFLICT DO NOTHING",
+            (str(dim),),
+        )
+    return inserted
+
+
 def init_db() -> list[str]:
     """Aplica sql/001_init.sql. Devolve as linhas de saída para a CLI."""
     conn = connect()
@@ -181,6 +236,22 @@ def check_environment() -> tuple[list[str], int]:
                         ok(f"chunks.embedding com {EMBEDDING_DIM} dimensões")
                     else:
                         fail(f"chunks.embedding com {dim} dimensões (esperado {EMBEDDING_DIM}).")
+
+                if "app_meta" in tables:
+                    meta = get_embedding_meta(conn)
+                    if meta is None:
+                        warn("Modelo de embeddings ainda não registrado (será gravado na primeira vetorização).")
+                    else:
+                        registered, registered_dim = meta
+                        if config.EMBEDDING_MODEL and registered != config.EMBEDDING_MODEL:
+                            fail(mismatch_message(config.EMBEDDING_MODEL, registered))
+                        elif registered_dim != EMBEDDING_DIM:
+                            fail(
+                                f'Modelo de embeddings registrado ("{registered}") com {registered_dim} '
+                                f"dimensões (esperado {EMBEDDING_DIM})."
+                            )
+                        else:
+                            ok(f"Modelo de embeddings: {registered} ({registered_dim} dimensões)")
 
     for name, note in OPTIONAL_ENV.items():
         if not getattr(config, name):
