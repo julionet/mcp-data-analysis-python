@@ -1,4 +1,4 @@
-# F13 — imagem do app (contexto de build = analysis_app/).
+# F13 — imagem do app (contexto de build = raiz do repositório).
 #
 # Python 3.13: é a versão em que a suíte (334 testes) foi validada; pyodbc>=5.2 e
 # bcrypt>=5 têm wheel para ela (ARQUITETURA.md §5.1). Pin em bookworm porque o repositório
@@ -29,9 +29,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# .env, certs/ e .venv ficam de fora (ver .dockerignore): secrets e certificados
-# entram só em runtime (env_file / volume somente leitura).
-COPY . .
+# Só src/ entra na imagem (contexto de build = raiz do repositório). .env e certs/ ficam
+# de fora: secrets e certificados entram só em runtime (environment / volume somente leitura).
+COPY src/ .
 
 RUN useradd --system --no-create-home --uid 10001 appuser \
     && chown -R appuser /app

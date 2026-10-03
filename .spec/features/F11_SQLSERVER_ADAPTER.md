@@ -525,16 +525,16 @@ Feitas antes da implementação, com um venv de teste fora do projeto (Python 3.
 ### ✅ Implementação Completada (2026-09-29)
 
 **Arquivos criados:**
-- ✅ `analysis_app/adapters/sqlserver.py` (150 linhas) — `SQLServerAdapter`: `_build_connection_string()`, `connect()`/`disconnect()`, `_to_positional()`, `execute_query()`, `execute()`, `test_connection()`, `translate_params()`
-- ✅ `analysis_app/tests/test_sqlserver_adapter.py` — testes unitários com `aioodbc` mockado
-- ✅ `analysis_app/tests/test_adapter_contract.py` — contrato de parâmetros PostgreSQL × MySQL × SQL Server
-- ✅ `analysis_app/scripts/seed_contas_pagar_sqlserver.py` e `analysis_app/database/seed_contas_pagar_sqlserver.sql` — cadastro do data_source `sedare_sqlserver` (senha cifrada com Fernet) e da análise `contas_a_pagar_por_fornecedor` (uso real da feature, fora da spec original)
+- ✅ `src/adapters/sqlserver.py` (150 linhas) — `SQLServerAdapter`: `_build_connection_string()`, `connect()`/`disconnect()`, `_to_positional()`, `execute_query()`, `execute()`, `test_connection()`, `translate_params()`
+- ✅ `tests/test_sqlserver_adapter.py` — testes unitários com `aioodbc` mockado
+- ✅ `tests/test_adapter_contract.py` — contrato de parâmetros PostgreSQL × MySQL × SQL Server
+- ✅ `src/scripts/seed_contas_pagar_sqlserver.py` e `src/database/seed_contas_pagar_sqlserver.sql` — cadastro do data_source `sedare_sqlserver` (senha cifrada com Fernet) e da análise `contas_a_pagar_por_fornecedor` (uso real da feature, fora da spec original)
 
 **Arquivos modificados:**
-- ✅ `analysis_app/adapters/factory.py` — `"sqlserver": SQLServerAdapter`
-- ✅ `analysis_app/requirements.txt` — `aioodbc>=0.4.0`, `pyodbc>=5.2.0`
-- ✅ `analysis_app/tests/test_adapter_factory.py` — caso `sqlserver`; o teste de "tipo desconhecido" passou a usar `oracle` (antes usava `sqlserver`, que agora é válido)
-- ✅ `analysis_app/tests/test_analysis_service.py` — `TestAnalysisServiceSQLServer` (adapter real, pool mockado, data_source `sqlserver`)
+- ✅ `src/adapters/factory.py` — `"sqlserver": SQLServerAdapter`
+- ✅ `requirements.txt` — `aioodbc>=0.4.0`, `pyodbc>=5.2.0`
+- ✅ `tests/test_adapter_factory.py` — caso `sqlserver`; o teste de "tipo desconhecido" passou a usar `oracle` (antes usava `sqlserver`, que agora é válido)
+- ✅ `tests/test_analysis_service.py` — `TestAnalysisServiceSQLServer` (adapter real, pool mockado, data_source `sqlserver`)
 - ✅ `.spec/FEATURES_ROADMAP.md` (v1.13), `.spec/ARQUITETURA.md` (v1.18), `.claude/CLAUDE.md`
 
 **Testes:** 185/185 na suíte completa (61 nos arquivos do F11: adapter, contrato e factory), sem regressão.

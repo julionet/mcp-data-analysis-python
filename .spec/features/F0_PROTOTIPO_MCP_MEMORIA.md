@@ -1,5 +1,7 @@
 # [F0] Protótipo MCP em Memória (Sprint 0)
 
+> **Nota (2026-10-03):** o diretório `mcp_prototype/` descrito aqui foi **removido** do repositório; o código permanece no histórico do git (último commit com a pasta: `d192bcb`). Este documento é mantido como registro das lições do protótipo.
+
 ## Feature Spec
 
 **ID:** F0 (pré-Sprint 1 — não entra na numeração F1-F24 do FEATURES_ROADMAP.md)

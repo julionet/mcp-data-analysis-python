@@ -1,9 +1,9 @@
-# F13 — ambiente LOCAL: app + postgres (Config DB) + mysql.
+# F13 — ambiente LOCAL: app + postgres (Config DB).
 # TLS terminado no próprio app (uvicorn + mkcert montado em /app/certs, somente leitura).
-# Oracle e SQL Server ficam FORA daqui de propósito (subida manual):
-# docker/oracle/docker-compose.oracle.yml e docker/sqlserver/docker-compose.sqlserver.yml.
+# MySQL, SQL Server e Oracle ficam FORA daqui de propósito (opcionais, subida manual):
+# docker/mysql/, docker/sqlserver/ e docker/oracle/ (cada um com o próprio compose).
 #
-# Uso:  cp analysis_app/.env.example .env   (e preencher)  →  docker compose -f docker-compose.local.yml up -d
+# Uso:  cp .env.example .env   (e preencher)  →  docker compose -f docker-compose.local.yml up -d
 # O .env da raiz alimenta só a interpolação deste arquivo; o app NÃO lê .env (está no .dockerignore).
 
 name: mcp-analysis-local
@@ -11,7 +11,7 @@ name: mcp-analysis-local
 services:
   app:
     build:
-      context: analysis_app
+      context: .
     ports:
       - "${SERVER_PORT:-3000}:3000"
     environment:
@@ -37,7 +37,7 @@ services:
       ACCESS_TOKEN_MAX_EXPIRATION_DAYS: ${ACCESS_TOKEN_MAX_EXPIRATION_DAYS:-365}
     volumes:
       # Certificados mkcert entram só em runtime, nunca na imagem
-      - ./analysis_app/certs:/app/certs:ro
+      - ./certs:/app/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,7 +55,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Roda uma única vez, com o volume vazio. schema.sql já inclui as tabelas da F12.
-      - ./analysis_app/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -63,23 +63,5 @@ services:
       retries: 10
     restart: unless-stopped
 
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-analysis_data}
-    ports:
-      - "${MYSQL_HOST_PORT:-3306}:3306"
-    volumes:
-      - mysqldata:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    restart: unless-stopped
-
 volumes:
   pgdata:
-  mysqldata:

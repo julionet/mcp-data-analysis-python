@@ -14,18 +14,18 @@
 
 ## 1. Visão
 
-Empacotar cada artefato do ambiente em seu próprio container — servidor MCP, PostgreSQL (Config DB), MySQL, SQL Server e Oracle — para subir tudo com 1 comando no ambiente local e reaproveitar o mesmo código no remoto, só trocando a configuração. Os containers SQL Server e Oracle são criados, mas **não** entram na execução do compose (opcionais, subida manual).
+Empacotar cada artefato do ambiente em seu próprio container — servidor MCP, PostgreSQL (Config DB), MySQL, SQL Server e Oracle — para subir tudo com 1 comando no ambiente local e reaproveitar o mesmo código no remoto, só trocando a configuração. Por padrão a aplicação usa só o PostgreSQL (Config DB); os containers MySQL, SQL Server e Oracle são criados, mas **não** entram na execução do compose (opcionais, subida manual, cada um em `docker/<banco>/`).
 
 ## 2. Objetivo
 
 Ter `Dockerfile`s, `docker-compose.local.yml` e `docker-compose.remote.yml` prontos, de modo que um desenvolvedor suba o ambiente completo sem instalar bancos nem drivers na máquina.
 
 **Métrica de Sucesso:**
-- ✅ `docker compose -f docker-compose.local.yml up` sobe `app`, `postgres` e `mysql`; `GET /health` retorna `{"status":"ok","db":true}`
+- ✅ `docker compose -f docker-compose.local.yml up` sobe `app` e `postgres`; `GET /health` retorna `{"status":"ok","db":true}`
 - ✅ O `postgres` inicia com o `schema.sql` aplicado (incluindo as tabelas da F12)
 - ✅ Handshake TLS/ALPN funciona no `app` (local: mkcert montado)
 - ✅ `POST /auth/token` → `/mcp` funciona via container
-- ✅ O `app` consegue executar uma análise contra MySQL do compose e contra SQL Server subido à parte (driver ODBC 18 presente na imagem)
+- ✅ O `app` consegue executar uma análise contra os bancos opcionais (MySQL, SQL Server) subidos à parte (driver ODBC 18 presente na imagem)
 - ✅ `docker-compose.remote.yml` sobe `nginx` na frente do `app` (TLS terminado no nginx, certificado montado); `certbot` é um profile opcional, desligado até haver domínio e provedor DNS (decisão 8)
 - ✅ O artefato Oracle existe e é construível/subível manualmente, mas o `up` padrão **não** o inicia
 - ✅ Nenhum secret ou certificado dentro de imagem
@@ -40,33 +40,34 @@ Ter `Dockerfile`s, `docker-compose.local.yml` e `docker-compose.remote.yml` pron
 ### 4.1 Componentes Afetados
 
 ```
-Arquivos novos (nenhum código Python da aplicação é alterado):
-analysis_app/
-├─ Dockerfile                          # imagem do app
-├─ .dockerignore
-├─ .env.example                        # ATUALIZADO: variáveis dos bancos/containers/nginx/certbot
+Arquivos novos (único código Python alterado: `src/config.py` → `extra="ignore"`, decisão 10):
+Dockerfile                             # imagem do app (COPY src/; contexto de build = raiz)
+.dockerignore
+.env.example                           # ATUALIZADO: variáveis dos bancos/containers/nginx/certbot; .env ÚNICO (host + compose)
 docker/
-├─ (postgres, mysql: imagens oficiais direto nos compose — sem diretório próprio;
+├─ (postgres: imagem oficial direto nos compose — sem diretório próprio;
 │   schema.sql montado em /docker-entrypoint-initdb.d)
+├─ mysql/
+│   └─ docker-compose.mysql.yml        # mysql:8.4 — NÃO roda no compose local/remote
 ├─ sqlserver/
 │   └─ docker-compose.sqlserver.yml    # mssql/server:2022-latest — NÃO roda no compose local/remote
 ├─ oracle/
 │   └─ docker-compose.oracle.yml       # gvenzl/oracle-free (sem login) — NÃO roda no compose local/remote
 └─ nginx/
     └─ nginx.conf.template             # reverse proxy TLS → app:3000 (ARQUITETURA.md §9.2)
-docker-compose.local.yml               # app + postgres + mysql (TLS: uvicorn + mkcert)
+docker-compose.local.yml               # app + postgres (TLS: uvicorn + mkcert)
 docker-compose.remote.yml              # nginx + certbot + app + bancos (TLS: nginx)
 ```
 
-> Os arquivos Docker ficam na raiz do repositório (`docker/`, `docker-compose.*.yml`), exceto `Dockerfile`/`.dockerignore`/`.env.example` do app, que ficam em `analysis_app/` (contexto de build = `analysis_app/`).
+> Todos os arquivos Docker ficam na raiz do repositório; o código da aplicação fica em `src/` (reorganização de 2026-10-03, decisão 10). Contexto de build = raiz; a imagem recebe só `requirements.txt` e `src/`.
 
 ### 4.2 Containers
 
 | Serviço | Imagem | Porta | Volume | No `up` padrão? |
 |---|---|---|---|---|
-| `app` | build `analysis_app/Dockerfile` | 3000 | `certs/` (somente leitura, no local) | ✅ |
+| `app` | build `Dockerfile` | 3000 | `certs/` (somente leitura, no local) | ✅ |
 | `postgres` | `postgres:16` | 5432 | `pgdata`; `schema.sql` em `initdb.d` | ✅ |
-| `mysql` | `mysql:8.4` | 3306 | `mysqldata` | ✅ |
+| `mysql` | `mysql:8.4` | 3306 | `mysqldata` | ❌ **fora do compose** (opcional, como SQL Server e Oracle) |
 | `sqlserver` | `mcr.microsoft.com/mssql/server:2022-latest` | 1433 | `mssqldata` | ❌ **fora do compose** (opcional, como o Oracle) |
 | `oracle` | `gvenzl/oracle-free` (sem login) | 1521 | `oradata` | ❌ **fora do compose** (ver 4.5) |
 | `nginx` (só remote) | `nginx:stable` | 443 / 80 | `certs/` montado (mkcert por ora; Certbot depois) | ✅ remote |
@@ -82,7 +83,7 @@ Passos:
 1. apt: curl, gnupg, unixodbc-dev
 2. Repositório Microsoft → apt install msodbcsql18   (ODBC 18, par do SQL Server 2022)
 3. pip install -r requirements.txt
-4. COPY . (respeitando .dockerignore: .env, certs/, .venv, __pycache__, tests/ opcional)
+4. COPY src/ . (contexto de build = raiz; .dockerignore exclui .env, certs/, .venv, tests/, .spec, docker/...)
 5. USER não-root
 6. HEALTHCHECK: GET /health
 7. CMD ["python", "run_https.py"]
@@ -123,7 +124,7 @@ LOCAL                                          REMOTE
 cliente MCP ──https:3000──► app (uvicorn+TLS)   cliente MCP ──https:443──► nginx ──http──► app:3000
                               │                                            │ (certbot renova certs)
                               ├─► postgres (Config DB)                      ├─► postgres
-                              ├─► mysql (data source)                       └─► mysql
+                              └─► [mysql, sqlserver, oracle: fora do compose]
                               └─► [sqlserver, oracle: fora do compose]
 ```
 
@@ -135,7 +136,7 @@ Feature: Docker Setup
 Scenario: Ambiente local sobe com 1 comando
   Given .env preenchido a partir de .env.example e certs/ gerados com mkcert
   When docker compose -f docker-compose.local.yml up -d
-  Then app, postgres e mysql ficam healthy
+  Then app e postgres ficam healthy
   And GET https://localhost:3000/health retorna {"status":"ok","db":true}
 
 Scenario: Config DB inicializado
@@ -176,11 +177,11 @@ Scenario: Secrets fora da imagem
 
 ## 6. Testes
 
-Sem testes unitários Python novos (nenhum código da aplicação muda); a regressão é a suíte existente (334 ✅) rodando inalterada.
+Sem testes unitários Python novos; a regressão é a suíte existente (336 ✅) rodando inalterada.
 
 ### 6.2 Checklist de Testes
 - [x] `docker build` do app conclui sem erro
-- [ ] Suíte `pytest` existente continua 334/334 (fora do container, sem alteração)
+- [ ] Suíte `pytest` existente continua 336/336 (da raiz, `pytest`; exige o postgres do compose em `localhost:5433`)
 - [x] `docker compose config` valida local e remote
 - [x] `up` local → 4 containers healthy, `/health` = `{"status":"ok","db":true}`, `/mcp` sem token = 401 (falta: `/auth/token` → `/mcp` com cliente MCP real)
 - [x] `MySQLAdapter` e `SQLServerAdapter` (sslmode omitido) conectam e executam `SELECT 1` a partir do container `app` (falta: análise completa via `call_tool`)
@@ -198,10 +199,11 @@ Sem testes unitários Python novos (nenhum código da aplicação muda); a regre
 POSTGRES_CONFIG_HOST=postgres
 
 # Containers de data source (somente dev/local)
-MYSQL_ROOT_PASSWORD=changeme
-MYSQL_DATABASE=analysis_data
-MSSQL_SA_PASSWORD=Changeme_123!      # SQL Server exige senha forte
-ORACLE_PASSWORD=changeme             # container Oracle (fora do compose)
+# Bancos opcionais, fora dos compose (descomentar só o que for subir à mão):
+# MYSQL_ROOT_PASSWORD=changeme
+# MYSQL_DATABASE=analysis_data
+# MSSQL_SA_PASSWORD=Changeme_123!      # SQL Server exige senha forte
+# ORACLE_PASSWORD=changeme
 
 # Remote (nginx; certificado montado em certs/ por ora)
 # Certbot (DNS-01) só com --profile certbot — descomentar quando houver domínio/DNS:
@@ -222,8 +224,8 @@ Novo banco = novo diretório em `docker/<banco>/` + serviço no compose (ou fora
 
 ## 9. Checklist de Implementação
 **Código:**
-- [x] `analysis_app/Dockerfile` + `.dockerignore`
-- [x] `docker/oracle`, `docker/sqlserver`, `docker/nginx` (postgres/mysql: imagem direta nos compose)
+- [x] `Dockerfile` + `.dockerignore`
+- [x] `docker/mysql`, `docker/oracle`, `docker/sqlserver`, `docker/nginx` (postgres: imagem direta nos compose)
 - [x] `docker-compose.local.yml` e `docker-compose.remote.yml`
 - [x] `.env.example` atualizado (inclui `POSTGRES_HOST_PORT=5433`, `NGINX_HTTP_PORT/NGINX_HTTPS_PORT`)
 - [x] Comentários nos arquivos explicando decisões (ODBC 18, Oracle fora do compose, `/auth/`)
@@ -236,7 +238,7 @@ Novo banco = novo diretório em `docker/<banco>/` + serviço no compose (ou fora
 
 | # | Decisão |
 |---|---|
-| 1 | Um container por artefato: `app`, `postgres`, `mysql`, `sqlserver`, `oracle` |
+| 1 | Um container por artefato: `app`, `postgres`, `mysql`, `sqlserver`, `oracle` (só `app` e `postgres` no compose; ver decisão 11) |
 | 2 | Oracle é criado mas **não** roda no compose; imagem sem login (`gvenzl/oracle-free`) |
 | 3 | Container de SQL Server criado (`mssql/server:2022`), mas **opcional e fora do compose**, como o Oracle (ajuste de 2026-10-03) |
 | 4 | Remote usa nginx + Certbot, **Opção A (DNS-01)**; local usa uvicorn + mkcert |
@@ -245,6 +247,8 @@ Novo banco = novo diretório em `docker/<banco>/` + serviço no compose (ou fora
 | 7 | Migrations da F12 (`f12_autenticacao.sql`) e seed (`seed_usuario_admin_f12.sql`) **canceladas**: `schema.sql` é a única fonte do schema |
 | 8 | Remote sem DNS por ora: nginx usa certificado montado (mkcert); `certbot` vira profile opcional, desligado |
 | 9 | SQL Server de dev: sem alteração no adapter; `sslmode` omitido/`prefer` aceita o certificado autoassinado; `verify-full` só em produção |
+| 11 | Postgres único por padrão: `app` + `postgres` nos compose; **MySQL, SQL Server e Oracle opcionais**, cada um em `docker/<banco>/docker-compose.<banco>.yml` (subida manual). Variáveis desses bancos só comentadas no `.env.example`, fora do `.env`. Nenhum código Python muda ao usá-los: credenciais vêm de `data_sources.connection_config` (os adapters só leem `QUERY_TIMEOUT_SECONDS` do `Settings`) e `extra="ignore"` tolera as variáveis no `.env`. Banco de análises no Postgres: não criado agora (2026-10-03) |
+| 10 | Estrutura de pastas (2026-10-03): `analysis_app/` → `src/`; `tests/`, `Dockerfile`, `.dockerignore`, `.env.example`, `requirements*.txt`, `pytest.ini` e `certs/` sobem para a raiz; **um único `.env`** na raiz (host: `POSTGRES_CONFIG_HOST=localhost`/porta 5433, o postgres do compose; compose força `postgres:5432`); `Settings` passou a `extra="ignore"` para tolerar as variáveis só do compose; `mcp_prototype/` excluído; `scripts/` vazio removido |
 
 ## 11. Pontos em aberto
 

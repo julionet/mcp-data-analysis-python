@@ -491,18 +491,18 @@ Não aparece diretamente. MySQL é um tipo de data_source interno. As análises 
 ### ✅ Implementação Completada (2026-09-28)
 
 **Arquivos criados:**
-- ✅ `analysis_app/adapters/mysql.py` (44 linhas) — MySQLAdapter com named parameters `%(name)s`
-- ✅ `analysis_app/tests/test_mysql_adapter.py` (93 linhas) — 9 testes unitários + test de reutilização de parâmetros
-- ✅ `analysis_app/scripts/encrypt_credential.py` (44 linhas) — Script para criptografar credenciais
-- ✅ `analysis_app/scripts/README_SCRIPTS.md` (66 linhas) — Documentação de scripts
+- ✅ `src/adapters/mysql.py` (44 linhas) — MySQLAdapter com named parameters `%(name)s`
+- ✅ `tests/test_mysql_adapter.py` (93 linhas) — 9 testes unitários + test de reutilização de parâmetros
+- ✅ `src/scripts/encrypt_credential.py` (44 linhas) — Script para criptografar credenciais
+- ✅ `src/scripts/README_SCRIPTS.md` (66 linhas) — Documentação de scripts
 
 **Arquivos modificados:**
-- ✅ `analysis_app/adapters/base.py` — `translate_params()` abstrato adicionado
-- ✅ `analysis_app/adapters/postgresql.py` — `translate_params()` implementado (migração de função global)
-- ✅ `analysis_app/adapters/factory.py` — MySQLAdapter registrado (comentário sobre Sprint 2 atualizado)
-- ✅ `analysis_app/services/analysis_service.py` — refatorado para usar `adapter.translate_params()`
-- ✅ `analysis_app/tests/test_adapter_factory.py` — teste de MySQL adicionado
-- ✅ `analysis_app/requirements.txt` — `aiomysql>=0.2.0` adicionado
+- ✅ `src/adapters/base.py` — `translate_params()` abstrato adicionado
+- ✅ `src/adapters/postgresql.py` — `translate_params()` implementado (migração de função global)
+- ✅ `src/adapters/factory.py` — MySQLAdapter registrado (comentário sobre Sprint 2 atualizado)
+- ✅ `src/services/analysis_service.py` — refatorado para usar `adapter.translate_params()`
+- ✅ `tests/test_adapter_factory.py` — teste de MySQL adicionado
+- ✅ `requirements.txt` — `aiomysql>=0.2.0` adicionado
 
 **Testes:**
 - ✅ 23/23 testes passando (MySQL + Factory + Parameters)

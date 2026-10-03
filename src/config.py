@@ -22,7 +22,9 @@ _VALID_CACHE_BACKENDS = {"memory", "none"}
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": o .env é único (host + compose) e traz variáveis que só o compose usa
+    # (POSTGRES_HOST_PORT, NGINX_*, e as dos bancos opcionais MYSQL_*/MSSQL_*/ORACLE_*); sem isso o pydantic-settings as rejeita.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     server_host: str = "0.0.0.0"
     server_port: int = 3000

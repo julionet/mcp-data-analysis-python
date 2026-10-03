@@ -30,7 +30,7 @@ Ter um servidor FastAPI rodando na porta 3000, acessível via `https://<ip>:3000
 Conforme estrutura de pastas do ARQUITETURA.md §5.2, novos nesta feature:
 
 ```
-analysis_app/
+src/
 ├─ main.py              (novo) — FastAPI app entry point, monta o servidor MCP via Streamable HTTP
 ├─ config.py            (novo) — Configuração via pydantic-settings (.env)
 ├─ requirements.txt     (novo) — dependências travadas (ver §7)
@@ -278,6 +278,6 @@ Antes de implementar, preciso confirmar (regra de ouro — não inventar):
 2. 1b. ~~**Atualização**~~ → **Resolvido:** Jose enviou o `main.py` real do protótipo F0, com o wiring completo (`Server` de baixo nível + `StreamableHTTPSessionManager` + rota exata/mount + lifespan manual + CORS com `expose_headers=["Mcp-Session-Id"]`). Código replicado em 4.1 e 4.4 abaixo.
 3. ~~**CORS — origens permitidas:**~~ Confirmado por Jose: `*` (rede interna confiável).
 4. ~~**IP(s) da máquina para o certificado mkcert:**~~ Parcialmente resolvido: Jose confirmou que, por enquanto, é só um certificado local (mkcert) para desenvolvimento/testes — a CA interna para múltiplas máquinas fica para quando a arquitetura de produção (NGINX) for formalizada (ver item abaixo). Falta só o IP real da máquina de dev para gerar o certificado.
-5. ~~**Local de `certs/` na estrutura de pastas:**~~ Confirmado por Jose: `analysis_app/certs/`.
+5. ~~**Local de `certs/` na estrutura de pastas:**~~ Confirmado por Jose: `certs/`.
 6. ~~**Escopo do `/health` nesta feature:**~~ Confirmado por Jose: apenas `{"status": "ok"}` nesta feature, evoluindo o endpoint incrementalmente em F2-F4.
 7. **TLS em produção via NGINX (novo, trazido por Jose):** o MCP server rodaria atrás de um NGINX que termina TLS em produção (com certificado de produção), enquanto o `mkcert` seria usado só localmente para desenvolvimento/testes. Isso é diferente do que o ADR-006 descreve hoje (TLS/ALPN implementado diretamente no `uvicorn`/FastAPI via `ssl_context_factory`, sem proxy reverso). Para F1 (ambiente de dev/rede interna), vou seguir exatamente o documentado — TLS/ALPN no próprio processo FastAPI, com mkcert. A arquitetura de produção com NGINX fica registrada como decisão futura, fora do escopo de F1 — quer que eu já anote essa nota em ARQUITETURA.md agora, ou prefere formalizar isso quando chegarmos no roadmap de produção (V1.2)?

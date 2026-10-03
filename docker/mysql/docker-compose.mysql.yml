@@ -1,0 +1,30 @@
+# F13 — MySQL: criado, mas FORA dos compose local/remote (opcional, como SQL Server e Oracle).
+# Por padrão a aplicação usa só o PostgreSQL (estrutura do app e, quando preciso, dados de análise).
+# Subida manual (na raiz do repositório):
+#   docker compose --env-file .env -f docker/mysql/docker-compose.mysql.yml up -d
+# Defina MYSQL_ROOT_PASSWORD (e, se quiser, MYSQL_DATABASE/MYSQL_HOST_PORT) no .env — modelo no .env.example.
+# O app (container) alcança este banco pelo host do data_source: host.docker.internal:3306
+# (o app só precisa disso em connection_config; nenhuma variável nem código Python muda).
+# Para incluir no ambiente depois: copiar o serviço para o compose desejado ou usar `include:`.
+
+name: mcp-analysis-mysql
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-analysis_data}
+    ports:
+      - "${MYSQL_HOST_PORT:-3306}:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mysqldata:

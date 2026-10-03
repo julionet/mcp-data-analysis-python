@@ -1,9 +1,9 @@
-# F13 — ambiente REMOTE: nginx (TLS) → app (HTTP interno) + postgres + mysql.
+# F13 — ambiente REMOTE: nginx (TLS) → app (HTTP interno) + postgres.
 # Diferenças para o local: TLS terminado no nginx (app com TLS_ENABLED=false, porta 3000 NÃO
 # publicada) e bancos só na rede interna do compose (nenhuma porta publicada no host).
-# Oracle e SQL Server ficam FORA: docker/oracle/ e docker/sqlserver/ (compose próprios).
+# MySQL, SQL Server e Oracle ficam FORA: docker/mysql/, docker/sqlserver/ e docker/oracle/ (compose próprios).
 #
-# Certificado: por ora montado de analysis_app/certs (mkcert), sem DNS (decisão 8 da spec F13).
+# Certificado: por ora montado de certs/ (mkcert), sem DNS (decisão 8 da spec F13).
 # Certbot (DNS-01) é um profile opcional, desligado por padrão:
 #   docker compose -f docker-compose.remote.yml --profile certbot up -d
 # Ao ligá-lo, aponte NGINX_CERT_FILE/NGINX_KEY_FILE para /etc/letsencrypt/live/<domínio>/{fullchain,privkey}.pem.
@@ -22,15 +22,17 @@ services:
       NGINX_KEY_FILE: ${NGINX_KEY_FILE:-/etc/nginx/certs/server-key.pem}
     volumes:
       - ./docker/nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ${NGINX_CERTS_DIR:-./analysis_app/certs}:/etc/nginx/certs:ro
+      - ${NGINX_CERTS_DIR:-./certs}:/etc/nginx/certs:ro
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
-      - app
+      # nginx resolve app:3000 ao iniciar: sem esperar o app ficar healthy ele cai e reinicia
+      app:
+        condition: service_healthy
     restart: unless-stopped
 
   app:
     build:
-      context: analysis_app
+      context: .
     # Sem "ports": o app só é alcançável pelo nginx (http://app:3000 na rede interna)
     expose:
       - "3000"
@@ -65,27 +67,12 @@ services:
       POSTGRES_DB: ${POSTGRES_CONFIG_DATABASE:-analysis_config}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./analysis_app/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 3s
       retries: 10
-    restart: unless-stopped
-
-  mysql:
-    image: mysql:8.4
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no .env}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-analysis_data}
-    volumes:
-      - mysqldata:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
     restart: unless-stopped
 
   # Opcional (profile "certbot"): emite/renova o certificado Let's Encrypt por DNS-01.
@@ -115,5 +102,4 @@ services:
 
 volumes:
   pgdata:
-  mysqldata:
   letsencrypt:

@@ -7,7 +7,6 @@ dist/
 .venv/
 venv/
 *.db
-mcp_prototype/certs/
 .venv
 certs/
 .env

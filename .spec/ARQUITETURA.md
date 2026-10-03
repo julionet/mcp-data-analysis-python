@@ -2,14 +2,16 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.23 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-01
+**Versão:** 1.24 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-03
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Nota de revisão (v1.23 → v1.24):** F13 (Docker Setup) implementada e estrutura de pastas reorganizada (2026-10-03). Código em `src/` (era `analysis_app/`); `tests/`, `Dockerfile`, `.dockerignore`, `.env.example`, `requirements*.txt`, `pytest.ini` e `certs/` na raiz; **um único `.env`** (host + compose). §5.2 e §9.1 ajustadas (comandos rodam da raiz: `python src/run_https.py`); §9.2 ganha o estado implementado (`docker-compose.remote.yml`: nginx + certificado montado, Certbot como profile opcional). Os compose sobem só `app` + `postgres`; MySQL, SQL Server e Oracle são opcionais (`docker/<banco>/`). `mcp_prototype/` removido. Ver `features/F13_DOCKER_SETUP.md`.
+
 > **Nota de revisão (v1.22 → v1.23):** F9 (Oracle Adapter) **implementada** (2026-10-01), sem mudança de decisão arquitetural. `OracleAdapter` (`adapters/oracle.py`) registrado no `AdapterFactory` (§4.2); `oracledb>=2.0.0` em `requirements.txt` (§5.1, modo thin, sem dependência de SO). Tradução `:x` → `:pN` por índice de `param_names` (mesmo contrato do PostgreSQL: `params` chega na ordem de `param_names`); chaves de coluna em minúsculas; `connect()` valida uma conexão (o pool async do driver é preguiçoso). Alias do wrapper `COUNT(*)` do Volume Guard: `AS sub` → `sub` em `analysis_service._run_query()` (aceito pelos 4 bancos). Sem validação manual (sem instância Oracle). Spec e histórico: `features/F9_ORACLE_ADAPTER.md` §11.
 >
-> **Nota de revisão (v1.21 → v1.22):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Schema em `analysis_app/database/schema.sql` (migration e seed da F12 canceladas — F13, decisão 7). Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Decisões de implementação que refinam §3.5/ADR-007 (sem mudar o desenho): (1) o `AuthMiddleware` envolve diretamente os dois endpoints do `/mcp` (rota exata e mount), sem filtro de path — fail-closed; (2) o SDK `mcp` chama `list_tools()` em todo `tools/call` para validar o input, o que adiciona uma query de permissão por chamada; (3) `_validate_credentials()` sempre executa um bcrypt (hash fictício quando o e-mail não existe) para tempo de resposta constante; (4) os handlers MCP são fail-closed: sem usuário no `contextvar` nada é listado nem executado.
+> **Nota de revisão (v1.21 → v1.22):** F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Schema em `src/database/schema.sql` (migration e seed da F12 canceladas — F13, decisão 7). Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11. Decisões de implementação que refinam §3.5/ADR-007 (sem mudar o desenho): (1) o `AuthMiddleware` envolve diretamente os dois endpoints do `/mcp` (rota exata e mount), sem filtro de path — fail-closed; (2) o SDK `mcp` chama `list_tools()` em todo `tools/call` para validar o input, o que adiciona uma query de permissão por chamada; (3) `_validate_credentials()` sempre executa um bcrypt (hash fictício quando o e-mail não existe) para tempo de resposta constante; (4) os handlers MCP são fail-closed: sem usuário no `contextvar` nada é listado nem executado.
 >
 > **Nota de revisão (v1.20 → v1.21):** correção do **racional** do transporte stateless (sem mudança de decisão — `stateless=True` continua). A nota v1.19 dizia que, com sessão, um usuário bloqueado "continuaria usando uma sessão já aberta"; isso só vale se o token fosse validado apenas no `initialize` — o middleware do F12 valida toda requisição, então o bloqueio imediato funcionaria também em stateful. O motivo real, comprovado em teste no SDK `mcp` 1.x: em stateful o `StreamableHTTPSessionManager` cria a task do servidor uma única vez, no `initialize`, e ela reaproveita o contexto daquela requisição — o `contextvar` do `AuthenticatedUser` fica congelado no usuário que abriu a sessão, e requisições seguintes com outro token executariam com as permissões dele (confusão de identidade). Em stateless a task nasce dentro de cada requisição e herda o `contextvar` correto. Atualizados: nota técnica de §3.5, consequência v1.19 do ADR-006 (§7) e nova lição técnica §14.1 item 8. `expose_headers` do CORS passa a `["WWW-Authenticate"]` (F12) — `Mcp-Session-Id` nunca é enviado em stateless.
 >
@@ -49,7 +51,7 @@
 
 > **Nota de revisão (v1.6 → v1.7):** documento aprovado. Explicitada em §9.2 a diferença de exigência de confiança do cliente entre as duas opções de Certbot: a Opção A (DNS-01/Let's Encrypt) não exige nenhuma configuração nos clientes MCP, porque a CA do Let's Encrypt já vem pré-instalada por padrão em qualquer sistema operacional/runtime — igual a qualquer API pública comum; a Opção B (CA interna) exige instalar/confiar nessa CA em cada máquina cliente, exatamente como o mkcert em §9.1. A distinção não é "nginx+Certbot vs. mkcert", é se a CA emissora já é publicamente confiável de fábrica ou é uma CA privada criada para esse ambiente.
 
-> **Nota de revisão (v1.7 → v1.8):** documento aprovado. Renomeada em §5.2 a pasta `mcp/` para **`mcp_transport/`** — durante a implementação de F1 (`F1_IMPLEMENTACAO.md`), constatou-se que um pacote local chamado `mcp/` colide com o SDK `mcp` que ele mesmo importa (`from mcp.server.lowlevel import Server`): rodando o processo a partir de `analysis_app/` (padrão usado desde o protótipo F0), o Python resolve `import mcp` para o pacote local em vez do SDK instalado, quebrando com `ModuleNotFoundError: No module named 'mcp.server'`. Nenhuma outra decisão de arquitetura foi alterada — apenas o nome da pasta em §5.2.
+> **Nota de revisão (v1.7 → v1.8):** documento aprovado. Renomeada em §5.2 a pasta `mcp/` para **`mcp_transport/`** — durante a implementação de F1 (`F1_IMPLEMENTACAO.md`), constatou-se que um pacote local chamado `mcp/` colide com o SDK `mcp` que ele mesmo importa (`from mcp.server.lowlevel import Server`): rodando o processo a partir de `src/` (padrão usado desde o protótipo F0), o Python resolve `import mcp` para o pacote local em vez do SDK instalado, quebrando com `ModuleNotFoundError: No module named 'mcp.server'`. Nenhuma outra decisão de arquitetura foi alterada — apenas o nome da pasta em §5.2.
 
 ---
 
@@ -917,11 +919,13 @@ uuid6==1.0.3
 
 ### 5.2 Python Structure
 
+Layout (2026-10-03): a aplicação fica em `src/`; `tests/`, `Dockerfile`, `.dockerignore`, `.env.example`, `requirements*.txt`, `pytest.ini`, `certs/` e o `.env` (único) ficam na raiz do repositório.
+
 ```
-analysis_app/
+src/
 ├── main.py                    # FastAPI app entry point (Streamable HTTP)
-├── config.py                  # Configuration (pydantic)
-├── requirements.txt
+├── run_https.py               # uvicorn com TLS + ALPN (python src/run_https.py)
+├── config.py                  # Configuration (pydantic; extra="ignore" — .env único)
 │
 ├── routes/                    # F12 — rotas HTTP fora do /mcp, registradas em main.py (include_router)
 │   ├── __init__.py
@@ -977,9 +981,6 @@ analysis_app/
 │                              # (list_resources/read_resource) não existe: fora de
 │                              # escopo em V1.0, ver F5_MCP_TOOLS_INTEGRATION.md §3
 │
-├── scripts/
-│   └── encrypt_credential.py     # já existente (não há mais script de emissão de token — F12 usa POST /auth/token)
-│
 ├── database/
 │   ├── __init__.py
 │   ├── connection.py         # DB connection pool
@@ -988,13 +989,6 @@ analysis_app/
 ├── logs/
 │   ├── app.log
 │   └── audit.log
-│
-└── tests/
-    ├── __init__.py
-    ├── test_analysis_service.py
-    ├── test_volume_guard_service.py
-    ├── test_cache_service.py
-    └── fixtures.py
 ```
 
 ---
@@ -1271,18 +1265,19 @@ ACCESS_TOKEN_MAX_EXPIRATION_DAYS=365  # F12 — maior expire_days aceito em POST
 ```bash
 # Preparar
 git clone <repo>
-cd analysis_app
-cp .env.example .env
+cd <repo>                # raiz do repositório — todos os comandos partem daqui
+cp .env.example .env    # .env ÚNICO (host + compose)
 
 # Certificado TLS local (obrigatório — ver ADR-006):
 brew install mkcert && mkcert -install
 mkcert -cert-file certs/server.pem -key-file certs/server-key.pem localhost 127.0.0.1 <ip-da-maquina>
 
-# Config DB: PostgreSQL rodando e com database/schema.sql aplicado.
-# (docker-compose local/remoto entra com a F13 — Docker Setup.)
+# Config DB: PostgreSQL com src/database/schema.sql aplicado. Mais simples, com Docker (F13):
+#   docker compose -f docker-compose.local.yml up -d postgres   # publica em localhost:5433
+# (ou tudo em container: docker compose -f docker-compose.local.yml up -d --build)
 
 # Subir o servidor (HTTPS com ALPN — ver aviso ao final desta seção):
-python run_https.py
+python src/run_https.py
 
 # Verificar
 curl https://localhost:3000/health
@@ -1318,6 +1313,8 @@ curl -X POST https://localhost:3000/auth/token -H "Content-Type: application/jso
 **Tempo de setup:** 5-10 minutos
 
 ### 9.2 Produção Interna (nginx + Certbot)
+
+> **Estado (F13, 2026-10-03):** implementado em `docker-compose.remote.yml` + `docker/nginx/nginx.conf.template` (inclui `location /auth/`, que o exemplo abaixo não lista). Hoje o nginx usa **certificado montado de `certs/`** (mkcert), porque ainda não há domínio público nem acesso à API de DNS; o `certbot` (DNS-01) existe como **profile opcional** (`--profile certbot`), desligado. Atenção: o Let's Encrypt só emite certificado para **domínio público** — `analise.empresa.internal` nos exemplos abaixo é ilustrativo e não seria emitido; em rede estritamente interna use a Opção B (CA interna) ou o mkcert com a CA distribuída aos clientes.
 
 Ainda dentro de V1.0 — rede interna, sem exposição pública (Restrição T1) — mas num servidor dedicado em vez da máquina de desenvolvimento. Aqui, **nginx** faz a terminação TLS como reverse proxy na frente do FastAPI/uvicorn, que passa a rodar atrás dele em HTTP simples. Isso elimina a necessidade do `ssl_context_factory`/ALPN manual da seção 9.1: o OpenSSL do nginx já negocia ALPN nativamente, então esse workaround é específico do cenário "uvicorn falando TLS diretamente" (dev com mkcert), não de produção com nginx.
 
@@ -1550,7 +1547,7 @@ V2.0 (Ecosystem):
 
 ### 14.1 Lições Técnicas do Protótipo F0
 
-Consolidadas a partir do antigo `mcp_prototype/README.md` (o protótipo continua no repositório como referência executável; a análise de "por quê" mora aqui). Resumo das decisões: ADR-006 (§7).
+Consolidadas a partir do antigo `mcp_prototype/README.md` (o protótipo foi removido do repositório em 2026-10-03 — permanece no histórico do git; a análise de "por quê" mora aqui). Resumo das decisões: ADR-006 (§7).
 
 **1. ALPN: por que existe `run_https.py` e não `uvicorn --ssl-keyfile/--ssl-certfile`**
 - Sintoma: certificado válido, `curl` e o SDK cliente do `mcp` funcionavam, mas o Claude Desktop reportava "nenhum servidor respondeu" e **nenhuma requisição aparecia no log** — a conexão TLS era abandonada antes da camada HTTP.

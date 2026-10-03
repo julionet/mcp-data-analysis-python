@@ -479,17 +479,17 @@ Novo adapter = herdar `DatabaseAdapter`, implementar os 6 métodos, registrar no
 ### ✅ Implementação Completada (2026-10-01)
 
 **Arquivos criados:**
-- ✅ `analysis_app/adapters/oracle.py` — `OracleAdapter`: `_build_dsn()`, `connect()`/`disconnect()`, `_to_binds()`, `execute_query()`, `execute()`, `test_connection()`, `translate_params()`
-- ✅ `analysis_app/tests/test_oracle_adapter.py` — 27 testes unitários com `oracledb` mockado
+- ✅ `src/adapters/oracle.py` — `OracleAdapter`: `_build_dsn()`, `connect()`/`disconnect()`, `_to_binds()`, `execute_query()`, `execute()`, `test_connection()`, `translate_params()`
+- ✅ `tests/test_oracle_adapter.py` — 27 testes unitários com `oracledb` mockado
 
 **Arquivos modificados:**
-- ✅ `analysis_app/adapters/factory.py` — `"oracle": OracleAdapter`
-- ✅ `analysis_app/services/analysis_service.py` — `count_sql` com alias `sub` (sem `AS`)
-- ✅ `analysis_app/requirements.txt` — `oracledb>=2.0.0` (instalado: 26.0.1)
-- ✅ `analysis_app/adapters/base.py` e `sqlserver.py` — só docstrings/comentários (exemplos SQL Server/Oracle; alias do wrapper)
-- ✅ `analysis_app/tests/test_adapter_contract.py` — fixture com 4 adapters (o mock do Oracle devolve colunas em MAIÚSCULAS para provar a normalização)
-- ✅ `analysis_app/tests/test_adapter_factory.py` — caso `oracle`; o teste de "tipo desconhecido" passou a usar `mongodb` (antes usava `oracle`, que agora é válido)
-- ✅ `analysis_app/tests/test_analysis_service.py` — asserção `) sub` / sem ` AS sub`
+- ✅ `src/adapters/factory.py` — `"oracle": OracleAdapter`
+- ✅ `src/services/analysis_service.py` — `count_sql` com alias `sub` (sem `AS`)
+- ✅ `requirements.txt` — `oracledb>=2.0.0` (instalado: 26.0.1)
+- ✅ `src/adapters/base.py` e `sqlserver.py` — só docstrings/comentários (exemplos SQL Server/Oracle; alias do wrapper)
+- ✅ `tests/test_adapter_contract.py` — fixture com 4 adapters (o mock do Oracle devolve colunas em MAIÚSCULAS para provar a normalização)
+- ✅ `tests/test_adapter_factory.py` — caso `oracle`; o teste de "tipo desconhecido" passou a usar `mongodb` (antes usava `oracle`, que agora é válido)
+- ✅ `tests/test_analysis_service.py` — asserção `) sub` / sem ` AS sub`
 - ✅ `.spec/FEATURES_ROADMAP.md` (v1.16), `.spec/ARQUITETURA.md` (v1.23), `.claude/CLAUDE.md`
 
 **Testes:** 334/334 na suíte completa (27 novos em `test_oracle_adapter.py` + Oracle nos testes de contrato e de factory), sem regressão.

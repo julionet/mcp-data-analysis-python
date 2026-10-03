@@ -1,3 +1,6 @@
+# Contexto de build = raiz. A imagem só usa requirements.txt e src/ (COPY explícito),
+# o resto fica fora para o build ser rápido e nada sensível sair do host.
+
 # Secrets e certificados nunca entram na imagem (F13 §2)
 .env
 .env.*
@@ -6,15 +9,19 @@ certs/
 
 # Ambiente e artefatos locais
 .venv/
-__pycache__/
+**/__pycache__/
 *.pyc
 .pytest_cache/
+
+# Fora do runtime
 .git/
 .gitignore
-
-# Testes e scripts de dev não são necessários em runtime
+.spec/
+.claude/
+.vscode/
+docker/
+docker-compose*.yml
 tests/
 pytest.ini
 requirements-dev.txt
-scripts/
-logs/
+README.md
