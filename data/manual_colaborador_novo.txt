@@ -1,0 +1,18 @@
+# Manual do Colaborador — Acme Tech
+
+## Férias
+Colaboradores CLT têm direito a 30 dias corridos de férias a cada 12 meses de trabalho. As férias podem ser fracionadas em até três períodos, sendo que um deles deve ter no mínimo 14 dias corridos e os demais no mínimo 5 dias cada. O pedido deve ser feito no portal de RH com pelo menos 30 dias de antecedência.
+
+## Trabalho remoto
+A Acme Tech adota o modelo híbrido. Os colaboradores trabalham presencialmente às terças e quintas e remotamente nos demais dias. Exceções devem ser aprovadas pelo gestor direto. Quem trabalha de casa recebe um auxílio mensal de R$ 150,00 para despesas de internet e energia.
+
+## Reembolso de despesas
+Despesas de viagem a trabalho são reembolsáveis mediante apresentação de nota fiscal. O prazo para solicitar o reembolso é de 15 dias após o fim da viagem. Refeições têm limite diário de R$ 120,00 e hospedagens de R$ 450,00 por diária. Despesas acima dos limites exigem aprovação prévia da diretoria.
+
+## Suporte de TI
+Para abrir um chamado, acesse o portal de suporte ou envie um e-mail para suporte@acmetech.example. O erro E-4021 indica falha de autenticação na VPN; nesse caso, redefina sua senha e tente novamente. O erro E-5107 indica que o certificado do notebook expirou e exige a visita presencial à equipe de TI. Chamados críticos são atendidos em até 2 horas; os demais, em até 2 dias úteis.
+
+## Segurança da informação
+Nunca compartilhe sua senha, nem com colegas de TI. Use sempre a VPN ao acessar sistemas internos fora do escritório. Incidentes suspeitos, como e-mails de phishing, devem ser reportados imediatamente ao time de segurança pelo canal #seguranca.
+
+Nova linha do arquivo.

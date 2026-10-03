@@ -39,9 +39,9 @@ O modelo é adequado: multilíngue (bom em português), 1024 dimensões, context
 
 ## 4. Ingestão de arquivos
 
-Novo módulo `src/loaders.py` com `load_document(path) -> Document`:
+Novo módulo `src/loaders.py` com `inspect_document(path) -> DocumentInfo` (valida o arquivo, calcula o `sha256` e conta as páginas), `iter_pages(path)` (entrega uma `Page` por vez, para PDFs grandes) e `load_document(path) -> Document` (tudo em memória, para arquivos pequenos):
 
-- `Document`: `filename`, `file_type`, `sha256`, `pages: list[Page]` (`Page`: `number`, `text`).
+- `Document`: `filename`, `file_type`, `sha256`, `pages: list[Page]` (`Page`: `number`, `text`). `DocumentInfo`: `filename`, `file_type`, `sha256`, `page_count`.
 - **TXT**: leitura em UTF-8, com fallback para `utf-8-sig`/`latin-1`. Todo o texto vira a página 1.
 - **PDF**: `pymupdf4llm` (PyMuPDF) converte cada página em **Markdown**, preservando títulos e tabelas. O número da página fica como metadado.
 - PDF sem texto extraível (provável escaneado): erro claro, sem indexar.
