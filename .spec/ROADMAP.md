@@ -79,4 +79,5 @@ Ordem sugerida, a planejar depois de M4:
 |---|---|---|
 | F01 | Aprovada | Verificada (2026-10-02) |
 | F02 | Aprovada | Verificada (2026-10-02) |
-| F03 a F12 | Pendente | Pendente |
+| F03 | Aprovada | Verificada (2026-10-03) |
+| F04 a F12 | Pendente | Pendente |

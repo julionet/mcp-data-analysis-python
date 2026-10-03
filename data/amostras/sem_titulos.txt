@@ -1,0 +1,5 @@
+A Acme Tech fornece notebooks para todos os colaboradores no primeiro dia de trabalho. O equipamento deve ser devolvido ao desligamento, em perfeito estado de conservação.
+
+Em caso de perda ou roubo, o colaborador deve registrar um boletim de ocorrência e avisar o time de TI em até 24 horas. A reposição do equipamento é analisada caso a caso pela diretoria.
+
+Acessórios como mouse, teclado e monitor adicional podem ser solicitados pelo portal de suporte. O prazo de entrega é de até cinco dias úteis após a aprovação do gestor direto.

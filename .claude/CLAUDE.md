@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Estado do projeto e fluxo de trabalho
 
-Aplicação de estudo de RAG (arquivos TXT, base vetorial local em numpy, Claude para gerar respostas). O código em `src/` e `scripts/` é a **versão atual**. Ela está em **evolução planejada** para TXT + PDF com PostgreSQL/pgvector, conduzida por **Spec Driven Development**. Implementada e verificada até agora: **F01** (banco, esquema e CLI `python -m src.cli` com `init-db` e `check`) e **F02** (leitura de TXT e PDF em `src/loaders.py`, com `scripts/read_document.py` de apoio); o restante ainda não. Status por feature em `.spec/ROADMAP.md`.
+Aplicação de estudo de RAG (arquivos TXT, base vetorial local em numpy, Claude para gerar respostas). O código em `src/` e `scripts/` é a **versão atual**. Ela está em **evolução planejada** para TXT + PDF com PostgreSQL/pgvector, conduzida por **Spec Driven Development**. Implementada e verificada até agora: **F01** (banco, esquema e CLI `python -m src.cli` com `init-db` e `check`) e **F02** (leitura de TXT e PDF em `src/loaders.py`, com `scripts/read_document.py` de apoio) e **F03** (divisão em trechos em `src/chunking.py`, com `Chunk`, `structured_chunks` e `chunk_pages`, e `scripts/chunk_document.py` de apoio); o restante ainda não. Status por feature em `.spec/ROADMAP.md`.
 
 Documentos de especificação (aprovados), em português:
 - `.spec/NEGOCIO.md`: regras de negócio R1–R11, escopo e fora de escopo.

@@ -74,6 +74,7 @@ Novo módulo `src/loaders.py` com `inspect_document(path) -> DocumentInfo` (vali
 4. Tamanho alvo ~800–1000 caracteres (~200–250 tokens), overlap ~10–15%, com o limite validado em tokens pelo tokenizer do bge-m3.
 5. Tabelas de PDF não são partidas no meio de uma linha.
 6. Metadados por chunk: `source`, `page`, `section`, `chunk_index`.
+7. Tipo `Chunk(chunk_index, page, section, content)` com `embedding_text` (seção + conteúdo); entrada única `chunk_pages(pages, strategy, ...)`. Um trecho **nunca cruza a fronteira de página**; a seção continua valendo nas páginas seguintes (ver F03).
 
 **Por quê:** PDFs e TXT com títulos perdem contexto quando o chunk não diz a que seção pertence ("o limite é R$ 120" sem saber que é refeição). O prefixo de seção melhora a recuperação, e a divisão por estrutura evita cortes no meio de ideias.
 
