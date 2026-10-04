@@ -4,6 +4,8 @@
 
 docker compose -f docker-compose.local.yml up -d --build
 docker compose -f docker-compose.local.yml ps
+docker compose -f docker-compose.local.yml exec app env
+docker compose -f docker-compose.local.yml logs -f app
 Isso cria sozinho, na primeira subida, com os valores do .env:
 - O usuário do banco: POSTGRES_CONFIG_USER, que é postgres.
 - O banco: analysis_config.
@@ -81,6 +83,10 @@ $enc = (docker compose -f docker-compose.local.yml exec -T app python -c "from s
 - O host é postgres, o nome do serviço na rede do compose, e a porta é 5432. Dentro do container não se usa localhost.
 - O CAST(:regiao AS VARCHAR) é necessário. Sem ele, o filtro opcional falhava com could not determine data type of parameter   a análise retornava erro. Essa falha apareceu no meu primeiro teste.
 - O SQL da análise aceita só um SELECT, sem ;.                                                                               
+
+## Executar comando no banco
+
+docker compose -f docker-compose.local.yml exec postgres psql -U postgres -d analysis_config -c "\d execution_history"
 
 ## Passo 6: emitir o token e testar
 

@@ -3,10 +3,18 @@
 Não há modo "sem autenticação": a autenticação é contornada só por estas fixtures.
 """
 
+import asyncio
+import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Windows: o teardown do TestClient (portal do anyio) às vezes trava no close() do loop
+# Proactor, depois de todos os testes passarem (reproduzido no HEAD pré-F14, ~1 em 4 execuções).
+# O loop Selector não tem esse problema; os testes não usam subprocess.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from main import app
 from mcp_transport import tools

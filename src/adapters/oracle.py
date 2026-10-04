@@ -22,6 +22,11 @@ _RESTRICTED_SQL_ERRORS = ("ORA-00911", "ORA-00918")
 
 _PLACEHOLDER_RE = re.compile(r"(?<![\w:]):(\w+)")
 
+_TIMEOUT_CODES = {"DPY-4024", "ORA-03156"}
+# DPY-4011 conexão fechada pelo banco/rede; ORA-03113/03114 fim de arquivo/não conectado;
+# ORA-12541 sem listener; ORA-01033/01089 banco subindo/desligando
+_TRANSIENT_CODES = {"DPY-4011", "ORA-03113", "ORA-03114", "ORA-12541", "ORA-01033", "ORA-01089"}
+
 
 class OracleAdapter(DatabaseAdapter):
     def _build_dsn(self) -> str:
@@ -121,6 +126,24 @@ class OracleAdapter(DatabaseAdapter):
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _full_code(exc: Exception) -> str | None:
+        """Código completo ("DPY-4024", "ORA-03113") de um oracledb.Error — args[0].full_code."""
+        if isinstance(exc, oracledb.Error) and exc.args:
+            return getattr(exc.args[0], "full_code", None)
+        return None
+
+    def is_timeout_error(self, exc: Exception) -> bool:
+        # DPY-4024 = call_timeout excedido (thin mode); ORA-03156 = idem em modo thick
+        return self._full_code(exc) in _TIMEOUT_CODES
+
+    def is_transient_error(self, exc: Exception) -> bool:
+        if isinstance(exc, ConnectionError):
+            return True
+        # DPY-6005 ("cannot connect") não entra: engloba causas demais (host errado,
+        # service inexistente, timeout) para repetir às cegas; sem instância Oracle, não validado.
+        return self._full_code(exc) in _TRANSIENT_CODES
 
     def translate_params(self, sql: str, param_names: list[str]) -> str:
         """Traduz placeholders nomeados (:param) para Oracle (:pN, N = índice em param_names).

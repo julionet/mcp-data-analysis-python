@@ -8,7 +8,7 @@ Plataforma agnóstica de LLM para análise de dados conversacional, **multi-clie
 ## Stack
 FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, porta 3000) + PostgreSQL + Python. Cache em memória local (Redis só em ambiente remoto/futuro).
 
-## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — ✅ 100% Completo | Sprint 3 — 🟨 F12 ✅ F13 ✅)
+## Status Atual (Sprint 1 — ✅ 100% Completo | Sprint 2 — ✅ 100% Completo | Sprint 3 — 🟨 F12 ✅ F13 ✅ F14 ✅)
 
 ### Sprint 1: MVP Local Multi-Cliente (✅ 100%)
 - F1: FastAPI + MCP Server via Streamable HTTP com TLS 🟩 Done
@@ -25,14 +25,15 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 - F10: MySQL Adapter 🟩 Done (named parameters `%(name)s`, 3 correções, 23/23 testes ✅)
 - F11: SQL Server Adapter 🟩 Done (`aioodbc`+`pyodbc`, `@n`→`?` por ordem de ocorrência, contrato agnóstico testado nos 3 adapters, 185/185 testes ✅)
 
-### Sprint 3: Production-Ready (🟨 em progresso — 2/7)
+### Sprint 3: Production-Ready (🟨 em progresso — 3/7)
 - F12: Autenticação e Controle de Acesso via Perfis 🟩 Done (2026-09-30) — `POST /auth/token` e `POST /auth/revoke` (e-mail + senha bcrypt), `AuthMiddleware` + `contextvar` no `/mcp`, perfis N:N, `execution_history.user_id`; 295/295 testes ✅ (spec e notas: `.spec/features/F12_AUTENTICACAO_PERFIS.md` §11). **Stateless é obrigatório:** em stateful o `contextvar` do usuário fica congelado no `initialize` (ARQUITETURA.md §14.1 item 8) — não trocar a flag. Schema: `src/database/schema.sql` (migration cancelada — F13); cliente `mcp-remote` passa o token com `--header`
 - F13: Docker Setup (Local + Remote) 🟩 Done (2026-10-03) — `Dockerfile` (python:3.13-slim-bookworm + ODBC 18), `docker-compose.local.yml` (`app`+`postgres`, TLS uvicorn+mkcert) e `docker-compose.remote.yml` (`nginx`+`app`+bancos; `certbot` DNS-01 só com `--profile certbot`, sem domínio/DNS por ora). **MySQL, SQL Server e Oracle ficam fora dos compose** (opcionais, subida manual: `docker/mysql/`, `docker/sqlserver/`, `docker/oracle/`; usá-los não exige mexer em Python — credenciais vêm de `data_sources.connection_config`). Config DB nasce do `schema.sql` via `initdb.d` (sem migrations). **Estrutura (2026-10-03):** código em `src/`, `tests/`/`Dockerfile`/`requirements*.txt`/`.env.example`/`certs/` na raiz, **um único `.env`** na raiz (`cp .env.example .env`) para host (`python src/run_https.py`, Config DB = postgres do compose em `localhost:5433`) e compose; `mcp_prototype/` removido. 336/336 testes ✅; **validação manual pendente:** `/auth/token`→`/mcp` com cliente real, análise completa em MySQL/SQL Server (subidos à parte), streaming SSE no nginx, Oracle 23ai, profile certbot (spec: `.spec/features/F13_DOCKER_SETUP.md`)
+- F14: Error Handling & Validation 🟩 Done (2026-10-03) — todo erro devolve `error_code` + `retryable` (7 códigos: `ANALYSIS_NOT_FOUND`, `INVALID_PARAMETERS`, `INVALID_ANALYSIS_CONFIG`, `DATA_SOURCE_UNAVAILABLE`, `QUERY_TIMEOUT`, `QUERY_FAILED`, `INTERNAL_ERROR`; tabela em ARQUITETURA.md §3.4.1); acesso negado = `ANALYSIS_NOT_FOUND` (não revela a análise); `call_tool()`/`list_tools()` nunca vazam exceção (o SDK `mcp` devolveria `str(exc)`); retry 3x com backoff **só de falha rápida de conexão** (nunca timeout/SQL/validação; classificação em `is_timeout_error`/`is_transient_error` de cada adapter); `execution_history` ganha status `timeout` e a coluna **`error_code`** — **bancos existentes precisam rodar na mão: `ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);`** (sem ela o histórico para de ser gravado). Achado: o `timeout=` do SQL Server era só *login timeout* — o query timeout agora vem de `after_created`. 480/480 testes ✅; `tests/conftest.py` usa o loop Selector no Windows (a suíte travava no teardown do `TestClient`); **validação manual pendente** (spec §6.2: queda do Config DB com cliente real, timeout de query em PG e SQL Server) (spec: `.spec/features/F14_ERROR_HANDLING_VALIDATION.md`)
 
 ## Documentos (Aprovados e Atualizados)
-- **NEGOCIO.md** (v1.10): Requisitos (RF1-RF5, T1-T5, RNF1-RNF5) — RF5 = autenticação por token + perfis (F12)
-- **ARQUITETURA.md** (v1.23): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
-- **FEATURES_ROADMAP.md** (v1.19): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12 e F13
+- **NEGOCIO.md** (v1.11): Requisitos (RF1-RF5, T1-T5, RNF1-RNF5) — RF5 = autenticação por token + perfis (F12)
+- **ARQUITETURA.md** (v1.25): Design técnico (componentes, schema, ADRs, fluxos) — ADR-006 stateless, ADR-007 token opaco emitido por e-mail/senha
+- **FEATURES_ROADMAP.md** (v1.20): Timeline (22 features, ~31 dias, Sprint 1-4) — inclui F12 e F13
 - **DATABASE_SCHEMA.md**: schema do Config DB (tabelas de auth do F12: `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`)
 - **TEMPLATE_FEATURE_SPEC.md**: Template (modelo de spec de features)
 - **PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md**: racional da remoção de Handlers e Controle de Volume
@@ -51,6 +52,7 @@ FastAPI + MCP (Streamable HTTP com TLS obrigatório, endpoint único `/mcp`, por
 ✅ 2+ clientes MCP simultâneos validados (execution_history sem erro de concorrência)
 ✅ Placeholders agnósticos de banco — SQL com `:param` é traduzido por adapter (PostgreSQL `$n`, MySQL `%(n)s`, SQL Server `@n`→`?`, Oracle `:pN`); o dialeto SQL não é traduzido — para rodar nos 4 bancos usar o subconjunto comum (sem `ORDER BY`/CTE/`;` no topo, colunas com nome único, todo parâmetro declarado presente no SQL — ver F11 §8.4 e F9 §8.4)
 ✅ Autenticação por token opaco + perfis (F12, implementada): `POST /auth/token` (e-mail + senha, `label`/`expire_days` opcionais) e `POST /auth/revoke`; `list_tools()` filtra e `call_tool()` revalida por perfil; usuário bloqueado perde acesso imediato; `execution_history.user_id`; usuários cadastrados por INSERT direto (sem CRUD); **sem proteção contra tentativas de senha em V1.0** (rever antes de expor fora da rede interna)
+✅ Contrato de erro estável (F14): `{"status":"error","error_code","retryable","mensagem","cached"}`; `execution_history.status` ∈ `success`/`volume_exceeded`/`error`/`timeout` + `error_code`; retry só de falha rápida de conexão
 ❌ Sem API Key, sem quota/rate limit por usuário, sem identificação de qual cliente MCP chama, sem OAuth/SSO (fora de escopo V1.0 — ver Roadmap Futuro)
 ❌ Sem versionamento de análises/rollback (removido: query SQL é configurada 1 vez; mudanças são diretas na tabela — histórico de execuções fornece auditoria necessária)
 

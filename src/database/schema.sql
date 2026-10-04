@@ -92,7 +92,7 @@ CREATE TABLE execution_history (
     analysis_id UUID NOT NULL REFERENCES analyses(id),
 
     parameters JSONB,
-    status VARCHAR(50),  -- success, failed, timeout
+    status VARCHAR(50),  -- success, volume_exceeded, error, timeout (F14)
     execution_time_ms INT,
     rows_affected INT,
     result_size_bytes INT,
@@ -100,7 +100,8 @@ CREATE TABLE execution_history (
     result_location VARCHAR(500),  -- path/uri do resultado
     executed_at TIMESTAMP DEFAULT NOW(),
     cached BOOLEAN DEFAULT false,
-    user_id UUID REFERENCES users(id)  -- sem ON DELETE: preserva auditoria (F12)
+    user_id UUID REFERENCES users(id),  -- sem ON DELETE: preserva auditoria (F12)
+    error_code VARCHAR(50)  -- F14: ANALYSIS_NOT_FOUND, INVALID_PARAMETERS, QUERY_TIMEOUT...; NULL se não houve erro/linhas pré-F14
 );
 
 -- Índices para performance

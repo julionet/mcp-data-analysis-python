@@ -2,8 +2,8 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.10 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-09-30
+**Versão:** 1.11 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-03 (v1.11 — RNF4: retry só de falha rápida de conexão, F14); 2026-09-30
 **Autor:** Jose
 **Status:** ✅ Aprovado
 
@@ -479,7 +479,8 @@ Então:
 ├─ Concorrência: suportar 10+ conexões/clientes MCP simultâneos
 ├─ Isolation: erro de 1 execução não afeta outras
 ├─ Rollback: voltar versão anterior em < 10s
-└─ Retry automático: 3x com backoff exponencial
+└─ Retry automático: 3x com backoff exponencial, só em falha de conexão ao data source
+   (não em timeout de query, erro de SQL ou validação — ver F14 §10, decisão 8)
 ```
 
 ### RNF5: Segurança

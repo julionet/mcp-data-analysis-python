@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AuditService:
     """Registra execuções em execution_history — suporta qualquer status
-    (success, volume_exceeded, error)."""
+    (success, volume_exceeded, error, timeout — este último desde a F14)."""
 
     def __init__(self, execution_repo: ExecutionRepository) -> None:
         self.execution_repo = execution_repo
@@ -24,12 +24,13 @@ class AuditService:
         self,
         analysis_id: UUID,
         parameters: dict,
-        status: str,  # "success" | "volume_exceeded" | "error"
+        status: str,  # "success" | "volume_exceeded" | "error" | "timeout"
         execution_time_ms: int,
         cached: bool,
         result: dict | None = None,
         error_message: str | None = None,
         user_id: UUID | None = None,
+        error_code: str | None = None,
     ) -> None:
         """Grava 1 linha em execution_history. Nunca propaga exceção — uma
         falha de auditoria não pode derrubar a resposta ao cliente MCP."""
@@ -54,10 +55,11 @@ class AuditService:
                 execution_time_ms=execution_time_ms,
                 rows_affected=rows_affected,
                 result_size_bytes=result_size_bytes,
-                error_message=error_message if status == "error" else None,
+                error_message=error_message if status in ("error", "timeout") else None,
                 result_location=None,
                 cached=cached,
                 user_id=user_id,
+                error_code=error_code if status in ("error", "timeout") else None,
             )
         except Exception:
             logger.exception("Falha ao gravar execution_history (análise '%s')", analysis_id)

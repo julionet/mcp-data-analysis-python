@@ -259,6 +259,8 @@ class TestAnalysisService:
 
         assert result == {
             "status": "error",
+            "error_code": "INTERNAL_ERROR",  # F14
+            "retryable": False,
             "mensagem": "Erro interno ao executar a análise.",
             "cached": False,
         }

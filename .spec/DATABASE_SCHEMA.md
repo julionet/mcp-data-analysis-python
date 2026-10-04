@@ -4,7 +4,7 @@
 
 **Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.17)
 **Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
-**Data:** 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; migrations e seed da F12 canceladas — `schema.sql` é a única fonte (F13, decisão 7); atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
+**Data:** 2026-10-03 (F14: `execution_history.error_code`, status `timeout`/`error` documentados; bancos existentes precisam do `ALTER TABLE` da §2.5) · 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; migrations e seed da F12 canceladas — `schema.sql` é a única fonte (F13, decisão 7); atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
 > Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
@@ -118,7 +118,7 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 | `analysis_id` | UUID (FK → `analyses.id`) | ✅ | Qual análise foi executada |
 | `user_id` | UUID (FK → `users.id`, sem `ON DELETE` — `NO ACTION`) | — | Quem executou (F12). `NULL` para execuções anteriores a F12. **Impede apagar o usuário** enquanto houver execuções dele (preserva a auditoria) — ver §2.6 |
 | `parameters` | JSONB | — | Parâmetros com que a análise foi chamada |
-| `status` | VARCHAR(50) | — | `success`, `failed`, `timeout` (também usado para o caso `volume_exceeded`, ver ARQUITETURA.md §3.4) |
+| `status` | VARCHAR(50) | — | `success`, `volume_exceeded` (ver ARQUITETURA.md §3.4), `error` ou `timeout` (F14). O valor `failed`, citado em versões antigas, nunca foi gravado |
 | `execution_time_ms` | INT | — | Tempo total de execução em milissegundos |
 | `rows_affected` | INT | — | Quantidade de linhas retornadas |
 | `result_size_bytes` | INT | — | Tamanho do resultado serializado |
@@ -126,6 +126,13 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 | `result_location` | VARCHAR(500) | — | Path/URI do resultado, se armazenado fora da tabela |
 | `executed_at` | TIMESTAMP | — | Default `NOW()` |
 | `cached` | BOOLEAN | — | Default `false`. Indica se o resultado veio do cache (F7) |
+| `error_code` | VARCHAR(50) | — | Código estável do erro (F14): `ANALYSIS_NOT_FOUND`, `INVALID_PARAMETERS`, `INVALID_ANALYSIS_CONFIG`, `DATA_SOURCE_UNAVAILABLE`, `QUERY_TIMEOUT`, `QUERY_FAILED`, `INTERNAL_ERROR` (ver ARQUITETURA.md §3.4.1). `NULL` quando não houve erro e em linhas anteriores à F14 |
+
+**Bancos já criados (pré-F14):** sem migration (decisão do projeto) — executar uma vez, direto no banco:
+```sql
+ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);
+```
+**Atenção:** sem essa coluna o `INSERT` do `ExecutionRepository` falha, e o `AuditService` só loga o erro (não derruba a resposta) — o histórico deixaria de ser gravado.
 
 **Relacionamentos:** N:1 com `analyses`, e, desde F12, opcionalmente N:1 com `users`.
 

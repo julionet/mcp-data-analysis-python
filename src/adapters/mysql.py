@@ -6,6 +6,11 @@ import aiomysql
 from adapters.base import DatabaseAdapter
 from config import settings
 
+_ER_QUERY_TIMEOUT = 3024
+# 2003 não conecta, 2006 servidor sumiu, 2013 conexão perdida na query, 2055 idem (lost connection),
+# 1040 too many connections, 1053 shutdown em andamento
+_TRANSIENT_ERROR_CODES = {2003, 2006, 2013, 2055, 1040, 1053}
+
 
 class MySQLAdapter(DatabaseAdapter):
     async def connect(self) -> None:
@@ -59,6 +64,26 @@ class MySQLAdapter(DatabaseAdapter):
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _error_code(exc: Exception) -> int | None:
+        """Código numérico do MySQL (args[0] de um OperationalError), ou None."""
+        if isinstance(exc, aiomysql.OperationalError) and exc.args and isinstance(exc.args[0], int):
+            return exc.args[0]
+        return None
+
+    def is_timeout_error(self, exc: Exception) -> bool:
+        # 3024 = ER_QUERY_TIMEOUT (max_execution_time do init_command estourou)
+        return self._error_code(exc) == _ER_QUERY_TIMEOUT
+
+    def is_transient_error(self, exc: Exception) -> bool:
+        if isinstance(exc, ConnectionError):
+            return True
+        code = self._error_code(exc)
+        if code not in _TRANSIENT_ERROR_CODES:
+            return False
+        # 2003 também cobre o estouro do connect_timeout ("timed out") — não repetir (decisão 8)
+        return "timed out" not in str(exc).lower()
 
     def translate_params(self, sql: str, param_names: list[str]) -> str:
         """Traduz placeholders nomeados (:param) para MySQL (%(param)s).

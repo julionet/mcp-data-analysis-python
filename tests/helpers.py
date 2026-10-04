@@ -11,10 +11,15 @@ def make_fake_adapter() -> AsyncMock:
     """AsyncMock de DatabaseAdapter com translate_params síncrono e real (PostgreSQL).
 
     `translate_params` é um método síncrono no adapter; num AsyncMock puro ele
-    viraria corrotina e o SQL "traduzido" seria um objeto coroutine.
+    viraria corrotina e o SQL "traduzido" seria um objeto coroutine. O mesmo vale
+    para `is_timeout_error`/`is_transient_error` (F14): como corrotinas seriam sempre
+    truthy — por padrão o fake não classifica nenhum erro (False), e cada teste
+    sobrescreve o que precisa.
     """
     adapter = AsyncMock()
     adapter.translate_params = MagicMock(side_effect=PostgreSQLAdapter({}).translate_params)
+    adapter.is_timeout_error = MagicMock(return_value=False)
+    adapter.is_transient_error = MagicMock(return_value=False)
     return adapter
 
 

@@ -34,20 +34,38 @@ from repositories.analysis_repo import Analysis, AnalysisRepository
 from repositories.data_source_repo import DataSource, DataSourceRepository
 from schemas.analysis_parameters import to_pydantic_model, validate_schema
 from schemas.sql_validation import validate_select_only
+from config import settings
 from schemas.exceptions import (
+    INTERNAL_ERROR_CODE,
     AnalysisNotFoundError,
     DataSourceConnectionError,
     InvalidAnalysisSchemaError,
     InvalidCacheFrequencyError,
     InvalidParametersError,
+    QueryExecutionError,
+    QueryTimeoutError,
     VolumeExceededError,
+    error_info,
+    error_response,
 )
 from security.crypto import decrypt_password
 from services.audit_service import AuditService
 from services.cache_service import CacheService
+from services.retry import retry_async
 from services.volume_guard_service import VolumeGuardService
 
 logger = logging.getLogger(__name__)
+
+# Erros de domínio: a mensagem (str(exc)) já é segura e acionável para o cliente.
+_DOMAIN_ERRORS = (
+    AnalysisNotFoundError,
+    InvalidAnalysisSchemaError,
+    InvalidParametersError,
+    DataSourceConnectionError,  # inclui QueryTimeoutError e QueryExecutionError
+    InvalidCacheFrequencyError,
+)
+
+
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -84,25 +102,17 @@ class AnalysisService:
           {"status": "success", "data": [...], "cached": bool}
           {"status": "success", "data": [...], "aviso": "...", "cached": bool}
           {"status": "volume_exceeded", "estimativa": {...}, "limite": {...}, "mensagem": "...", "cached": false}
-          {"status": "error", "mensagem": "...", "cached": false}
+          {"status": "error", "error_code": "...", "retryable": bool, "mensagem": "...", "cached": false}
+        F14: o erro ganha `error_code` + `retryable` (tabela em F14 §4.2); success e
+        volume_exceeded não mudam.
         """
         try:
             return await self._execute(analysis_id, params, confirmar_volume_alto, user_id)
-        except (
-            AnalysisNotFoundError,
-            InvalidAnalysisSchemaError,
-            InvalidParametersError,
-            DataSourceConnectionError,
-            InvalidCacheFrequencyError,
-        ) as exc:
-            return {"status": "error", "mensagem": str(exc), "cached": False}
+        except _DOMAIN_ERRORS as exc:
+            return error_response(str(exc), *error_info(exc))
         except Exception:
             logger.exception("Erro inesperado ao executar a análise '%s'", analysis_id)
-            return {
-                "status": "error",
-                "mensagem": "Erro interno ao executar a análise.",
-                "cached": False,
-            }
+            return error_response("Erro interno ao executar a análise.", INTERNAL_ERROR_CODE, False)
 
     async def _execute(
         self,
@@ -115,6 +125,8 @@ class AnalysisService:
         if analysis is None:
             raise AnalysisNotFoundError(analysis_id)
 
+        exec_time_ms = {"value": 0}  # fora do try: os `except` abaixo também o gravam no histórico
+
         try:
             validate_schema(analysis.parameters)
 
@@ -126,13 +138,13 @@ class AnalysisService:
 
             ttl_seconds = CacheService.resolve_ttl(analysis.cache_frequency)
 
-            exec_time_ms = {"value": 0}
-
             async def executor() -> dict:
                 start = time.perf_counter()
-                result = await self._run_query(analysis, validated_params, confirmar_volume_alto)
-                exec_time_ms["value"] = int((time.perf_counter() - start) * 1000)
-                return result
+                try:
+                    return await self._run_query(analysis, validated_params, confirmar_volume_alto)
+                finally:
+                    # também em erro/timeout: a duração real vai para o execution_history
+                    exec_time_ms["value"] = int((time.perf_counter() - start) * 1000)
 
             if ttl_seconds is None:  # cache_frequency == "none" — pula o cache
                 logger.info("Cache BYPASS (cache_frequency='none') para a análise '%s'", analysis.name)
@@ -153,11 +165,12 @@ class AnalysisService:
             await self.audit_service.log_execution(
                 analysis_id=analysis.id,
                 parameters=params,
-                status="error",
-                execution_time_ms=0,
+                status="timeout" if isinstance(exc, QueryTimeoutError) else "error",
+                execution_time_ms=exec_time_ms["value"],
                 cached=False,
                 error_message=str(exc),
                 user_id=user_id,
+                error_code=error_info(exc)[0],
             )
             raise
         except Exception:
@@ -165,10 +178,11 @@ class AnalysisService:
                 analysis_id=analysis.id,
                 parameters=params,
                 status="error",
-                execution_time_ms=0,
+                execution_time_ms=exec_time_ms["value"],
                 cached=False,
                 error_message="Erro interno ao executar a análise.",
                 user_id=user_id,
+                error_code=INTERNAL_ERROR_CODE,
             )
             raise
 
@@ -208,7 +222,7 @@ class AnalysisService:
         validate_select_only(step.definition["sql"])
 
         try:
-            adapter = await self._get_adapter(data_source)
+            adapter = await self._get_adapter(data_source)  # connect() já com retry (F14)
         except Exception as exc:
             logger.exception(
                 "Falha ao conectar ao data source '%s'", data_source.name
@@ -226,19 +240,18 @@ class AnalysisService:
 
         try:
             if not confirmar_volume_alto:
-                await self.volume_guard.check_row_count(adapter, count_sql, ordered_values)
-            dataset = await adapter.execute_query(translated_sql, ordered_values)
+                await self._with_retry(
+                    adapter,
+                    lambda: self.volume_guard.check_row_count(adapter, count_sql, ordered_values),
+                    analysis.name,
+                )
+            dataset = await self._with_retry(
+                adapter, lambda: adapter.execute_query(translated_sql, ordered_values), analysis.name
+            )
         except VolumeExceededError as exc:
             return self.volume_guard.build_refinement_response(exc)
         except Exception as exc:
-            logger.exception(
-                "Falha ao executar a análise '%s' no data source '%s'",
-                analysis.name,
-                data_source.name,
-            )
-            raise DataSourceConnectionError(
-                f"Não foi possível executar a análise no data source '{data_source.name}'"
-            ) from exc
+            raise self._classify_query_error(adapter, exc, analysis, data_source) from exc
 
         if not confirmar_volume_alto:
             try:
@@ -252,6 +265,53 @@ class AnalysisService:
             # o dataset completo, incluindo aviso"
             result["aviso"] = "resultado grande, enviado por confirmação explícita"
         return result
+
+    @staticmethod
+    def _with_retry(adapter: DatabaseAdapter, fn, label: str):
+        """Retry (F14 §4.3) só de falha RÁPIDA de conexão, segundo o próprio adapter.
+        Timeout, erro de SQL e VolumeExceededError não são transitórios e sobem de imediato.
+        Seguro porque a query é sempre um SELECT (validate_select_only)."""
+        return retry_async(
+            fn,
+            attempts=settings.query_retry_max_attempts,
+            base_ms=settings.query_retry_backoff_base_ms,
+            # a recusa do Volume Guard nunca é repetida, qualquer que seja o classificador do adapter
+            is_retryable=lambda exc: (
+                not isinstance(exc, VolumeExceededError) and adapter.is_transient_error(exc)
+            ),
+            label=label,
+        )
+
+    @staticmethod
+    def _classify_query_error(
+        adapter: DatabaseAdapter, exc: Exception, analysis: Analysis, data_source: DataSource
+    ) -> DataSourceConnectionError:
+        """Converte a exceção crua do driver numa exceção de domínio (F14 §4.2); a mensagem
+        ao cliente nunca carrega host, credencial nem stack trace — o detalhe vai ao log."""
+        if adapter.is_timeout_error(exc):
+            logger.warning(
+                "Timeout (%ss) ao executar a análise '%s' no data source '%s'",
+                settings.query_timeout_seconds,
+                analysis.name,
+                data_source.name,
+            )
+            return QueryTimeoutError(
+                f"A consulta excedeu o tempo limite de {settings.query_timeout_seconds}s. "
+                "Refine o período ou adicione filtros."
+            )
+        logger.error(
+            "Falha ao executar a análise '%s' no data source '%s'",
+            analysis.name,
+            data_source.name,
+            exc_info=exc,
+        )
+        if adapter.is_transient_error(exc):  # chegou aqui = tentativas esgotadas
+            return DataSourceConnectionError(
+                f"Não foi possível conectar ao data source '{data_source.name}'"
+            )
+        return QueryExecutionError(
+            f"Não foi possível executar a análise no data source '{data_source.name}'"
+        )
 
     async def get_allowed_analyses(self, user_id: UUID) -> list[Analysis]:
         """F12: analyses que o usuário pode ver/executar (perfis ativos × analyses
@@ -282,7 +342,7 @@ class AnalysisService:
                 "password": decrypt_password(data_source.connection_config["password"]),
             }
             adapter = AdapterFactory.create_adapter(data_source.type, adapter_config)
-            await adapter.connect()
+            await self._with_retry(adapter, adapter.connect, data_source.name)  # F14
             self._adapters[data_source.id] = adapter
             return adapter
 

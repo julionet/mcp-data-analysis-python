@@ -36,6 +36,29 @@ class TestAccessTokenExpirationSettings:
             Settings(access_token_expiration_days=100, access_token_max_expiration_days=30)
 
 
+class TestQueryRetrySettings:
+    """F14 §7 — QUERY_RETRY_MAX_ATTEMPTS / QUERY_RETRY_BACKOFF_BASE_MS."""
+
+    def test_defaults(self):
+        s = Settings()
+        assert s.query_retry_max_attempts == 3
+        assert s.query_retry_backoff_base_ms == 200
+
+    def test_attempts_below_one_raises(self):
+        with pytest.raises(ValueError, match="QUERY_RETRY_MAX_ATTEMPTS"):
+            Settings(query_retry_max_attempts=0)
+
+    def test_one_attempt_means_no_retry_and_is_valid(self):
+        assert Settings(query_retry_max_attempts=1).query_retry_max_attempts == 1
+
+    def test_negative_backoff_raises(self):
+        with pytest.raises(ValueError, match="QUERY_RETRY_BACKOFF_BASE_MS"):
+            Settings(query_retry_backoff_base_ms=-1)
+
+    def test_zero_backoff_is_valid(self):
+        assert Settings(query_retry_backoff_base_ms=0).query_retry_backoff_base_ms == 0
+
+
 class TestTlsEnabledSetting:
     """TLS_ENABLED — HTTP puro só em desenvolvimento local (run_https.py)."""
 

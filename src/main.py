@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 # console se basicConfig() já tiver rodado quando esse import acontecer.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from database.connection import check_postgres, connect_config_db, disconnect_config_db
@@ -43,6 +43,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """F14: 500 JSON genérico para qualquer exceção que escape (hoje /auth/* e /health; os
+    handlers do /mcp já são protegidos em tools.py e pelo SDK). Sem stack trace nem str(exc) no
+    corpo — o detalhe fica no log do servidor (o Starlette ainda propaga a exceção ao uvicorn)."""
+    return JSONResponse(
+        {"error": "internal_error", "message": "Erro interno do servidor."}, status_code=500
+    )
+
+
 configure_mcp(app)
 app.include_router(auth_router)  # POST /auth/token, POST /auth/revoke — fora do /mcp, sem Bearer
 

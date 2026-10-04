@@ -27,7 +27,7 @@ Servir resultados repetidos sem tocar o BD, com TTL por análise (`cache_frequen
 
 ## 3. Contexto
 **Depende de:** F4 (Analysis Execution Engine), F3 (Controle de Volume, cujos limites são reutilizados)
-**É dependência de:** F8 (Log de Execução, grava a coluna `execution_history.cached`), F9/F10 (versionamento, ver nota em 4.2), F16 (Performance Optimization)
+**É dependência de:** F8 (Log de Execução, grava a coluna `execution_history.cached`), F9/F10 (versionamento, ver nota em 4.2), F15 (Performance Optimization — renumerado de F16→F15 após a remoção de versionamento/rollback e a inclusão de F12/F13)
 
 **Decisões já tomadas (conversa de definição do F7):**
 - O cache fica **dentro de `AnalysisService.execute()`**, não em `mcp_transport/tools.py`. `execute()` já carrega a análise (id, `updated_at`, `cache_frequency`) e atende qualquer chamador (`call_tool` hoje, Celery no futuro). O diagrama de ARQUITETURA.md §3.2, que desenha o cache no `call_tool`, deve ser ajustado na próxima revisão do documento.

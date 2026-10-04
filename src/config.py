@@ -14,6 +14,8 @@ F7: CACHE_BACKEND, CACHE_MAX_ENTRIES, CACHE_MAX_SIZE_MB — ver F7_CACHE_SERVICE
 F12: ACCESS_TOKEN_EXPIRATION_DAYS / ACCESS_TOKEN_MAX_EXPIRATION_DAYS — validade
     padrão e máxima dos tokens emitidos por POST /auth/token. Falha no startup se
     algum for < 1 ou se EXPIRATION > MAX (senão a emissão com o padrão já daria 400).
+F14: QUERY_RETRY_MAX_ATTEMPTS / QUERY_RETRY_BACKOFF_BASE_MS — retry só de falha rápida
+    de conexão ao data source (F14_ERROR_HANDLING_VALIDATION.md §4.3, §7).
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,6 +43,8 @@ class Settings(BaseSettings):
     default_max_result_rows: int = 500
     default_max_result_size_kb: int = 150
     query_timeout_seconds: int = 30
+    query_retry_max_attempts: int = 3  # total de tentativas (1 = sem retry) — F14
+    query_retry_backoff_base_ms: int = 200  # espera = base * 2^(tentativa-1) — F14
 
     fernet_key: str
 
@@ -57,6 +61,10 @@ class Settings(BaseSettings):
                 f"CACHE_BACKEND '{self.cache_backend}' inválido — "
                 f"valores aceitos: {', '.join(_VALID_CACHE_BACKENDS)}"
             )
+        if self.query_retry_max_attempts < 1:
+            raise ValueError("QUERY_RETRY_MAX_ATTEMPTS deve ser >= 1 (1 = sem retry)")
+        if self.query_retry_backoff_base_ms < 0:
+            raise ValueError("QUERY_RETRY_BACKOFF_BASE_MS deve ser >= 0")
         if self.access_token_expiration_days < 1 or self.access_token_max_expiration_days < 1:
             raise ValueError(
                 "ACCESS_TOKEN_EXPIRATION_DAYS e ACCESS_TOKEN_MAX_EXPIRATION_DAYS devem ser >= 1"

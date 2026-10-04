@@ -36,6 +36,23 @@ class DatabaseAdapter(ABC):
     async def test_connection(self) -> bool:
         """Usado pelo /health e por validações de data_source."""
 
+    def is_timeout_error(self, exc: Exception) -> bool:
+        """F14: True se `exc` é o estouro do timeout de QUERY (QUERY_TIMEOUT_SECONDS) deste driver.
+
+        Não-abstrato: um adapter sem override nunca classifica timeout (default False).
+        """
+        return False
+
+    def is_transient_error(self, exc: Exception) -> bool:
+        """F14: True se `exc` é uma falha de CONEXÃO rápida e repetível (recusada, resetada,
+        perdida, limite de conexões) — a única classe que recebe retry automático.
+
+        Timeouts (de query OU de conexão) ficam de fora: repetir uma espera de 30 s três
+        vezes passaria do limite de tempo (F14 decisão 8). Credencial inválida e erro de
+        SQL também não são transitórios. Default False.
+        """
+        return False
+
     @abstractmethod
     def translate_params(self, sql: str, param_names: list[str]) -> str:
         """Traduz placeholders nomeados (:param) para o formato posicional do banco.

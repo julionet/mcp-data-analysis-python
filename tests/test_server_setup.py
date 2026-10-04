@@ -190,7 +190,10 @@ class TestMcpAuthentication:
             )
 
         payload = json.loads(result["result"]["content"][0]["text"])
-        assert payload == {"status": "error", "mensagem": "Acesso não autorizado a esta análise."}
+        # F14 (decisão 6): acesso negado é indistinguível de "análise não encontrada"
+        assert payload["status"] == "error"
+        assert payload["error_code"] == "ANALYSIS_NOT_FOUND"
+        assert payload["mensagem"] == "Análise 'custos' não encontrada ou inativa."
 
     def test_contextvar_isolated_across_users_in_same_client(self, client: TestClient):
         """§4.2 item 4b — regressão contra stateless=False: `initialize` como A e

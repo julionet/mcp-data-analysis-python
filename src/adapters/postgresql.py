@@ -42,6 +42,23 @@ class PostgreSQLAdapter(DatabaseAdapter):
         except Exception:
             return False
 
+    def is_timeout_error(self, exc: Exception) -> bool:
+        # command_timeout do asyncpg estoura como TimeoutError; 57014 = cancelado pelo servidor
+        return isinstance(exc, (TimeoutError, asyncpg.QueryCanceledError))
+
+    def is_transient_error(self, exc: Exception) -> bool:
+        return isinstance(
+            exc,
+            (
+                ConnectionError,  # recusada/resetada pelo SO
+                asyncpg.PostgresConnectionError,  # 08xxx (conexão perdida/inexistente)
+                asyncpg.CannotConnectNowError,  # 57P03 (servidor subindo)
+                asyncpg.TooManyConnectionsError,  # 53300
+                asyncpg.AdminShutdownError,  # 57P01
+                asyncpg.CrashShutdownError,  # 57P02
+            ),
+        )
+
     def translate_params(self, sql: str, param_names: list[str]) -> str:
         """Traduz placeholders nomeados (:param) para PostgreSQL ($1, $2, ...)."""
         translated = sql

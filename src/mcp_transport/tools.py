@@ -13,7 +13,8 @@ permissão a cada chamada — nunca confia no que list_tools() já mostrou.
 import logging
 import re
 
-from mcp.types import Tool
+from mcp.shared.exceptions import McpError
+from mcp.types import INTERNAL_ERROR, ErrorData, Tool
 
 from config import settings
 from database.connection import config_db_adapter
@@ -25,6 +26,12 @@ from repositories.profile_repo import ProfileRepository
 from repositories.user_repo import UserRepository
 from schemas.analysis_parameters import to_json_schema
 from schemas.auth import AuthenticatedUser
+from schemas.exceptions import (
+    INTERNAL_ERROR_CODE,
+    AnalysisNotFoundError,
+    InvalidParametersError,
+    error_response,
+)
 from services.analysis_service import AnalysisService
 from services.audit_service import AuditService
 from services.auth_service import AuthService
@@ -35,6 +42,8 @@ from services.volume_guard_service import VolumeGuardService
 logger = logging.getLogger(__name__)
 
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+
+_LIST_TOOLS_ERROR_MESSAGE = "Erro interno ao listar as análises."
 
 _CONFIRMAR_VOLUME_ALTO_PROPERTY = {
     "type": "boolean",
@@ -96,9 +105,18 @@ async def list_tools(current_user: AuthenticatedUser) -> list[Tool]:
     """Gera dinamicamente uma Tool MCP por análise ativa, com nome válido e
     liberada ao usuário (perfil ativo → análise ativa — F12).
     Análises com nome fora do padrão de identificador MCP são ignoradas
-    (logadas como warning), nunca viram uma tool inválida."""
+    (logadas como warning), nunca viram uma tool inválida.
+
+    F14: falha do Config DB vira McpError com mensagem genérica — sem isso o SDK
+    devolveria `str(exc)` (host, SQL) ao cliente num erro JSON-RPC com code=0."""
+    try:
+        allowed = await analysis_service.get_allowed_analyses(current_user.id)
+    except Exception as exc:
+        logger.exception("Falha ao listar as análises do usuário user_id=%s", current_user.id)
+        raise McpError(ErrorData(code=INTERNAL_ERROR, message=_LIST_TOOLS_ERROR_MESSAGE)) from exc
+
     tools: list[Tool] = []
-    for analysis in await analysis_service.get_allowed_analyses(current_user.id):
+    for analysis in allowed:
         if not _NAME_PATTERN.match(analysis.name):
             logger.warning(
                 "Análise '%s' ignorada em list_tools(): nome fora do padrão %s",
@@ -113,15 +131,26 @@ async def list_tools(current_user: AuthenticatedUser) -> list[Tool]:
 async def call_tool(name: str, arguments: dict, current_user: AuthenticatedUser) -> dict:
     """Único ponto de entrada de execução de análises via MCP. Resolve a
     análise pelo nome recebido do protocolo e repassa o resultado (já
-    estruturado por AnalysisService.execute()) ao cliente MCP. Nunca propaga
-    exceção — analysis_service.execute() já garante essa contrato."""
+    estruturado por AnalysisService.execute()) ao cliente MCP.
+
+    F14: nunca propaga exceção — nem a das consultas feitas aqui (Config DB), que ficam
+    fora do execute(). O SDK converteria a exceção em `isError` com `str(exc)` (vazaria
+    host/SQL); aqui o cliente recebe sempre o dict estruturado com mensagem genérica."""
+    try:
+        return await _call_tool(name, arguments, current_user)
+    except Exception:
+        logger.exception("Erro inesperado em call_tool('%s') user_id=%s", name, current_user.id)
+        return error_response("Erro interno ao executar a análise.", INTERNAL_ERROR_CODE, False)
+
+
+async def _call_tool(name: str, arguments: dict, current_user: AuthenticatedUser) -> dict:
     analysis_name = name.removeprefix("execute_")
+    not_found = error_response(
+        f"Análise '{analysis_name}' não encontrada ou inativa.", AnalysisNotFoundError.error_code, False
+    )
     analysis = await analysis_repo.get_by_name(analysis_name)
     if analysis is None or not analysis.is_active:
-        return {
-            "status": "error",
-            "mensagem": f"Análise '{analysis_name}' não encontrada ou inativa.",
-        }
+        return not_found
 
     # F12: revalida a permissão a cada chamada, ANTES de qualquer cache/execução —
     # a tool pode ter aparecido num list_tools() anterior e o perfil mudado desde então.
@@ -132,9 +161,23 @@ async def call_tool(name: str, arguments: dict, current_user: AuthenticatedUser)
             analysis.id,
             analysis.name,
         )
-        return {"status": "error", "mensagem": "Acesso não autorizado a esta análise."}
+        # F14 (decisão 6): mesma resposta de "não existe" — quem não tem acesso não descobre
+        # que a análise existe. A diferença fica só no log acima.
+        return not_found
 
+    # Validação só depois da permissão: o erro de argumento nunca revela uma análise vedada.
+    if not isinstance(arguments, dict):
+        return _invalid_parameters("Os argumentos da chamada devem ser um objeto JSON.")
+    arguments = dict(arguments)  # não altera o dict do chamador
     confirmar_volume_alto = arguments.pop("confirmar_volume_alto", False)
+    if not isinstance(confirmar_volume_alto, bool):
+        # "false" (string) seria truthy e contornaria o Volume Guard
+        return _invalid_parameters("O parâmetro 'confirmar_volume_alto' deve ser booleano (true ou false).")
+
     return await analysis_service.execute(
         analysis.id, arguments, confirmar_volume_alto, user_id=current_user.id
     )
+
+
+def _invalid_parameters(message: str) -> dict:
+    return error_response(message, InvalidParametersError.error_code, False)

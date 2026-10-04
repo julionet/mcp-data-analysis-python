@@ -144,6 +144,17 @@ class TestSQLServerAdapter:
         assert adapter._pool is create_pool.return_value
 
     @pytest.mark.asyncio
+    async def test_connect_sets_query_timeout_on_each_new_connection(self):
+        # F14: `timeout=` do pool é só login timeout; o de query vem do hook after_created
+        with patch("adapters.sqlserver.aioodbc.create_pool", new=AsyncMock()) as create_pool:
+            await SQLServerAdapter(CONFIG).connect()
+
+        raw_conn = MagicMock()
+        await create_pool.await_args.kwargs["after_created"](raw_conn)
+
+        assert raw_conn.timeout == settings.query_timeout_seconds
+
+    @pytest.mark.asyncio
     async def test_connect_invalid_sslmode_fails_before_opening_pool(self):
         with patch("adapters.sqlserver.aioodbc.create_pool", new=AsyncMock()) as create_pool:
             with pytest.raises(ValueError):

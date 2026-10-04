@@ -30,7 +30,14 @@ class TestMcpToolsAuth:
         ):
             result = await tools.call_tool("execute_custos_financeiros", {}, user)
 
-        assert result == {"status": "error", "mensagem": "Acesso não autorizado a esta análise."}
+        # F14 (decisão 6): acesso negado é indistinguível de "análise não encontrada"
+        assert result == {
+            "status": "error",
+            "error_code": "ANALYSIS_NOT_FOUND",
+            "retryable": False,
+            "mensagem": "Análise 'custos_financeiros' não encontrada ou inativa.",
+            "cached": False,
+        }
         mock_execute.assert_not_awaited()
         mock_cache.assert_not_awaited()
 

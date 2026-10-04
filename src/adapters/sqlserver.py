@@ -8,6 +8,7 @@ pyodbc só aceita parâmetros posicionais (F11 §3, Opção 1A).
 import re
 
 import aioodbc
+import pyodbc
 
 from adapters.base import DatabaseAdapter
 from config import settings
@@ -29,6 +30,16 @@ _RESTRICTED_SQL_ERRORS = ("(1033)", "(8155)", "(8156)")
 _ORDER_BY_TEXT = "ORDER BY clause is invalid in views, inline functions, derived tables, subqueries"
 
 _PLACEHOLDER_RE = re.compile(r"(?<![@\w])@(\w+)")
+
+
+async def _apply_query_timeout(raw_conn: pyodbc.Connection) -> None:
+    """Hook `after_created` do aioodbc: roda em cada conexão nova do pool.
+
+    O `timeout=` de create_pool/pyodbc.connect é só o LOGIN timeout; o limite de cada
+    statement é o atributo `timeout` da conexão pyodbc (SQL_ATTR_QUERY_TIMEOUT). Sem isto
+    uma query lenta nunca era interrompida (F14 §10, correção da premissa da F11).
+    """
+    raw_conn.timeout = settings.query_timeout_seconds
 
 
 class SQLServerAdapter(DatabaseAdapter):
@@ -63,7 +74,8 @@ class SQLServerAdapter(DatabaseAdapter):
             minsize=1,
             maxsize=10,
             autocommit=True,
-            timeout=settings.query_timeout_seconds,
+            timeout=settings.query_timeout_seconds,  # LOGIN timeout (SQL_ATTR_LOGIN_TIMEOUT)
+            after_created=_apply_query_timeout,  # timeout de QUERY — F14, ver abaixo
         )
 
     async def disconnect(self) -> None:
@@ -136,6 +148,26 @@ class SQLServerAdapter(DatabaseAdapter):
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _sqlstate_and_message(exc: Exception) -> tuple[str | None, str]:
+        """(SQLSTATE, mensagem) de um pyodbc.Error — args = (sqlstate, mensagem)."""
+        if isinstance(exc, pyodbc.Error) and len(exc.args) >= 2:
+            return str(exc.args[0]), str(exc.args[1])
+        return None, ""
+
+    def is_timeout_error(self, exc: Exception) -> bool:
+        # HYT00 também é "Login timeout expired" (conexão) — só "Query timeout expired" conta aqui
+        sqlstate, message = self._sqlstate_and_message(exc)
+        return sqlstate == "HYT00" and "query" in message.lower()
+
+    def is_transient_error(self, exc: Exception) -> bool:
+        if isinstance(exc, ConnectionError):
+            return True
+        sqlstate, _ = self._sqlstate_and_message(exc)
+        # 08xxx = connection exception (08S01 link failure); 01002 = disconnect error.
+        # HYT00/HYT01 (timeouts de login/conexão) ficam de fora — decisão 8.
+        return sqlstate is not None and (sqlstate.startswith("08") or sqlstate == "01002")
 
     def translate_params(self, sql: str, param_names: list[str]) -> str:
         """Traduz placeholders nomeados (:param) para T-SQL (@param).

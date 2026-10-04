@@ -39,7 +39,7 @@ Ter um `OracleAdapter` funcional — conecta por DSN, executa queries parametriz
 - F11 (SQL Server Adapter) — cria `tests/test_adapter_contract.py`, ao qual o Oracle é acrescentado
 
 **É dependência de:**
-- F16 (Unit Tests) — cobertura dos adapters
+- F17 (Unit Tests) — cobertura dos adapters (renumerado de F16→F17 na revisão v1.12 do roadmap)
 
 **Decisões confirmadas (sessão de 2026-09-28):**
 - Driver: `python-oracledb` em **modo thin** (async nativo, Python puro, sem Oracle Client). Modo thick fora do escopo

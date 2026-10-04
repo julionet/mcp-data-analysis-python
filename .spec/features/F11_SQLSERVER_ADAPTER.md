@@ -37,7 +37,7 @@ Ter um `SQLServerAdapter` funcional — conecta via ODBC, executa queries parame
 **É dependência de:**
 - F13 (Docker Setup) — instalação do driver ODBC no `Dockerfile` (ver §7.2; renumerado de F12→F13 na revisão v1.12 de FEATURES_ROADMAP.md, que inseriu F12 "Autenticação")
 - F9 (Oracle Adapter) — reutiliza `tests/test_adapter_contract.py`, criado aqui
-- F16 (Unit Tests) — cobertura dos adapters
+- F17 (Unit Tests) — cobertura dos adapters (renumerado de F16→F17 na revisão v1.12 do roadmap)
 
 **Decisões confirmadas (sessão de 2026-09-28):**
 - Driver: `aioodbc` + `pyodbc`. `type` do data_source: `sqlserver` (ARQUITETURA.md §2.2)
@@ -495,13 +495,13 @@ Novo adapter = herdar `DatabaseAdapter`, implementar `connect`, `disconnect`, `e
 
 | # | Observação | Situação |
 |---|---|---|
-| 1 | `PostgreSQLAdapter` e `MySQLAdapter` **ignoram** `sslmode` do `connection_config`; só o SQL Server passa a respeitá-lo. O mesmo campo tem efeito diferente por banco. | Pendência — alinhar em feature futura (ex.: F13 Error Handling & Validation ou ajuste dedicado) |
-| 2 | `MySQLAdapter` só configura `connect_timeout`; **não há timeout de query** (PG usa `command_timeout`, SQL Server usa o `timeout` do pyodbc). RNF: máx. 30s local / 60s remoto. | Pendência — corrigir no MySQL em feature futura (ex.: F14 Performance) |
+| 1 | `PostgreSQLAdapter` e `MySQLAdapter` **ignoram** `sslmode` do `connection_config`; só o SQL Server passa a respeitá-lo. O mesmo campo tem efeito diferente por banco. | Pendência — alinhar em feature futura. Avaliado na F14 (Error Handling & Validation) e deixado **fora** do escopo dela (ver `F14_ERROR_HANDLING_VALIDATION.md` §10): ajuste dedicado ou F15 |
+| 2 | `MySQLAdapter` só configura `connect_timeout`; **não há timeout de query** (PG usa `command_timeout`, SQL Server usa o `timeout` do pyodbc). RNF: máx. 30s local / 60s remoto. | ✅ Resolvida (2026-10-03, conferido em `adapters/mysql.py`): `init_command` com `SET SESSION max_execution_time` (exige MySQL >= 5.7.8) |
 | 3 | `PostgreSQLAdapter` depende de `params` chegar na ordem de `param_names` (`.values()`); MySQL e SQL Server usam o nome. | Registrado no teste de contrato (§6.1) |
 | 4 | Mensagem de erro de query é genérica para o cliente MCP (`DataSourceConnectionError`); detalhe só no log. | Comportamento existente, mantido |
 | 5 | `translate_params` dos três adapters usa `:nome\b`, que pode casar `::nome` (cast PG, ex.: `x::text` com parâmetro chamado `text`) ou `:nome` dentro de literal. | Caso extremo existente, mantido |
 | 6 | `bytes` (VARBINARY) é serializado por `default=str` como `"b'...'"`. | Aceito em V1.0 |
-| 7 | `PostgreSQLAdapter` usa os defaults do asyncpg (`min_size=max_size=10`): 10 conexões abertas por data source PostgreSQL. | Pendência — revisar em feature futura (ex.: F14 Performance) |
+| 7 | `PostgreSQLAdapter` usa os defaults do asyncpg (`min_size=max_size=10`): 10 conexões abertas por data source PostgreSQL. | Pendência — revisar em feature futura (ex.: F15 Performance Optimization) |
 
 ---
 

@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.19 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-03 (atualizado 2026-10-03 — F13 implementada)
+**Versão:** 1.20 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-03 (atualizado 2026-10-03 — F14 implementada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.19 → v1.20):** F14 (Error Handling & Validation) implementada (2026-10-03). Erros ganham `error_code` + `retryable`; timeout de query vira status `timeout`; retry (3x, backoff exponencial) só de falha **rápida** de conexão; `call_tool()`/`list_tools()` nunca vazam exceção; acesso negado é indistinguível de "análise não encontrada"; `execution_history.error_code` (coluna nova — `ALTER TABLE` manual em bancos existentes). Descoberto na F14: o `timeout=` do SQL Server era só *login timeout* (corrigido). RNF4 ajustado em NEGOCIO.md. Ver `features/F14_ERROR_HANDLING_VALIDATION.md`.
 
 > **Nota de revisão (v1.18 → v1.19):** reorganização pós-F13 (2026-10-03). Código em `src/` (era `analysis_app/`); `tests/`, `Dockerfile`, `.dockerignore`, `.env.example`, `requirements*.txt`, `pytest.ini` e `certs/` na raiz; **um único `.env`** (host + compose; `Settings` com `extra="ignore"`); `mcp_prototype/` removido. **Postgres único por padrão:** os compose sobem só `app` + `postgres` (+ `nginx` no remote); **MySQL, SQL Server e Oracle são opcionais**, cada um em `docker/<banco>/docker-compose.<banco>.yml`, sem mudança de código (credenciais vêm de `data_sources.connection_config`). Spec F13 §10 decisões 10 e 11.
 
@@ -153,7 +155,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 |---|---------|-----------|--------|-----------|--------|
 | F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 3.5d | F5 | 🟩 Done (2026-09-30) |
 | F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | 🟩 Done (2026-10-03) |
-| F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | ⬜ Todo |
+| F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | 🟩 Done (2026-10-03) |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
@@ -222,6 +224,29 @@ Escopo transversal:
 
 Resolvido na spec F13: SQL Server/MySQL/Oracle opcionais; nginx + Certbot (profile opcional); Redis fora do V1.0;
 ODBC 18; seed do usuário admin no guia de deploy (F20).
+```
+
+**F14 em detalhe (Error Handling & Validation) — spec: `features/F14_ERROR_HANDLING_VALIDATION.md` (✅ implementada em 2026-10-03 — 480/480 testes; validação manual pendente, ver spec §6.2):**
+```
+Objetivo: erros com código estável para o LLM do cliente MCP, timeout distinto de
+erro de conexão, retry só do que é transitório e contrato "nunca propaga exceção"
+fechado — sem mudar success/volume_exceeded e sem isError do protocolo (contrato F5).
+
+Escopo:
+├─ Resposta de erro ganha error_code + retryable (ANALYSIS_NOT_FOUND — também para acesso negado, sem revelar que a análise existe,
+│  INVALID_PARAMETERS, INVALID_ANALYSIS_CONFIG, DATA_SOURCE_UNAVAILABLE,
+│  QUERY_TIMEOUT, QUERY_FAILED, INTERNAL_ERROR); tabela completa na spec §4.2
+├─ execution_history.status passa a receber 'timeout'; coluna nova error_code VARCHAR(50)
+│  (schema.sql; bancos existentes: ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);)
+├─ Retry (RNF4: 3x, backoff exponencial, QUERY_RETRY_* no .env) só em falha de
+│  conexão; nunca em erro de SQL/validação; classificação por adapter
+│  (is_timeout_error/is_transient_error), sem acoplar o service aos drivers
+├─ call_tool()/list_tools() protegidos contra queda do Config DB; handler global do
+│  FastAPI para /auth/* e /health (não cobre o /mcp, ver spec §4.4)
+└─ Validação estrita de confirmar_volume_alto (string "false" não pode virar bypass)
+
+Fora do escopo (pendências registradas): sslmode em PostgreSQL/MySQL (F11 #1) e
+translate_params com ::nome/literais (F11 #5). Pontos em aberto na spec §11.
 ```
 
 ---
@@ -536,4 +561,4 @@ A especificação técnica completa (código de middleware, schema SQL, fluxos) 
 ---
 
 **Documento de Roadmap Completo — Multi-Cliente, Com Autenticação por Token + Perfis (F12), Sem Versionamento de Análises.**
-**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3: F12 ✅ e F13 ✅ concluídas; próximas F14 (Error Handling) e demais da Sprint 3, depois Sprint 4 (Deploy).**
+**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3: F12 ✅, F13 ✅ e F14 ✅ concluídas; próximas F15 (Performance) e demais da Sprint 3, depois Sprint 4 (Deploy).**

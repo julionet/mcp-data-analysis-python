@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.24 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Versão:** 1.25 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
 **Data:** 2026-10-03
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.24 → v1.25):** F14 (Error Handling & Validation) implementada (2026-10-03). Nova §3.4.1 (contrato de erro: `error_code`/`retryable`, retry, status `timeout`); `execution_history` ganha `error_code` (§2.2 DDL; bancos existentes: `ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);`). Ver `features/F14_ERROR_HANDLING_VALIDATION.md`.
 
 > **Nota de revisão (v1.23 → v1.24):** F13 (Docker Setup) implementada e estrutura de pastas reorganizada (2026-10-03). Código em `src/` (era `analysis_app/`); `tests/`, `Dockerfile`, `.dockerignore`, `.env.example`, `requirements*.txt`, `pytest.ini` e `certs/` na raiz; **um único `.env`** (host + compose). §5.2 e §9.1 ajustadas (comandos rodam da raiz: `python src/run_https.py`); §9.2 ganha o estado implementado (`docker-compose.remote.yml`: nginx + certificado montado, Certbot como profile opcional). Os compose sobem só `app` + `postgres`; MySQL, SQL Server e Oracle são opcionais (`docker/<banco>/`). `mcp_prototype/` removido. Ver `features/F13_DOCKER_SETUP.md`.
 
@@ -341,14 +343,15 @@ CREATE TABLE execution_history (
     user_id UUID REFERENCES users(id),  -- nullable: quem executou (F12); NULL para execuções pré-F12; sem ON DELETE: impede apagar usuário com histórico
 
     parameters JSONB,
-    status VARCHAR(50),  -- success, failed, timeout
+    status VARCHAR(50),  -- success, volume_exceeded, error, timeout (F14)
     execution_time_ms INT,
     rows_affected INT,
     result_size_bytes INT,
     error_message TEXT,
     result_location VARCHAR(500),  -- path/uri do resultado
     executed_at TIMESTAMP DEFAULT NOW(),
-    cached BOOLEAN DEFAULT false
+    cached BOOLEAN DEFAULT false,
+    error_code VARCHAR(50)  -- F14: código estável do erro (ver §3.4.1); NULL se não houve erro/linhas pré-F14
 );
 
 -- Índices para performance
@@ -582,6 +585,43 @@ DEFAULT_MAX_RESULT_SIZE_KB=150
 
 Ambos os limites são globais; não há coluna nova em `analyses` para isso, e nenhuma
 migration de schema é necessária além da remoção de `custom_handlers` (§2.2).
+
+---
+
+### 3.4.1 Contrato de Erro (F14)
+
+O servidor **nunca propaga exceção** ao cliente MCP: todo retorno de `call_tool()` é um
+dict estruturado. Em erro, ele carrega um `error_code` estável e `retryable`:
+
+```json
+{ "status": "error", "error_code": "QUERY_TIMEOUT", "retryable": true,
+  "mensagem": "A consulta excedeu o tempo limite de 30s. Refine o período ou adicione filtros.",
+  "cached": false }
+```
+
+| `error_code` | Quando | `retryable` | `execution_history.status` |
+|---|---|---|---|
+| `ANALYSIS_NOT_FOUND` | Análise inexistente, inativa **ou sem permissão** (indistinguíveis: quem não tem acesso não descobre que ela existe) | false | — (só log) |
+| `INVALID_PARAMETERS` | Parâmetros não batem com `analyses.parameters`; `confirmar_volume_alto` não booleano; `arguments` não objeto | false | `error` |
+| `INVALID_ANALYSIS_CONFIG` | Erro de cadastro: schema de parâmetros, step ausente, SQL que não é SELECT, `cache_frequency` inválido | false | `error` |
+| `DATA_SOURCE_UNAVAILABLE` | Data source inativo ou conexão indisponível (após as tentativas) | true | `error` |
+| `QUERY_TIMEOUT` | A query excedeu `QUERY_TIMEOUT_SECONDS` | true (com filtro mais estreito) | `timeout` |
+| `QUERY_FAILED` | O banco rejeitou/falhou o SQL | false | `error` |
+| `INTERNAL_ERROR` | Qualquer outra exceção (inclui falha do Config DB em `call_tool()`) | false | `error` |
+
+`success` e `volume_exceeded` não têm `error_code`. O mesmo `error_code` é gravado em
+`execution_history.error_code` (só para `error`/`timeout`).
+
+**Retry (RNF4):** `QUERY_RETRY_MAX_ATTEMPTS` (padrão 3, total de tentativas) com backoff
+exponencial `QUERY_RETRY_BACKOFF_BASE_MS * 2^(n-1)` (200 ms, 400 ms), **só para falha rápida
+de conexão** (recusada, resetada, perdida, "too many connections"), no `connect()`, no
+`COUNT(*)` do Volume Guard e na query. Nunca para timeout (3 × 30 s estouraria o limite do §8.1),
+erro de SQL, validação nem `VolumeExceededError`. A classificação é de cada adapter
+(`is_timeout_error`/`is_transient_error`); um adapter novo sem override não ganha retry.
+
+**Falhas fora do `execute()`:** `call_tool()` captura tudo e devolve `INTERNAL_ERROR` com mensagem
+genérica; `list_tools()` levanta `McpError` (-32603) genérico. O SDK `mcp` 1.30 devolveria
+`str(exc)` ao cliente nos dois casos (host, SQL) — por isso a captura é nossa.
 
 ---
 
