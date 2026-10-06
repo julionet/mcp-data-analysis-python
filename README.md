@@ -242,3 +242,65 @@ docker compose -f docker-compose.local.yml exec -T postgres pg_dumpall -U postgr
 Isso inclui o Config DB (analysis_config) e o banco de análises (analysis_data). Para restaurar, com um volume novo e vazio:
 Get-Content backup.sql -Raw | docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres
 Se o backup.sql for restaurado num volume que já tem o analysis_config, haverá erros de objetos já existentes. Restaure só em volume vazio.
+
+## Criar instalação
+
+O docker-compose.dist.yml e o script scripts/build-dist.ps1 estão criados e funcionam. Rodei o script de ponta a ponta e ele gerou a pasta dist/ com o .tar de 235 MB. Eu não testei a instalação numa máquina de verdade, só confirmei o conteúdo do pacote.
+
+Um compose não gera .tar, ele só constrói e tagueia as imagens. O .tar vem do docker save, que o script 
+executa depois do build.
+                                                                                                        
+Como gerar o pacote
+                                                                                                        
+Na raiz do projeto, no PowerShell:
+powershell -ExecutionPolicy Bypass -File .\scripts\build-dist.ps1 -Version 1.0.0                        
+O -ExecutionPolicy Bypass evita o bloqueio de scripts do Windows. Opcionalmente use -PostgresImage
+postgres:16.6 para fixar a versão do Postgres.                                                          
+
+O que existe em dist/                                                                                   
+
+┌────────────────────────┬──────────────────────────────────────────────────────────────┐               
+│        Arquivo         │                           Para quê                           │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤               
+│ mcp-analysis-1.0.0.tar │ as duas imagens, app e postgres:16                           │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤               
+│ docker-compose.yml     │ cópia do docker-compose.dist.yml                             │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤               
+│ schema.sql             │ o Postgres cria o banco a partir dele na primeira subida     │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤               
+│ .env.example           │ já com APP_VERSION=1.0.0 e o comando para gerar a FERNET_KEY │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ certs/                 │ pasta vazia com um LEIA-ME.txt                               │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ INSTALL.md             │ passo a passo de instalação e de atualização                 │
+├────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ SHA256SUMS.txt         │ hash do .tar, para conferir a cópia                          │
+└────────────────────────┴──────────────────────────────────────────────────────────────┘
+
+Instalação no outro computador
+
+Copie a pasta dist/ inteira e, dentro dela:
+docker load -i mcp-analysis-1.0.0.tar
+cp .env.example .env        # preencher a senha do Postgres e a FERNET_KEY
+# colocar server.pem e server-key.pem em certs/
+docker compose up -d
+O INSTALL.md traz também como atualizar para uma nova versão.
+
+O que conferi
+
+- Conteúdo do .tar: leva as duas imagens, mcp-analysis:1.0.0 e postgres:16. O outro computador não precisa de internet.
+- Segredos: a imagem do app não leva .env nem certs/. Ela roda como usuário 10001, não root, e tem só src/ mais o requirements.txt.
+- Compose do pacote: o config resolve as duas imagens e o schema.sql ao lado do arquivo. O pull_policy: never impede o compose de tentar baixar mcp-analysis do Docker Hub.
+- Fora do git e do build: o dist/ já estava no .gitignore. Acrescentei ao .dockerignore, para a pasta não entrar no contexto de build e inflar os próximos builds.
+
+O que não foi testado
+
+- A subida no destino: docker load e docker compose up numa máquina limpa.
+- TLS: o certificado mkcert só é aceito onde a CA dele está instalada. Os clientes MCP exigem HTTPS confiável, então no outro computador instale essa CA ou use um certificado de verdade.
+- Arquitetura: a imagem saiu linux/amd64. Para Mac com chip Apple seria preciso o docker buildx com --platform.
+
+Manutenção
+
+O .env.example do pacote é gerado dentro do script. Se você acrescentar uma variável nova ao compose, lembre de incluí-la lá também. Deixei esse aviso no cabeçalho do script.
+
+Os arquivos novos estão fora do commit, como o resto da F14. Quer que eu faça os commits agora?

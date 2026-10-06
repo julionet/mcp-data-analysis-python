@@ -6,12 +6,16 @@
 .env.*
 !.env.example
 certs/
+secrets/
 
 # Ambiente e artefatos locais
 .venv/
 **/__pycache__/
 *.pyc
 .pytest_cache/
+
+# Saída do scripts/build-dist.ps1 (.tar de gigabytes) — nunca no contexto de build
+dist/
 
 # Fora do runtime
 .git/

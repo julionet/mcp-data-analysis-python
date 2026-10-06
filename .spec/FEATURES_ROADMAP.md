@@ -224,6 +224,11 @@ Escopo transversal:
 
 Resolvido na spec F13: SQL Server/MySQL/Oracle opcionais; nginx + Certbot (profile opcional); Redis fora do V1.0;
 ODBC 18; seed do usuário admin no guia de deploy (F20).
+Seed do admin (2026-10-04, pós-F14): src/database/seed_admin.sh roda sozinho na criação do banco (initdb.d, 02-seed-admin.sh)
+nos compose local e dist — perfil "admin" + usuário (login admin, senha padrão CONHECIDA Senh@123, bcrypt via pgcrypto) +
+vínculos, inclusive com todas as análises existentes; scripts/setup-admin.ps1 gera a FERNET_KEY no .env, sobe o compose,
+reexecuta o seed (idempotente) e emite o token por POST /auth/token (secrets/admin-token.txt). O compose remote NÃO recebe
+o seed (opt-in explícito; senha padrão conhecida não vai a um ambiente exposto por acidente).
 ```
 
 **F14 em detalhe (Error Handling & Validation) — spec: `features/F14_ERROR_HANDLING_VALIDATION.md` (✅ implementada em 2026-10-03 — 480/480 testes; validação manual pendente, ver spec §6.2):**

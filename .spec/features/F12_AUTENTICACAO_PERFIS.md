@@ -809,6 +809,8 @@ ACCESS_TOKEN_MAX_EXPIRATION_DAYS=365  # maior expire_days aceito em POST /auth/t
 Não aparece como uma tool nova: é uma camada de autenticação em frente a `list_tools()`/`call_tool()`. O efeito visível para o usuário é que a lista de tools passa a variar por token/usuário. A emissão e a revogação de token são endpoints HTTP comuns (`/auth/token`, `/auth/revoke`), fora do protocolo MCP.
 
 ### 8.2 Como o usuário usa essa feature
+**Admin inicial (automático, 2026-10-04):** nos compose local e dist, `src/database/seed_admin.sh` cria o perfil `admin`, o usuário `admin` (senha padrão **conhecida** `Senh@123` — troque; `ADMIN_LOGIN`/`ADMIN_PASSWORD` no `.env` só valem na criação do banco) e os vínculos, na criação do banco. `scripts/setup-admin.ps1` gera a `FERNET_KEY`, sobe o compose, reexecuta o seed (vincula o admin às análises cadastradas depois) e emite o token (`-ResetPassword` troca a senha de um admin existente). Não vale para o compose remote.
+
 **Admin (uma vez por usuário, SQL direto):**
 1. Gera o hash bcrypt da senha do usuário, sem criar arquivo no projeto:
    ```

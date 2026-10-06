@@ -2,9 +2,9 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.17)
-**Banco:** `analysis_config` (PostgreSQL local — config DB, separado dos data sources de negócio)
-**Data:** 2026-10-03 (F14: `execution_history.error_code`, status `timeout`/`error` documentados; bancos existentes precisam do `ALTER TABLE` da §2.5) · 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; migrations e seed da F12 canceladas — `schema.sql` é a única fonte (F13, decisão 7); atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
+**Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.25)
+**Banco:** `analysis_config` (PostgreSQL — config DB, separado dos data sources de negócio; nome real definido por `POSTGRES_CONFIG_DATABASE` no `.env`). **Fonte única do DDL:** `src/database/schema.sql` (sem migrations)
+**Data:** 2026-10-05 (alinhado ao código: §2.1 `type` aceito pelo `AdapterFactory`, §2.3 `definition` = `{sql, params}`, §2.5 `result_location` sempre `NULL`, §3 regras de validação de `parameters`, §4 `connection_config` por banco, §6 seed do admin com `pgcrypto`, §8 convenções — `updated_at` sem trigger) · 2026-10-03 (F14: `execution_history.error_code`, status `timeout`/`error` documentados; bancos existentes precisam do `ALTER TABLE` da §2.5) · 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; migrations e seed da F12 canceladas — `schema.sql` é a única fonte (F13, decisão 7); atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
 > Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
@@ -48,9 +48,9 @@ Representa uma conexão a um banco de dados externo (o "de onde" os dados de neg
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único, gerado automaticamente |
 | `name` | VARCHAR(255) | ✅ (UNIQUE) | Nome único da fonte de dados (ex.: `"vendas_db"`) |
-| `type` | VARCHAR(50) | ✅ | Tipo do banco: `postgresql`, `mysql`, `sqlserver`, `oracle`, `api` |
-| `connection_config` | JSONB | ✅ | `{host, port, database, user, password (cifrado com Fernet), sslmode}` — ver §3 |
-| `is_active` | BOOLEAN | — | Default `true`. Fontes inativas não podem ser usadas em novas análises |
+| `type` | VARCHAR(50) | ✅ | Tipo do banco. **Aceitos pelo `AdapterFactory`:** `postgresql`, `mysql`, `sqlserver`, `oracle`. Qualquer outro valor (inclusive `api`, citado em versões antigas, que não tem adapter) falha na execução com `ValueError` → `DATA_SOURCE_UNAVAILABLE`. Sem `CHECK` no banco |
+| `connection_config` | JSONB | ✅ | Conexão do data source; as chaves variam por banco, e `password` vai cifrado com Fernet — ver §4 |
+| `is_active` | BOOLEAN | — | Default `true`. **Fonte inativa (ou inexistente) faz a execução da análise falhar** com `DATA_SOURCE_UNAVAILABLE` ("não encontrado ou inativo") |
 | `created_by` | VARCHAR(255) | — | Quem criou o registro |
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
 | `updated_at` | TIMESTAMP | — | Default `NOW()` |
@@ -68,17 +68,18 @@ A definição de "o que" uma análise faz — nome, descrição, de onde vêm os
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `name` | VARCHAR(255) | ✅ (UNIQUE) | Nome único da análise (ex.: `"vendas_por_regiao"`) — é o nome exposto como tool MCP |
 | `description` | TEXT | — | Descrição usada pelo LLM cliente para entender o que a análise faz |
-| `data_source_id` | UUID (FK → `data_sources.id`) | — | Qual fonte de dados essa análise consulta |
-| `cache_frequency` | VARCHAR(50) | — | Default `'daily'`. Controla o TTL do cache (F7) — `'none'` desativa cache |
-| `parameters` | JSONB | — | Schema dos parâmetros aceitos (ver §3) — convertido para JSON Schema MCP |
-| `is_active` | BOOLEAN | — | Default `true` |
+| `data_source_id` | UUID (FK → `data_sources.id`, sem `ON DELETE`) | — (na prática ✅) | Qual fonte de dados essa análise consulta. Nulável no DDL, mas sem fonte a execução falha com `DATA_SOURCE_UNAVAILABLE`. Não dá para apagar uma fonte que ainda tem análises |
+| `cache_frequency` | VARCHAR(50) | — | Default `'daily'`. TTL do cache (F7): `hourly`=1h, `daily`=24h, `weekly`=7d, `none`=sem cache. **Outro valor** → `INVALID_ANALYSIS_CONFIG` e nenhuma query executada (validação só em código, sem `CHECK`) |
+| `parameters` | JSONB | — | Schema dos parâmetros aceitos (ver §3) — convertido para JSON Schema MCP e para modelo Pydantic |
+| `is_active` | BOOLEAN | — | Default `true`. Análise inativa some do `list_tools()` e não executa (`ANALYSIS_NOT_FOUND`) |
 | `created_by` | VARCHAR(255) | — | Quem criou/configurou a análise |
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
-| `updated_at` | TIMESTAMP | — | Default `NOW()` — usado como parte da chave de cache (F7) |
+| `updated_at` | TIMESTAMP | — | Default `NOW()`. **Entra na chave do cache (F7)** — e **não é atualizado sozinho** (sem trigger; ver §8): ao editar a análise ou seu step por SQL, faça `updated_at = NOW()` junto, senão o cache serve o resultado antigo até o TTL expirar |
 
 **Relacionamentos:**
 - N:1 com `data_sources` (uma análise pertence a uma fonte)
-- 1:N com `analysis_steps`, `execution_history`
+- 1:N com `analysis_steps` (`ON DELETE CASCADE`) e `profile_analyses` (`ON DELETE CASCADE`)
+- 1:N com `execution_history` (**sem** `ON DELETE`): **uma análise com histórico não pode ser apagada** — desative com `is_active = false`
 
 ---
 
@@ -90,9 +91,14 @@ O SQL efetivo que a análise executa. Em V1.0, toda análise tem exatamente 1 st
 |---|---|---|---|
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `analysis_id` | UUID (FK → `analyses.id`, `ON DELETE CASCADE`) | ✅ | A qual análise essa etapa pertence |
-| `step_order` | INT | ✅ | Ordem de execução (1, 2, 3...) — único por análise |
-| `step_type` | VARCHAR(50) | ✅ | Único valor em uso em V1.0: `query` |
-| `definition` | JSONB | ✅ | `{sql, params, ...}` — o SQL parametrizado e seus metadados |
+| `step_order` | INT | ✅ | Ordem de execução (1, 2, 3...) — único por análise. **O engine executa só o primeiro step** (menor `step_order`) |
+| `step_type` | VARCHAR(50) | ✅ | Único valor em uso em V1.0: `query`. O código **não lê** esta coluna (os comentários `transform`/`aggregate` do `schema.sql` são legado dos handlers removidos) |
+| `definition` | JSONB | ✅ | `{"sql": "...", "params": ["nome1", "nome2"]}` — ver abaixo |
+
+**`definition` (chaves lidas pelo engine):**
+- `sql` — SELECT com placeholders `:nome`, traduzido por adapter. Validado antes de executar: só `SELECT`, **sem `;`**, sem palavras proibidas (DML/DDL) → senão `INVALID_ANALYSIS_CONFIG`.
+- `params` — lista **ordenada** com os nomes dos parâmetros usados no SQL (define a ordem dos placeholders posicionais). Todo nome precisa existir em `analyses.parameters`; para rodar nos 4 bancos, todo parâmetro declarado deve aparecer no SQL.
+- A chave `handler` (versões antigas) não existe mais.
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
 | `updated_at` | TIMESTAMP | — | Default `NOW()` |
 
@@ -104,7 +110,7 @@ O SQL efetivo que a análise executa. Em V1.0, toda análise tem exatamente 1 st
 
 ### 2.4 *(removida)*
 
-A tabela `analysis_versions` saiu do schema na v1.17 (ver §6). A numeração foi mantida para não quebrar as referências a §2.5-§2.10.
+A tabela `analysis_versions` saiu do schema na v1.17 (ver §7). A numeração foi mantida para não quebrar as referências a §2.5-§2.10.
 
 ---
 
@@ -120,12 +126,12 @@ Registro de cada execução de análise — *o quê* foi executado, *quando*, *c
 | `parameters` | JSONB | — | Parâmetros com que a análise foi chamada |
 | `status` | VARCHAR(50) | — | `success`, `volume_exceeded` (ver ARQUITETURA.md §3.4), `error` ou `timeout` (F14). O valor `failed`, citado em versões antigas, nunca foi gravado |
 | `execution_time_ms` | INT | — | Tempo total de execução em milissegundos |
-| `rows_affected` | INT | — | Quantidade de linhas retornadas |
-| `result_size_bytes` | INT | — | Tamanho do resultado serializado |
+| `rows_affected` | INT | — | Linhas retornadas (`success`). Em `volume_exceeded` guarda a **estimativa** de linhas; em erro/timeout fica `NULL` |
+| `result_size_bytes` | INT | — | Tamanho do JSON serializado (`success`) ou a estimativa em bytes (`volume_exceeded`); `NULL` em erro/timeout |
 | `error_message` | TEXT | — | Mensagem de erro, se houver |
-| `result_location` | VARCHAR(500) | — | Path/URI do resultado, se armazenado fora da tabela |
-| `executed_at` | TIMESTAMP | — | Default `NOW()` |
-| `cached` | BOOLEAN | — | Default `false`. Indica se o resultado veio do cache (F7) |
+| `result_location` | VARCHAR(500) | — | Reservada: o `AuditService` grava sempre `NULL` (resultado nunca é armazenado fora da tabela em V1.0) |
+| `executed_at` | TIMESTAMP | — | Default `NOW()` (não existe coluna `created_at` nesta tabela) |
+| `cached` | BOOLEAN | — | Default `false`. `true` só quando o resultado foi servido do cache (F7); erros e `volume_exceeded` sempre `false` |
 | `error_code` | VARCHAR(50) | — | Código estável do erro (F14): `ANALYSIS_NOT_FOUND`, `INVALID_PARAMETERS`, `INVALID_ANALYSIS_CONFIG`, `DATA_SOURCE_UNAVAILABLE`, `QUERY_TIMEOUT`, `QUERY_FAILED`, `INTERNAL_ERROR` (ver ARQUITETURA.md §3.4.1). `NULL` quando não houve erro e em linhas anteriores à F14 |
 
 **Bancos já criados (pré-F14):** sem migration (decisão do projeto) — executar uma vez, direto no banco:
@@ -136,6 +142,8 @@ ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);
 
 **Relacionamentos:** N:1 com `analyses`, e, desde F12, opcionalmente N:1 com `users`.
 
+**Quando NÃO há linha:** análise inexistente/acesso negado (`ANALYSIS_NOT_FOUND`) não grava histórico — não há `analysis_id` válido para a FK.
+
 ---
 
 ### 2.6 `users` — Usuários com Acesso à Plataforma (F12)
@@ -145,7 +153,7 @@ ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);
 | `id` | UUID (PK) | ✅ | Identificador único |
 | `name` | VARCHAR(255) | ✅ | Nome do usuário |
 | `external_id` | VARCHAR(255) | — (UNIQUE) | **E-mail de login (F12)**, cadastrado sempre em minúsculas; a aplicação normaliza (`strip().lower()`) o e-mail recebido em `POST /auth/token`/`/auth/revoke` antes de buscar. Sem `CHECK` no banco — cadastro com maiúscula nunca casa com o login |
-| `password_hash` | VARCHAR(255) | — | **Hash bcrypt da senha (F12)**, nunca a senha. `NULL` = usuário não consegue emitir token. Gerado fora do código e inserido à mão (ver F12 §8.2) |
+| `password_hash` | VARCHAR(255) | — | **Hash bcrypt da senha (F12)**, nunca a senha. `NULL` = usuário não consegue emitir token. Gerado fora do código e inserido à mão (ver F12 §8.2); o usuário `admin` do seed (§6) é gerado com `crypt(..., gen_salt('bf', 12))` do `pgcrypto` |
 | `is_blocked` | BOOLEAN | ✅ (NOT NULL) | Default `false`. Bloqueado perde acesso imediato a todas as analyses (ver ARQUITETURA.md §3.5) |
 | `created_by` | VARCHAR(255) | — | Quem criou o registro |
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
@@ -248,6 +256,14 @@ Cada chave é o nome de um parâmetro aceito pela análise:
 
 Este formato é convertido para JSON Schema MCP (para `list_tools`) e para um `pydantic.BaseModel` (para validação no Execution Engine) pelo módulo `schemas/analysis_parameters.py` — fonte única de verdade para os dois usos.
 
+**Regras validadas a cada execução (`validate_schema`)** — violação → `INVALID_ANALYSIS_CONFIG`:
+- `type` ∈ {`string`, `integer`, `number`, `boolean`, `date`, `datetime`} (obrigatório).
+- `required` deve ser booleano (default `false`).
+- `enum` só em `string`, `integer` ou `number`.
+- `min`/`max` só em `integer` ou `number` (viram `ge`/`le` no Pydantic e `minimum`/`maximum` no JSON Schema).
+
+**Semântica:** parâmetro com `required: true` não tem default; os demais são opcionais e assumem `default` (ou `null`). `description` e `default` são opcionais. Valor do cliente fora das regras → `INVALID_PARAMETERS`. Os parâmetros validados (com defaults resolvidos) são os que entram na chave do cache.
+
 > O parâmetro reservado `confirmar_volume_alto` (Controle de Volume, ARQUITETURA.md §3.4) **não** faz parte deste JSON — é injetado diretamente no `inputSchema` de toda tool MCP pelo `mcp_transport/tools.py`, por ser global e não específico de uma análise.
 
 ---
@@ -260,12 +276,22 @@ Este formato é convertido para JSON Schema MCP (para `list_tools`) e para um `p
   "port": 5432,
   "database": "vendas_db",
   "user": "readonly_user",
-  "password": "<cifrado com Fernet>",
-  "sslmode": "prefer"
+  "password": "<cifrado com Fernet>"
 }
 ```
 
-O campo `password` (e demais credenciais sensíveis) é cifrado com **Fernet** (biblioteca `cryptography`) antes de persistir — nunca em texto puro (ver ARQUITETURA.md §8.2).
+Chaves lidas por cada adapter (as demais são ignoradas):
+
+| `type` | Obrigatórias | Opcionais (default) |
+|---|---|---|
+| `postgresql` | `host`, `port`, `database`, `user`, `password` | — |
+| `mysql` | `host`, `database`, `user`, `password` | `port` (3306) |
+| `sqlserver` | `host`, `database`, `user`, `password` | `port` (1433), `driver` (`ODBC Driver 18 for SQL Server`), `sslmode` (`prefer` → `Encrypt=yes;TrustServerCertificate=yes`; `verify-full` → `TrustServerCertificate=no`; outro valor falha) |
+| `oracle` | `host`, `user`, `password` e **`service_name` ou `sid`** | `port` (1521) |
+
+`sslmode` só tem efeito no SQL Server; nos demais é ignorado.
+
+O campo `password` é cifrado com **Fernet** (chave `FERNET_KEY` do `.env`; biblioteca `cryptography`) antes de persistir — nunca em texto puro (ver ARQUITETURA.md §8.2). O `AnalysisService` decifra no momento de criar o adapter; uma `FERNET_KEY` diferente da usada no cadastro faz a conexão falhar.
 
 ---
 
@@ -282,7 +308,20 @@ CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 
 ---
 
-## 6. O Que Foi Removido do Schema (Histórico)
+## 6. Extensões e Seed (não fazem parte do `schema.sql`)
+
+O `schema.sql` **não** cria extensões nem dados. O seed do administrador (`src/database/seed_admin.sh`) é montado em `docker-entrypoint-initdb.d` dos compose **local** e **dist** (não no **remote**), roda depois do `schema.sql` e é **idempotente** (`ON CONFLICT DO NOTHING`); `scripts/setup-admin.ps1` o reexecuta em bancos já existentes.
+
+- `CREATE EXTENSION IF NOT EXISTS pgcrypto;` — necessária só para o seed (`crypt`/`gen_salt` geram o bcrypt). A aplicação em si não usa.
+- `profiles`: perfil `admin`.
+- `users`: usuário `admin` (`ADMIN_LOGIN`, padrão `admin`; `external_id` sempre em minúsculas; `created_by = 'seed_admin'`), senha `ADMIN_PASSWORD` — **padrão conhecido `Senh@123`: trocar em qualquer ambiente acessível por outras pessoas** (`ADMIN_RESET_PASSWORD=1` ou `setup-admin.ps1 -ResetPassword` regrava a senha).
+- `user_profiles`: vínculo admin ↔ `admin`.
+- `profile_analyses`: perfil `admin` ↔ **todas as análises existentes no momento**. Análises cadastradas depois **não** entram sozinhas: reexecute o seed ou faça `INSERT` em `profile_analyses`.
+- O seed **não** emite token (o token só existe na resposta de `POST /auth/token`).
+
+---
+
+## 7. O Que Foi Removido do Schema (Histórico)
 
 Para não haver confusão ao ler versões antigas de código/specs:
 
@@ -294,4 +333,14 @@ Para não haver confusão ao ler versões antigas de código/specs:
 
 ---
 
-**Fonte:** ARQUITETURA.md v1.17, §2.2, §2.3 e §3.5.
+## 8. Convenções do Schema
+
+- **Sem triggers:** nenhum `updated_at` é atualizado automaticamente — quem edita por SQL deve setá-lo. Só `analyses.updated_at` tem efeito funcional (chave do cache, F7); `users.updated_at` é gravado só pelo seed ao regravar a senha.
+- **Sem migrations:** o `schema.sql` é a única fonte; mudanças em bancos existentes são `ALTER TABLE` manuais, registrados na seção da tabela (ex.: `execution_history.error_code`, §2.5).
+- **Sem `CHECK`:** valores como `data_sources.type`, `analyses.cache_frequency`, `execution_history.status` são validados só em código.
+- **Fuso:** `access_tokens` usa `TIMESTAMPTZ`; as demais tabelas, `TIMESTAMP`.
+- **Cascata:** `analysis_steps`, `user_profiles`, `profile_analyses` e `access_tokens` apagam em cascata. `analyses.data_source_id`, `execution_history.analysis_id` e `execution_history.user_id` **não** — preservam a auditoria (bloqueie/desative em vez de apagar).
+
+---
+
+**Fonte:** `src/database/schema.sql`, `src/database/seed_admin.sh`, repositórios/adapters em `src/` e ARQUITETURA.md v1.25, §2.2, §2.3 e §3.5.

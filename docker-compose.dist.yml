@@ -1,17 +1,29 @@
-# F13 — ambiente LOCAL: app + postgres (Config DB).
-# TLS terminado no próprio app (uvicorn + mkcert montado em /app/certs, somente leitura).
-# MySQL, SQL Server e Oracle ficam FORA daqui de propósito (opcionais, subida manual):
-# docker/mysql/, docker/sqlserver/ e docker/oracle/ (cada um com o próprio compose).
+# Distribuição — rodar em OUTRO computador, sem o código-fonte (app + postgres, TLS no app).
 #
-# Uso:  cp .env.example .env   (e preencher)  →  docker compose -f docker-compose.local.yml up -d
-# O .env da raiz alimenta só a interpolação deste arquivo; o app NÃO lê .env (está no .dockerignore).
+# Um compose NÃO gera .tar: ele só constrói/tagueia as imagens. O .tar sai de `docker save`,
+# que o script scripts/build-dist.ps1 executa depois do build deste arquivo.
+#
+# Este arquivo serve aos dois lados:
+#   Máquina de build (repositório):  .\scripts\build-dist.ps1 -Version 1.0.0
+#       → docker compose build  +  docker save  →  dist/ (tar + este compose + schema.sql + .env.example)
+#   Máquina de destino (só a pasta dist/):  docker load -i mcp-analysis-<versão>.tar
+#       → cp .env.example .env  (preencher)  →  docker compose up -d      (ver INSTALL.md gerado)
+#
+# O script copia este arquivo como dist/docker-compose.yml. No destino não existe Dockerfile:
+# `pull_policy: never` garante que o compose use só a imagem carregada pelo `docker load`
+# (e nunca tente baixar "mcp-analysis" do Docker Hub). Se a imagem não estiver carregada, o
+# `up` falha com "No such image" — rode o `docker load` primeiro.
+#
+# Para ambiente com nginx/Let's Encrypt use docker-compose.remote.yml (precisa do repositório).
 
-name: mcp-analysis-local
+name: mcp-analysis
 
 services:
   app:
     build:
-      context: .
+      context: .   # só usado na máquina de build (raiz do repositório)
+    image: ${APP_IMAGE:-mcp-analysis}:${APP_VERSION:-1.0.0}
+    pull_policy: never
     ports:
       - "${SERVER_PORT:-3000}:3000"
     environment:
@@ -38,7 +50,7 @@ services:
       ACCESS_TOKEN_EXPIRATION_DAYS: ${ACCESS_TOKEN_EXPIRATION_DAYS:-90}
       ACCESS_TOKEN_MAX_EXPIRATION_DAYS: ${ACCESS_TOKEN_MAX_EXPIRATION_DAYS:-365}
     volumes:
-      # Certificados mkcert entram só em runtime, nunca na imagem
+      # Certificados entram só em runtime, nunca na imagem
       - ./certs:/app/certs:ro
     depends_on:
       postgres:
@@ -46,12 +58,12 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16
+    image: ${POSTGRES_IMAGE:-postgres:16}
     environment:
       POSTGRES_USER: ${POSTGRES_CONFIG_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_CONFIG_PASSWORD:?defina POSTGRES_CONFIG_PASSWORD no .env}
       POSTGRES_DB: ${POSTGRES_CONFIG_DATABASE:-analysis_config}
-      # Lidos só pelo seed_admin.sh (initdb.d); SENHA PADRÃO CONHECIDA — troque fora do desenvolvimento.
+      # Lidos só pelo seed_admin.sh (initdb.d); SENHA PADRÃO CONHECIDA — troque antes de expor o servidor.
       # Senha com "$" no .env precisa ser escrita "$$" (interpolação do compose).
       ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Senh@123}
@@ -60,11 +72,12 @@ services:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Roda uma única vez, com o volume vazio. schema.sql já inclui as tabelas da F12.
-      - ./src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      # Cria o admin (perfil + usuário + vínculos) na criação do banco; também reexecutável à mão
-      # (scripts/setup-admin.ps1). Roda depois do schema (ordem alfabética: 01-, 02-).
-      - ./src/database/seed_admin.sh:/docker-entrypoint-initdb.d/02-seed-admin.sh:ro
+      # schema.sql fica ao lado deste arquivo (o script o copia de src/database/). Roda uma única
+      # vez, com o volume vazio; num banco já existente é preciso aplicar as mudanças à mão.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Cria o admin (perfil + usuário + vínculos) na criação do banco; o script copia este arquivo
+      # de src/database/seed_admin.sh. Reexecutável à mão com setup-admin.ps1.
+      - ./seed_admin.sh:/docker-entrypoint-initdb.d/02-seed-admin.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s

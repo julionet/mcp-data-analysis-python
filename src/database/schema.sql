@@ -4,7 +4,7 @@
 CREATE TABLE data_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) UNIQUE NOT NULL,
-    type VARCHAR(50) NOT NULL,  -- postgresql, mysql, sqlserver, oracle, api
+    type VARCHAR(50) NOT NULL,  -- postgresql, mysql, sqlserver, oracle
     connection_config JSONB NOT NULL,  -- {host, port, database, ...}
     is_active BOOLEAN DEFAULT true,
     created_by VARCHAR(255),
@@ -31,8 +31,8 @@ CREATE TABLE analysis_steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     analysis_id UUID NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
     step_order INT NOT NULL,
-    step_type VARCHAR(50) NOT NULL,  -- query, transform, aggregate
-    definition JSONB NOT NULL,  -- {sql, handler, params, ...}
+    step_type VARCHAR(50) NOT NULL,  -- V1.0: apenas 'query' (o código não lê esta coluna)
+    definition JSONB NOT NULL,  -- {"sql": "...", "params": [...]}
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(analysis_id, step_order)
@@ -97,7 +97,7 @@ CREATE TABLE execution_history (
     rows_affected INT,
     result_size_bytes INT,
     error_message TEXT,
-    result_location VARCHAR(500),  -- path/uri do resultado
+    result_location VARCHAR(500),  -- reservada: sempre NULL em V1.0
     executed_at TIMESTAMP DEFAULT NOW(),
     cached BOOLEAN DEFAULT false,
     user_id UUID REFERENCES users(id),  -- sem ON DELETE: preserva auditoria (F12)

@@ -1,0 +1,3 @@
+# Scripts executados dentro de containers Linux precisam de final de linha LF: com CRLF (padrão do
+# Git no Windows com autocrlf) o shell lê "\r" como parte do comando e a inicialização do banco falha.
+*.sh text eol=lf
