@@ -3,7 +3,7 @@
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
 **Versão:** 1.20 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-03 (atualizado 2026-10-03 — F14 implementada)
+**Data:** 2026-10-07 (atualizado 2026-10-07 — F15 implementada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
@@ -254,7 +254,7 @@ Fora do escopo (pendências registradas): sslmode em PostgreSQL/MySQL (F11 #1) e
 translate_params com ::nome/literais (F11 #5). Pontos em aberto na spec §11.
 ```
 
-**F15 em detalhe (Performance Optimization) — spec: `features/F15_PERFORMANCE_OPTIMIZATION.md` (spec aprovada; implementada em 2026-10-07 — pool configurável + scripts; baseline, EXPLAIN e load test pendentes de execução manual com o Docker no ar):**
+**F15 em detalhe (Performance Optimization) — spec: `features/F15_PERFORMANCE_OPTIMIZATION.md` (✅ implementada em 2026-10-07 — pool configurável + scripts; 500/500 testes; baseline, load test e revogação medidos no compose local; pendentes: bloqueio de usuário e EXPLAIN com volume realista, ver spec §12):**
 ```
 Objetivo: medir antes de otimizar. Benchmark das metas de RNF1, pool PostgreSQL
 configurável e otimização medida do Config DB, sem enfraquecer a F12.
@@ -479,7 +479,7 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 22/22 | 12/22 🟩 |
+| **Features Implementadas** | 22/22 | 13/22 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 4 (PostgreSQL, MySQL, SQL Server, Oracle) ✅ |
@@ -585,4 +585,4 @@ A especificação técnica completa (código de middleware, schema SQL, fluxos) 
 ---
 
 **Documento de Roadmap Completo — Multi-Cliente, Com Autenticação por Token + Perfis (F12), Sem Versionamento de Análises.**
-**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3: F12 ✅, F13 ✅ e F14 ✅ concluídas; próximas F15 (Performance) e demais da Sprint 3, depois Sprint 4 (Deploy).**
+**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3: F12 ✅, F13 ✅, F14 ✅ e F15 ✅ concluídas; próximas F16 (API Documentation), F17 e F18, depois Sprint 4 (Deploy).**
