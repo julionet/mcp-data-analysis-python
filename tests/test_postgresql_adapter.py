@@ -43,8 +43,29 @@ class TestPostgreSQLAdapter:
             password="test_password",
             database="test_db",
             command_timeout=settings.query_timeout_seconds,
+            min_size=10,
+            max_size=10,
         )
         assert adapter._pool is fake_pool
+
+    @pytest.mark.asyncio
+    async def test_pool_respeita_env(self):
+        """F15: PG_POOL_MIN/MAX_SIZE alterados chegam ao create_pool."""
+        adapter = PostgreSQLAdapter(CONFIG)
+        with patch.object(settings, "pg_pool_min_size", 2), patch.object(settings, "pg_pool_max_size", 5):
+            with patch("adapters.postgresql.asyncpg.create_pool", new=AsyncMock()) as mock_create_pool:
+                await adapter.connect()
+        assert mock_create_pool.await_args.kwargs["min_size"] == 2
+        assert mock_create_pool.await_args.kwargs["max_size"] == 5
+
+    @pytest.mark.asyncio
+    async def test_pool_respeita_connection_config(self):
+        """F15: pool_min_size/pool_max_size do connection_config sobrepõem o .env."""
+        adapter = PostgreSQLAdapter({**CONFIG, "pool_min_size": 1, "pool_max_size": 3})
+        with patch("adapters.postgresql.asyncpg.create_pool", new=AsyncMock()) as mock_create_pool:
+            await adapter.connect()
+        assert mock_create_pool.await_args.kwargs["min_size"] == 1
+        assert mock_create_pool.await_args.kwargs["max_size"] == 3
 
     @pytest.mark.asyncio
     async def test_execute_query_returns_list_of_dicts(self):

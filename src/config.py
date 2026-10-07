@@ -16,6 +16,8 @@ F12: ACCESS_TOKEN_EXPIRATION_DAYS / ACCESS_TOKEN_MAX_EXPIRATION_DAYS — validad
     algum for < 1 ou se EXPIRATION > MAX (senão a emissão com o padrão já daria 400).
 F14: QUERY_RETRY_MAX_ATTEMPTS / QUERY_RETRY_BACKOFF_BASE_MS — retry só de falha rápida
     de conexão ao data source (F14_ERROR_HANDLING_VALIDATION.md §4.3, §7).
+F15: PG_POOL_MIN/MAX_SIZE e CONFIG_DB_POOL_MIN/MAX_SIZE — tamanho do pool PostgreSQL
+    (F15_PERFORMANCE_OPTIMIZATION.md §4.3, §7). Falha no startup se MIN < 1 ou MAX < MIN.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,6 +48,13 @@ class Settings(BaseSettings):
     query_retry_max_attempts: int = 3  # total de tentativas (1 = sem retry) — F14
     query_retry_backoff_base_ms: int = 200  # espera = base * 2^(tentativa-1) — F14
 
+    # F15: pool PostgreSQL — data sources (PG_POOL_*) e Config DB (CONFIG_DB_POOL_*) separados.
+    # Padrão 10/10 = o default anterior do asyncpg (sem mudança em instalações existentes).
+    pg_pool_min_size: int = 10
+    pg_pool_max_size: int = 10
+    config_db_pool_min_size: int = 10
+    config_db_pool_max_size: int = 10
+
     fernet_key: str
 
     cache_backend: str = "memory"
@@ -65,6 +74,14 @@ class Settings(BaseSettings):
             raise ValueError("QUERY_RETRY_MAX_ATTEMPTS deve ser >= 1 (1 = sem retry)")
         if self.query_retry_backoff_base_ms < 0:
             raise ValueError("QUERY_RETRY_BACKOFF_BASE_MS deve ser >= 0")
+        for prefix, low, high in (
+            ("PG_POOL", self.pg_pool_min_size, self.pg_pool_max_size),
+            ("CONFIG_DB_POOL", self.config_db_pool_min_size, self.config_db_pool_max_size),
+        ):
+            if low < 1:
+                raise ValueError(f"{prefix}_MIN_SIZE deve ser >= 1")
+            if high < low:
+                raise ValueError(f"{prefix}_MAX_SIZE não pode ser menor que {prefix}_MIN_SIZE")
         if self.access_token_expiration_days < 1 or self.access_token_max_expiration_days < 1:
             raise ValueError(
                 "ACCESS_TOKEN_EXPIRATION_DAYS e ACCESS_TOKEN_MAX_EXPIRATION_DAYS devem ser >= 1"

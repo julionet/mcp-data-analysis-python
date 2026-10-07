@@ -13,3 +13,4 @@ certs/
 .DS_Store
 # token de acesso gerado por scripts/setup-admin.ps1
 secrets/
+benchmark-*.json

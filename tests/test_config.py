@@ -59,6 +59,38 @@ class TestQueryRetrySettings:
         assert Settings(query_retry_backoff_base_ms=0).query_retry_backoff_base_ms == 0
 
 
+class TestPoolSettings:
+    """F15 §6.1 — PG_POOL_* / CONFIG_DB_POOL_*."""
+
+    def test_defaults(self):
+        s = Settings()
+        assert (s.pg_pool_min_size, s.pg_pool_max_size) == (10, 10)
+        assert (s.config_db_pool_min_size, s.config_db_pool_max_size) == (10, 10)
+
+    @pytest.mark.parametrize(
+        "prefix,min_field,max_field",
+        [
+            ("PG_POOL", "pg_pool_min_size", "pg_pool_max_size"),
+            ("CONFIG_DB_POOL", "config_db_pool_min_size", "config_db_pool_max_size"),
+        ],
+    )
+    def test_max_menor_que_min_falha(self, prefix, min_field, max_field):
+        with pytest.raises(ValueError, match=f"{prefix}_MAX_SIZE"):
+            Settings(**{min_field: 5, max_field: 4})
+
+    @pytest.mark.parametrize(
+        "prefix,min_field",
+        [("PG_POOL", "pg_pool_min_size"), ("CONFIG_DB_POOL", "config_db_pool_min_size")],
+    )
+    def test_min_menor_que_1_falha(self, prefix, min_field):
+        with pytest.raises(ValueError, match=f"{prefix}_MIN_SIZE"):
+            Settings(**{min_field: 0})
+
+    def test_pool_menor_e_valido(self):
+        s = Settings(pg_pool_min_size=2, pg_pool_max_size=5)
+        assert (s.pg_pool_min_size, s.pg_pool_max_size) == (2, 5)
+
+
 class TestTlsEnabledSetting:
     """TLS_ENABLED — HTTP puro só em desenvolvimento local (run_https.py)."""
 

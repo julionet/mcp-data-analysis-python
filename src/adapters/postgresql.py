@@ -16,8 +16,11 @@ class PostgreSQLAdapter(DatabaseAdapter):
             password=self.config["password"],
             database=self.config["database"],
             command_timeout=settings.query_timeout_seconds,
-        )  # min_size/max_size = defaults do asyncpg; command_timeout via .env (ajuste
-        # retroativo F4, 2026-09-26 — ver ARQUITETURA.md §8.1 / F4_EXECUTION_ENGINE.md)
+            # F15: pool_min_size/pool_max_size no connection_config sobrepõem o .env (por data source)
+            min_size=self.config.get("pool_min_size", settings.pg_pool_min_size),
+            max_size=self.config.get("pool_max_size", settings.pg_pool_max_size),
+        )  # command_timeout via .env (ajuste retroativo F4, 2026-09-26 — ver
+        # ARQUITETURA.md §8.1 / F4_EXECUTION_ENGINE.md)
 
     async def disconnect(self) -> None:
         if self._pool:

@@ -17,6 +17,9 @@ config_db_adapter = PostgreSQLAdapter(
         "user": settings.postgres_config_user,
         "password": settings.postgres_config_password,
         "database": settings.postgres_config_database,
+        # F15: pool próprio do Config DB (recebe ≥7 idas por chamada /mcp)
+        "pool_min_size": settings.config_db_pool_min_size,
+        "pool_max_size": settings.config_db_pool_max_size,
     }
 )
 

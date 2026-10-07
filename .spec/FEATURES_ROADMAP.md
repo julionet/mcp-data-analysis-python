@@ -156,7 +156,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F12 | Autenticação e Controle de Acesso via Perfis | 🔴 Crítica | 3.5d | F5 | 🟩 Done (2026-09-30) |
 | F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | 🟩 Done (2026-10-03) |
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | 🟩 Done (2026-10-03) |
-| F15 | Performance Optimization | 🟠 Alta | 2d | F7 | ⬜ Todo |
+| F15 | Performance Optimization | 🟠 Alta | 2d | F7 | 🟩 Done (2026-10-07) |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
 | F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
@@ -252,6 +252,25 @@ Escopo:
 
 Fora do escopo (pendências registradas): sslmode em PostgreSQL/MySQL (F11 #1) e
 translate_params com ::nome/literais (F11 #5). Pontos em aberto na spec §11.
+```
+
+**F15 em detalhe (Performance Optimization) — spec: `features/F15_PERFORMANCE_OPTIMIZATION.md` (spec aprovada; implementada em 2026-10-07 — pool configurável + scripts; baseline, EXPLAIN e load test pendentes de execução manual com o Docker no ar):**
+```
+Objetivo: medir antes de otimizar. Benchmark das metas de RNF1, pool PostgreSQL
+configurável e otimização medida do Config DB, sem enfraquecer a F12.
+
+Escopo:
+├─ Pool PostgreSQL configurável (PG_POOL_MIN/MAX_SIZE; Config DB com par próprio);
+│  padrão = comportamento atual (10) — resolve F11 #7 / F14 #4
+├─ scripts/benchmark.py: cache hit <100ms, COUNT(*) <500ms, list_tools <2s,
+│  análise leve <5s; baseline antes/depois (--compare); fora da suíte de testes
+├─ Auth/permissões: só medir (EXPLAIN ANALYZE) e indexar se justificado — SEM cache de
+│  token/permissão (bloqueio e revogação imediatos da F12 / ADR-007)
+├─ Cache (F7) e touch_last_used: só medir; código só muda se o benchmark provar problema
+└─ scripts/load_test.py: 10+ clientes simultâneos, manual, fora dos 480 testes
+
+Fora do escopo: log assíncrono do execution_history (RNF4), sslmode (F11 #1),
+translate_params (F11 #5) e análises assíncronas com status check. Pontos em aberto na spec §11.
 ```
 
 ---
