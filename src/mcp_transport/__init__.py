@@ -83,7 +83,7 @@ def configure_mcp(app: FastAPI) -> None:
         # processo de renderer, sujeito a CORS — sem isso, a checagem falha com um
         # erro genérico de "sem resposta", mesmo o servidor respondendo normalmente.
         allow_origins=["*"],  # confirmado: rede interna, todas origens liberadas
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["WWW-Authenticate"],  # o 401 do AuthMiddleware; sem sessão (stateless) não há Mcp-Session-Id
     )

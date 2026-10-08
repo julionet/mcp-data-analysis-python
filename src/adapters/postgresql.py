@@ -1,10 +1,29 @@
 """Adapter PostgreSQL (asyncpg) — F2_POSTGRESQL_ADAPTER.md §4.4."""
 
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import asyncpg
 
 from adapters.base import DatabaseAdapter
 from config import settings
+
+
+class Transaction:
+    """Conexão dentro de uma transação, com a mesma semântica de execute_query()/execute()."""
+
+    def __init__(self, conn: asyncpg.Connection) -> None:
+        self._conn = conn
+
+    async def execute_query(self, query: str, params: dict | None = None, scalar: bool = False):
+        if scalar:
+            return await self._conn.fetchval(query, *(params or {}).values())
+        records = await self._conn.fetch(query, *(params or {}).values())
+        return [dict(r) for r in records]
+
+    async def execute(self, query: str, *args) -> None:
+        await self._conn.execute(query, *args)
 
 
 class PostgreSQLAdapter(DatabaseAdapter):
@@ -37,6 +56,13 @@ class PostgreSQLAdapter(DatabaseAdapter):
         """Executa INSERT/UPDATE/DELETE com parâmetros posicionais."""
         async with self._pool.acquire() as conn:
             await conn.execute(query, *args)
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Transaction]:
+        """Commit ao sair do bloco; rollback (e a exceção propaga) se ele levantar."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                yield Transaction(conn)
 
     async def test_connection(self) -> bool:
         try:

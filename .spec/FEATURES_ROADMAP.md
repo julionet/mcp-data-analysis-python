@@ -161,7 +161,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | 🟩 Done (2026-10-03) |
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | 🟩 Done (2026-10-03) |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | 🟩 Done (2026-10-07) |
-| F23 | API Admin: base + Usuários + Perfis (`/admin/users`, `/admin/profiles`, `/me`) | 🟠 Alta | 3.5d | F12 | ⬜ Todo (spec confirmada 2026-10-08, sem pendências: `features/F23_API_ADMIN_USUARIOS_PERFIS.md`; aguardando autorização para implementar) |
+| F23 | API Admin: base + Usuários + Perfis (`/admin/users`, `/admin/profiles`, `/me`) | 🟠 Alta | 3.5d | F12 | 🟩 Done (2026-10-08; validação manual pendente: `features/F23_API_ADMIN_USUARIOS_PERFIS.md` §12) |
 | F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | ⬜ Todo (spec pendente) |
 | F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | ⬜ Todo (spec pendente) |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | ⬜ Todo |
@@ -490,7 +490,7 @@ XXX_PARAM=value
 ⬜ Validações manuais pendentes de F13/F14/F15 (fluxo /auth/token → /mcp com cliente real,
    MySQL/SQL Server completos, SSE no nginx, Oracle 23ai, queda do Config DB, timeout de query,
    bloqueio de usuário, EXPLAIN com volume realista)
-1. ⬜ F23: API Admin — base + Usuários + Perfis (spec pendente)
+1. 🟩 F23: API Admin — base + Usuários + Perfis (feito 2026-10-08)
 2. ⬜ F24: API Admin — Data Sources + Analyses (spec pendente)
 3. ⬜ F25: API Admin — Histórico de Execuções (spec pendente)
 4. ⬜ F17: Unit Tests (80% coverage) — medir cobertura e preencher lacunas (cobre também F23–F25)

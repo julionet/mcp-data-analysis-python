@@ -6,7 +6,7 @@
 **Nome:** API Administrativa — base (papel admin), usuários, perfis e autosserviço (`/me`)
 **Prioridade:** 🟠 Alta
 **Esforço Estimado:** 3.5d
-**Status:** ⬜ Todo (spec escrita e confirmada em 2026-10-08, sem pontos em aberto — aguardando autorização para implementar)
+**Status:** 🟩 Done (2026-10-08) — validação manual com cliente MCP real pendente (§6.3)
 
 > **Origem dos requisitos:** NEGOCIO.md v1.12 (RF6, UC4, RNF5, Restrição T5), ARQUITETURA.md v1.26 (§2.4, §3.6, ADR-008), FEATURES_ROADMAP.md v1.22 e DATABASE_SCHEMA.md (`users.is_admin`, §2.6). Esta spec cobre só a **F23**; data sources e analyses são a F24 e o histórico de execuções é a F25.
 
@@ -405,18 +405,18 @@ class TestTransaction:       # PostgreSQLAdapter.transaction(): commit, rollback
 Arquivo no padrão de `tests/test_permission_queries_integration.py` (fixture `db` que dá `pytest.skip` se as tabelas da F12 ou a coluna `is_admin` não existirem): rollback real em `create_user` com perfil inexistente, cascatas de `DELETE` (usuário, perfil), `FOR UPDATE` dos administradores ativos, unicidade (`UniqueViolationError` → 409), efeito imediato de vínculos em `get_allowed_analysis_ids`.
 
 ### 6.3 Checklist de Testes
-- [ ] 401/403 em **todas** as rotas `/admin/*` (parametrizado por `app.routes`)
-- [ ] Papel e bloqueio lidos do banco a cada chamada
-- [ ] Política de senha nos três pontos de entrada
-- [ ] Hash de senha: custo 12, verificável, > 72 bytes recusado
-- [ ] CRUD de usuários e perfis, filtros e paginação
-- [ ] Redefinição de senha e `/me/password` revogam tokens
-- [ ] Proteções: próprio admin, último admin ativo, usuário com histórico
-- [ ] `invalid_reference` com rollback completo
-- [ ] Login `admin` do seed serializa sem erro; PATCH sem e-mail não revalida
-- [ ] Nenhum segredo (senha, hash, token) em respostas nem em logs
-- [ ] `transaction()` commit/rollback; integração com banco real
-- [ ] CORS permite PUT/PATCH; `/mcp` e `/auth/*` inalterados (regressão dos 500 testes)
+- [x] 401/403 em **todas** as rotas `/admin/*` (parametrizado por `app.routes`)
+- [x] Papel e bloqueio lidos do banco a cada chamada
+- [x] Política de senha nos três pontos de entrada
+- [x] Hash de senha: custo 12, verificável, > 72 bytes recusado
+- [x] CRUD de usuários e perfis, filtros e paginação
+- [x] Redefinição de senha e `/me/password` revogam tokens
+- [x] Proteções: próprio admin, último admin ativo, usuário com histórico
+- [x] `invalid_reference` com rollback completo
+- [x] Login `admin` do seed serializa sem erro; PATCH sem e-mail não revalida
+- [x] Nenhum segredo (senha, hash, token) em respostas nem em logs
+- [x] `transaction()` commit/rollback; integração com banco real
+- [x] CORS permite PUT/PATCH; `/mcp` e `/auth/*` inalterados (regressão dos 500 testes)
 - [ ] Manual: criar usuário e perfil pela API, vincular análise, emitir token do novo usuário e ver só a análise liberada no cliente MCP; bloquear → perde acesso imediato (spec F12/ADR-007)
 
 ---
@@ -443,23 +443,23 @@ F24 e F25 criam novos routers com `dependencies=[Depends(require_admin)]`, reuti
 ## 9. Checklist de Implementação
 
 **Código:**
-- [ ] `hash_password` + `validate_password_policy` + `PasswordPolicyError`
-- [ ] `PostgreSQLAdapter.transaction()`
-- [ ] `User.is_admin` + novos métodos nos 3 repositórios (com `db` opcional)
-- [ ] `security/admin_auth.py` (`get_current_user`, `require_admin`)
-- [ ] `schemas/admin.py` (modelos + exceções)
-- [ ] `services/user_admin_service.py`, `services/profile_admin_service.py`
-- [ ] `routes/dependencies.py`, `routes/admin_users.py`, `routes/admin_profiles.py`, `routes/me.py`
-- [ ] `main.py` (include_router) e CORS (`PUT`, `PATCH`)
-- [ ] `requirements.txt` (email-validator)
-- [ ] Docstrings
+- [x] `hash_password` + `validate_password_policy` + `PasswordPolicyError`
+- [x] `PostgreSQLAdapter.transaction()`
+- [x] `User.is_admin` + novos métodos nos 3 repositórios (com `db` opcional)
+- [x] `security/admin_auth.py` (`get_current_user`, `require_admin`)
+- [x] `schemas/admin.py` (modelos + exceções)
+- [x] `services/user_admin_service.py`, `services/profile_admin_service.py`
+- [x] `routes/dependencies.py`, `routes/admin_users.py`, `routes/admin_profiles.py`, `routes/me.py`
+- [x] `main.py` (include_router) e CORS (`PUT`, `PATCH`)
+- [x] `requirements.txt` (email-validator)
+- [x] Docstrings
 
 **Documentação (ao concluir):**
-- [ ] Preencher §12; marcar F23 como 🟩 no ROADMAP e no `.claude/CLAUDE.md`
-- [ ] ARQUITETURA.md §2.4/§3.6: trocar "slugs definidos na spec" pelos slugs da §4.5; DATABASE_SCHEMA.md se houver índice novo
+- [x] Preencher §12; marcar F23 como 🟩 no ROADMAP e no `.claude/CLAUDE.md`
+- [x] ARQUITETURA.md §2.4/§3.6: trocar "slugs definidos na spec" pelos slugs da §4.5; DATABASE_SCHEMA.md se houver índice novo
 
 **QA:**
-- [ ] Suíte completa passando (com `.venv`)
+- [x] Suíte completa passando (com `.venv`)
 - [ ] Validação manual com cliente MCP real (§6.3)
 - [ ] Code review
 
@@ -515,4 +515,14 @@ Nenhum. Os 7 pontos levantados na escrita da spec foram confirmados pelo respons
 
 ## 12. Implementação
 
-*(a preencher após a implementação — resultado, arquivos novos, desvios em relação ao desenho e como rodar.)*
+**Resultado (2026-10-08):** 571/571 testes ✅ com `.venv` (500 anteriores + 71 novos: 65 de rota/serviço em `tests/test_admin_api.py` com repositórios em memória de `tests/admin_fakes.py`, 6 de integração em `tests/test_admin_integration.py` contra um Postgres 18 real com o `schema.sql`; a integração pula sozinha sem banco ou sem `users.is_admin`).
+
+**Arquivos novos:** `security/admin_auth.py`, `schemas/admin.py`, `services/user_admin_service.py`, `services/profile_admin_service.py`, `routes/{dependencies,admin_route,admin_users,admin_profiles,me}.py`, `repositories/sql_helpers.py`. **Modificados:** `security/password_hash.py`, `adapters/postgresql.py` (`Transaction` + `transaction()`), os três repositórios, `main.py`, CORS (`PUT`/`PATCH`), `requirements.txt` (`email-validator`).
+
+**Desvios em relação ao desenho:**
+- Tradução de erros por `AdminRoute` (`route_class` dos routers), não por handlers no app: assim funciona em apps de teste montados só com `include_router`, e cobre também o 401/403 levantado pelas dependências. Todas as exceções de domínio herdam de `AdminError` (status + slug).
+- O teste de "todas as rotas `/admin/*`" percorre `app.openapi()["paths"]`: no FastAPI 0.142 `app.routes` guarda os routers incluídos num wrapper (`_IncludedRouter`), não em `APIRoute`.
+- `last_admin_protected` só é reproduzível por corrida; o teste unitário simula-a trocando `lock_active_admin_ids`, e o de integração só roda se não houver outros admins ativos no banco.
+- `PATCH` com `name`/`is_active` = `null` é tratado como "não enviado" (colunas `NOT NULL`); `description: null` limpa o campo.
+
+**Como rodar:** `.venv/bin/python -m pytest tests` (a integração e os testes do app real usam o Config DB do `.env`, `localhost:5433`). Bancos existentes: `ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false;`; reconstruir a imagem Docker (nova dependência).

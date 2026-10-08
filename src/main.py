@@ -29,7 +29,10 @@ from database.connection import check_postgres, connect_config_db, disconnect_co
 from mcp_transport import configure_mcp
 from mcp_transport import lifespan as mcp_lifespan
 from mcp_transport.tools import analysis_service
+from routes.admin_profiles import router as admin_profiles_router
+from routes.admin_users import router as admin_users_router
 from routes.auth import router as auth_router
+from routes.me import router as me_router
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -57,6 +60,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 configure_mcp(app)
 app.include_router(auth_router)  # POST /auth/token, POST /auth/revoke — fora do /mcp, sem Bearer
+app.include_router(admin_users_router)  # F23: /admin/users — exige administrador
+app.include_router(admin_profiles_router)  # F23: /admin/profiles
+app.include_router(me_router)  # F23: GET /me, PUT /me/password — qualquer usuário autenticado
 
 
 @app.get("/health")
