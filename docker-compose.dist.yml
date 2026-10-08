@@ -1,10 +1,10 @@
 # Distribuição — rodar em OUTRO computador, sem o código-fonte (app + postgres, TLS no app).
 #
 # Um compose NÃO gera .tar: ele só constrói/tagueia as imagens. O .tar sai de `docker save`,
-# que o script scripts/build-dist.ps1 executa depois do build deste arquivo.
+# que o script scripts/build-dist.sh (macOS/Linux) ou build-dist.ps1 (Windows) executa depois do build deste arquivo.
 #
 # Este arquivo serve aos dois lados:
-#   Máquina de build (repositório):  .\scripts\build-dist.ps1 -Version 1.0.0
+#   Máquina de build (repositório):  ./scripts/build-dist.sh --version 1.0.0   (Windows: .\scripts\build-dist.ps1 -Version 1.0.0)
 #       → docker compose build  +  docker save  →  dist/ (tar + este compose + schema.sql + .env.example)
 #   Máquina de destino (só a pasta dist/):  docker load -i mcp-analysis-<versão>.tar
 #       → cp .env.example .env  (preencher)  →  docker compose up -d      (ver INSTALL.md gerado)
