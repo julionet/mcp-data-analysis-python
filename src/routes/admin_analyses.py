@@ -5,13 +5,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response
 
 from routes.admin_route import AdminRoute
-from routes.dependencies import get_analysis_admin_service
+from repositories.execution_repo import ExecutionFilters
+from routes.admin_executions import analysis_execution_filters
+from routes.dependencies import get_analysis_admin_service, get_execution_admin_service
 from schemas.admin import (
     AnalysisCreate,
     AnalysisDetail,
     AnalysisSummary,
     AnalysisUpdate,
     InvalidateResult,
+    ExecutionSummary,
     Page,
     ProfileIdsBody,
     ValidationReport,
@@ -19,6 +22,7 @@ from schemas.admin import (
 from schemas.auth import AuthenticatedUser
 from security.admin_auth import get_current_user, require_admin
 from services.analysis_admin_service import AnalysisAdminService
+from services.execution_admin_service import ExecutionAdminService
 
 router = APIRouter(
     prefix="/admin/analyses",
@@ -100,3 +104,15 @@ async def invalidate_analysis_cache(
     service: AnalysisAdminService = Depends(get_analysis_admin_service),
 ):
     return await service.invalidate_cache(analysis_id, actor)
+
+
+@router.get("/{analysis_id}/executions", response_model=Page[ExecutionSummary])
+async def list_analysis_executions(
+    analysis_id: UUID,
+    filters: ExecutionFilters = Depends(analysis_execution_filters),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    service: ExecutionAdminService = Depends(get_execution_admin_service),
+):
+    """F25: atalho do histórico por análise (404 se a análise não existe; inativa é aceita)."""
+    return await service.list_by_analysis(analysis_id, filters, limit, offset)

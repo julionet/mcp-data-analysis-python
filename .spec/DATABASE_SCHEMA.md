@@ -350,7 +350,7 @@ Para não haver confusão ao ler versões antigas de código/specs:
 - **Sem `CHECK`:** valores como `data_sources.type`, `analyses.cache_frequency`, `execution_history.status` são validados só em código.
 - **Fuso:** `access_tokens` usa `TIMESTAMPTZ`; as demais tabelas, `TIMESTAMP`.
 - **Cascata:** `analysis_steps`, `user_profiles`, `profile_analyses` e `access_tokens` apagam em cascata. `analyses.data_source_id`, `execution_history.analysis_id` e `execution_history.user_id` **não** — preservam a auditoria (bloqueie/desative em vez de apagar). A API administrativa (F23–F25, ARQUITETURA.md §2.4/ADR-008) segue isso: `DELETE` físico só sem dependentes, senão 409 orientando desativar/bloquear.
-- **Índices de `execution_history` e a consulta da F25:** os índices atuais (§5) são simples; índices compostos ou GIN em `parameters` só serão criados se o `EXPLAIN` justificar (decisão da F25, ARQUITETURA.md §2.4) — nenhum foi criado ainda.
+- **Índices de `execution_history` e a consulta da F25:** os índices atuais (§5) são simples; índices compostos ou GIN em `parameters` só serão criados se o `EXPLAIN` justificar (decisão da F25, ARQUITETURA.md §2.4) — nenhum foi criado ainda. **Medição da F25 (1 M de linhas, 2026-10-08):** GIN em `parameters` não se justifica; o único caso acima da meta (análise + filtro `parameters` raro: 1,5 s) cai para 43 ms com `CREATE INDEX idx_execution_history_analysis_executed_at ON execution_history (analysis_id, executed_at DESC);` — **proposto, aguardando decisão** (F25 §12).
 
 ---
 

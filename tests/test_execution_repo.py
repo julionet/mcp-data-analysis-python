@@ -1,11 +1,12 @@
-"""ExecutionRepository — create() e get_all() sobre o adapter do Config DB."""
+"""ExecutionRepository — create() (F8/F12/F14) e consulta administrativa (F25) sobre o adapter do Config DB."""
 
+from datetime import datetime
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
-from repositories.execution_repo import ExecutionRepository
+from repositories.execution_repo import ExecutionFilters, ExecutionRepository
 
 
 class TestExecutionRepository:
@@ -91,16 +92,100 @@ class TestExecutionRepository:
         _, *args = db.execute.await_args.args
         assert args[-1] is None
 
+    def test_get_all_was_replaced_by_search(self):
+        assert not hasattr(ExecutionRepository, "get_all")
+
+
+class TestExecutionQueries:
+    """F25: SQL e ordem dos valores ligados (o adapter liga o dict por posição, `$1…$n`)."""
+
     @pytest.mark.asyncio
-    async def test_get_all_uses_execute_query(self):
-        rows = [{"id": 1}, {"id": 2}]
+    async def test_search_without_filters_binds_nulls_then_limit_offset(self):
         db = AsyncMock()
-        db.execute_query.return_value = rows
-        repo = ExecutionRepository(db)
+        db.execute_query.return_value = [{"parameters": '{"a": 1}'}, {"parameters": None}]
 
-        result = await repo.get_all(limit=5)
+        rows = await ExecutionRepository(db).search(ExecutionFilters(), 50, 100)
 
-        assert result == rows
         query, params = db.execute_query.await_args.args
-        assert "LIMIT $1" in query
-        assert params == {"limit": 5}
+        assert list(params.values()) == [None] * 9 + [50, 100]
+        assert "ORDER BY e.executed_at DESC, e.id DESC LIMIT $10 OFFSET $11" in query
+        assert "LEFT JOIN users u" in query and "JOIN analyses a" in query
+        assert "error_message" not in query and "password" not in query and "token" not in query
+        assert [r["parameters"] for r in rows] == [{"a": 1}, {}]
+
+    @pytest.mark.asyncio
+    async def test_search_binds_every_filter_in_placeholder_order(self):
+        db = AsyncMock()
+        db.execute_query.return_value = []
+        aid, uid = uuid4(), uuid4()
+        start, end = datetime(2026, 10, 1), datetime(2026, 10, 2)
+        filters = ExecutionFilters(aid, uid, "error", "QUERY_FAILED", False, start, end, 500, {"regiao": "SP"})
+
+        await ExecutionRepository(db).search(filters, 10, 0)
+
+        query, params = db.execute_query.await_args.args
+        assert list(params.values()) == [
+            aid, uid, "error", "QUERY_FAILED", False, start, end, 500, '{"regiao": "SP"}', 10, 0,
+        ]
+        for i, fragment in enumerate(
+            ["e.analysis_id = $1", "e.user_id = $2", "e.status = $3", "e.error_code = $4", "e.cached = $5",
+             "e.executed_at >= $6", "e.executed_at < $7", "e.execution_time_ms >= $8", "e.parameters @> $9::jsonb"],
+            start=1,
+        ):
+            assert fragment in query, i
+
+    @pytest.mark.asyncio
+    async def test_count_uses_same_filters_without_joins(self):
+        db = AsyncMock()
+        db.execute_query.return_value = 7
+
+        total = await ExecutionRepository(db).count(ExecutionFilters(status="error"))
+
+        query, params = db.execute_query.await_args.args
+        assert total == 7 and db.execute_query.await_args.kwargs == {"scalar": True}
+        assert "JOIN" not in query and "FROM execution_history e" in query
+        assert list(params.values())[:3] == [None, None, "error"] and len(params) == 9
+
+    @pytest.mark.asyncio
+    async def test_get_detail_includes_error_message_and_none_when_missing(self):
+        db = AsyncMock()
+        eid = uuid4()
+        db.execute_query.return_value = [{"id": eid, "parameters": '{"x": 2}', "error_message": "boom"}]
+
+        row = await ExecutionRepository(db).get_detail(eid)
+
+        query, params = db.execute_query.await_args.args
+        assert "e.error_message" in query and "WHERE e.id = $1" in query and params == {"id": eid}
+        assert row["parameters"] == {"x": 2} and row["error_message"] == "boom"
+        db.execute_query.return_value = []
+        assert await ExecutionRepository(db).get_detail(eid) is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_period_uses_database_clock(self):
+        db = AsyncMock()
+        start, end = datetime(2026, 10, 1), datetime(2026, 10, 8)
+        db.execute_query.return_value = [{"period_from": start, "period_to": end}]
+
+        result = await ExecutionRepository(db).resolve_period(None, None, 7)
+
+        query, params = db.execute_query.await_args.args
+        assert result == (start, end) and "LOCALTIMESTAMP" in query
+        assert list(params.values()) == [None, None, 7]
+
+    @pytest.mark.asyncio
+    async def test_stats_runs_four_read_only_queries_with_period_bounds(self):
+        db = AsyncMock()
+        db.execute_query.side_effect = [[{"total": 0}], [], [], []]
+        start, end, aid = datetime(2026, 10, 1), datetime(2026, 10, 8), uuid4()
+
+        data = await ExecutionRepository(db).stats(start, end, aid, None, 5)
+
+        queries = [c.args[0] for c in db.execute_query.await_args_list]
+        assert len(queries) == 4 and set(data) == {"summary", "error_codes", "top_analyses", "top_users"}
+        assert all(q.lstrip().upper().startswith("SELECT") for q in queries)
+        assert "percentile_cont(0.95) WITHIN GROUP" in queries[0] and "FILTER" in queries[0]
+        assert all("e.executed_at >= $1 AND e.executed_at < $2" in q for q in queries)
+        first_params = db.execute_query.await_args_list[0].args[1]
+        assert list(first_params.values()) == [start, end, aid, None]
+        assert list(db.execute_query.await_args_list[2].args[1].values()) == [start, end, aid, None, 5]
+        assert "e.user_id IS NOT NULL" not in queries[3] and "JOIN users u" in queries[3]

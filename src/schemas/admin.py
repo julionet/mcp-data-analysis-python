@@ -7,7 +7,7 @@ formato de erro `{"error", "message"}` (ADR-008); `routes/admin_route.py` a trad
 """
 
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -204,6 +204,24 @@ class InvalidAnalysisDefinitionError(AdminError):
             "Definição da análise inválida: " + "; ".join(f"{i.field}: {i.message}" for i in issues)
         )
         self.issues = issues
+
+
+class ExecutionNotFoundError(AdminError):
+    status_code = 404
+    error = "execution_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("Execução não encontrada.")
+
+
+class InvalidPeriodError(AdminError):
+    status_code = 422
+    error = "invalid_period"
+
+
+class InvalidParametersFilterError(AdminError):
+    status_code = 422
+    error = "invalid_parameters_filter"
 
 
 # ---- requests ----
@@ -485,3 +503,91 @@ class AnalysisDetail(AnalysisSummary):
 class InvalidateResult(BaseModel):
     invalidated: bool
     updated_at: datetime
+
+
+# ---- F25: histórico de execuções (somente leitura) ----
+
+ExecutionStatus = Literal["success", "volume_exceeded", "error", "timeout"]
+# Os 7 códigos do contrato da F14 (ARQUITETURA.md §3.4.1); um teste os compara com schemas/exceptions.py.
+ExecutionErrorCode = Literal[
+    "ANALYSIS_NOT_FOUND",
+    "INVALID_PARAMETERS",
+    "INVALID_ANALYSIS_CONFIG",
+    "DATA_SOURCE_UNAVAILABLE",
+    "QUERY_TIMEOUT",
+    "QUERY_FAILED",
+    "INTERNAL_ERROR",
+]
+
+
+class ExecutionAnalysisRef(BaseModel):
+    id: UUID
+    name: str
+
+
+class ExecutionUserRef(BaseModel):
+    id: UUID
+    name: str
+    email: str  # users.external_id (str: o login "admin" do seed não é e-mail)
+
+
+class ExecutionSummary(BaseModel):
+    id: UUID
+    analysis: ExecutionAnalysisRef
+    user: ExecutionUserRef | None  # None em execuções pré-F12
+    status: str
+    error_code: str | None
+    cached: bool
+    parameters: dict[str, Any]
+    execution_time_ms: int | None
+    rows_affected: int | None
+    result_size_bytes: int | None
+    executed_at: datetime
+
+
+class ExecutionDetail(ExecutionSummary):
+    error_message: str | None
+
+
+class StatusCounts(BaseModel):
+    success: int
+    volume_exceeded: int
+    error: int
+    timeout: int
+
+
+class TimeStats(BaseModel):
+    count: int
+    avg: float | None
+    p95: float | None
+    max: int | None
+
+
+class CacheStats(BaseModel):
+    hits: int
+    success: int
+    hit_rate: float | None
+
+
+class ExecutionTopAnalysis(BaseModel):
+    analysis_id: UUID
+    name: str
+    count: int
+
+
+class ExecutionTopUser(BaseModel):
+    user_id: UUID
+    name: str
+    email: str
+    count: int
+
+
+class ExecutionStats(BaseModel):
+    period: dict[str, datetime]
+    total: int
+    by_status: StatusCounts
+    by_error_code: dict[str, int]
+    cache: CacheStats
+    execution_time_ms: dict[str, TimeStats]  # {"cache_hit": ..., "cache_miss": ...}
+    top_analyses: list[ExecutionTopAnalysis]
+    top_users: list[ExecutionTopUser]

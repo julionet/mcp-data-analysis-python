@@ -497,13 +497,13 @@ Regras que vêm do código atual:
 
 Código previsto: CRUD em `data_source_repo.py` e `analysis_repo.py` (incluindo steps); `services/data_source_admin_service.py`, `services/analysis_admin_service.py`; `routes/admin_data_sources.py`, `routes/admin_analyses.py`.
 
-#### F25 — Histórico de execuções
+#### F25 — Histórico de execuções (✅ implementada 2026-10-08)
 
-- `GET /admin/executions` — filtros `analysis_id`, `user_id`, `status`, `error_code`, `cached`, `from`/`to`, `min_time_ms`; ordenado por `executed_at` desc; paginação obrigatória; com nome da análise e do usuário e os `parameters` de cada execução, tempo, linhas e bytes.
+- `GET /admin/executions` — filtros (além de `parameters @>` como JSON objeto, tipo exato) `analysis_id`, `user_id`, `status`, `error_code`, `cached`, `from`/`to`, `min_time_ms`; ordenado por `executed_at` desc; paginação obrigatória; com nome da análise e do usuário e os `parameters` de cada execução, tempo, linhas e bytes.
 - `GET /admin/executions/{id}` — detalhe completo (inclui `error_message`).
-- `GET /admin/executions/stats?from=&to=` — contagem por status, p95 de tempo, taxa de cache hit, análises e usuários mais frequentes.
+- `GET /admin/executions/stats?from=&to=&analysis_id=&user_id=&top=` — contagem por status e por `error_code`, taxa de cache hit, tempo médio/p95/máx **separado em cache hit × miss**, análises e usuários mais frequentes; padrão últimos 7 dias, janela máxima 366.
 - `GET /admin/analyses/{id}/executions` — atalho por análise; filtro por valor de parâmetro (`parameters @> ...`) opcional.
-- `ExecutionRepository.get_all(limit)` é substituído por `search(filtros, limit, offset)` + `count`.
+- `ExecutionRepository.get_all(limit)` foi substituído por `search(filtros, limit, offset)` + `count` (+ `get_detail`, `resolve_period`, `stats`); código em `services/execution_admin_service.py` e `routes/admin_executions.py`. Spec e medição de `EXPLAIN`: `features/F25_API_ADMIN_HISTORICO_EXECUCOES.md` §12.
 - Os `parameters` gravados são os enviados pelo cliente, antes da validação (`AnalysisService`), podem conter dado sensível e não trazem defaults resolvidos; após editar uma análise podem divergir do schema atual. A tabela não tem política de retenção e cresce sem limite — por isso a paginação é obrigatória.
 - Índices atuais de `execution_history`: `analysis_id`, `executed_at`, `user_id` (simples). Índices compostos (ex.: `analysis_id, executed_at`) ou GIN em `parameters` só entram se o `EXPLAIN` justificar (mesmo critério da F15), como `ALTER`/`CREATE INDEX` manual.
 
@@ -1083,8 +1083,7 @@ src/
 │   ├── me.py                  # F23 (planejada) — GET /me, PUT /me/password
 │   ├── admin_data_sources.py  # F24 (planejada) — /admin/data-sources
 │   ├── admin_analyses.py      # F24 (planejada) — /admin/analyses
-│   └── admin_executions.py    # F25 (planejada) — /admin/executions
-│                              # (nome do arquivo da F25 a confirmar na spec)
+│   └── admin_executions.py    # F25 — /admin/executions (+ atalho em admin_analyses.py)
 │
 ├── adapters/
 │   ├── __init__.py
@@ -1105,7 +1104,8 @@ src/
 │   ├── user_admin_service.py        # F23 (planejada) — §2.4
 │   ├── profile_admin_service.py     # F23 (planejada)
 │   ├── data_source_admin_service.py # F24 (planejada)
-│   └── analysis_admin_service.py    # F24 (planejada); F25: ver spec (consulta ao histórico)
+│   └── analysis_admin_service.py    # F24
+│   └── execution_admin_service.py   # F25 — consulta ao histórico (somente leitura)
 │
 ├── security/
 │   ├── __init__.py

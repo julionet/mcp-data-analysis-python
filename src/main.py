@@ -31,6 +31,7 @@ from mcp_transport import lifespan as mcp_lifespan
 from mcp_transport.tools import analysis_service
 from routes.admin_analyses import router as admin_analyses_router
 from routes.admin_data_sources import router as admin_data_sources_router
+from routes.admin_executions import router as admin_executions_router
 from routes.admin_profiles import router as admin_profiles_router
 from routes.admin_users import router as admin_users_router
 from routes.auth import router as auth_router
@@ -66,6 +67,7 @@ app.include_router(admin_users_router)  # F23: /admin/users — exige administra
 app.include_router(admin_profiles_router)  # F23: /admin/profiles
 app.include_router(admin_data_sources_router)  # F24: /admin/data-sources
 app.include_router(admin_analyses_router)  # F24: /admin/analyses
+app.include_router(admin_executions_router)  # F25: /admin/executions
 app.include_router(me_router)  # F23: GET /me, PUT /me/password — qualquer usuário autenticado
 
 

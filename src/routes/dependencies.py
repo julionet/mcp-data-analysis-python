@@ -8,6 +8,7 @@ o Config DB ao importar este módulo.
 from repositories.user_repo import UserRepository
 from services.analysis_admin_service import AnalysisAdminService
 from services.data_source_admin_service import DataSourceAdminService
+from services.execution_admin_service import ExecutionAdminService
 from services.profile_admin_service import ProfileAdminService
 from services.user_admin_service import UserAdminService
 
@@ -61,4 +62,14 @@ def get_analysis_admin_service() -> AnalysisAdminService:
         DataSourceRepository(config_db_adapter),
         ProfileRepository(config_db_adapter),
         UserRepository(config_db_adapter),
+    )
+
+
+def get_execution_admin_service() -> ExecutionAdminService:
+    from database.connection import config_db_adapter
+    from repositories.analysis_repo import AnalysisRepository
+    from repositories.execution_repo import ExecutionRepository
+
+    return ExecutionAdminService(
+        ExecutionRepository(config_db_adapter), AnalysisRepository(config_db_adapter)
     )

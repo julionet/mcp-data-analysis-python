@@ -35,6 +35,8 @@ class Store:
         self.steps: dict[UUID, dict] = {}  # F24: step_id -> linha
         self.history_analysis_ids: set[UUID] = set()  # F24
         self.clock = 0  # F24: relógio fake de updated_at
+        self.executions: list[dict] = []  # F25
+        self.now = datetime(2026, 10, 8, 12, 0)  # F25: LOCALTIMESTAMP fake
 
     def snapshot(self):
         return copy.deepcopy(self.__dict__)
@@ -472,3 +474,124 @@ class FakeAnalysisRepo:
     async def replace_profiles(self, analysis_id, profile_ids, db):
         self.s.profile_analyses = {p for p in self.s.profile_analyses if p[1] != analysis_id}
         self.s.profile_analyses |= {(pid, analysis_id) for pid in profile_ids}
+
+
+# ---- F25: histórico de execuções ----
+
+_UNSET = object()
+
+
+def _percentile_cont(values: list[int], q: float) -> float:
+    ordered = sorted(values)
+    pos = (len(ordered) - 1) * q
+    low = int(pos)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (pos - low)
+
+
+class FakeExecutionRepo:
+    """Implementa a semântica do ExecutionRepository (F25) sobre `store.executions`.
+    Registra as chamadas em `calls` para os testes de somente-leitura."""
+
+    def __init__(self, store: Store) -> None:
+        self.s = store
+        self.calls: list[str] = []
+
+    def add(self, analysis_id, user_id=_UNSET, status="success", executed_at=None, parameters=None,
+            cached=False, error_code=None, error_message=None, time_ms=10, rows=5, size=100) -> UUID:
+        eid = uuid4()
+        self.s.executions.append(dict(
+            id=eid, analysis_id=analysis_id, user_id=None if user_id is _UNSET else user_id,
+            status=status, error_code=error_code, cached=cached, parameters=parameters or {},
+            execution_time_ms=time_ms, rows_affected=rows, result_size_bytes=size,
+            executed_at=executed_at or self.s.now - timedelta(minutes=1), error_message=error_message,
+        ))
+        return eid
+
+    def _matches(self, e, f) -> bool:
+        def contains(doc, sub):
+            return all(k in doc and doc[k] == v and type(doc[k]) is type(v) for k, v in sub.items())
+
+        return ((f.analysis_id is None or e["analysis_id"] == f.analysis_id)
+                and (f.user_id is None or e["user_id"] == f.user_id)
+                and (f.status is None or e["status"] == f.status)
+                and (f.error_code is None or e["error_code"] == f.error_code)
+                and (f.cached is None or e["cached"] == f.cached)
+                and (f.executed_from is None or e["executed_at"] >= f.executed_from)
+                and (f.executed_to is None or e["executed_at"] < f.executed_to)
+                and (f.min_time_ms is None or (e["execution_time_ms"] is not None
+                                               and e["execution_time_ms"] >= f.min_time_ms))
+                and (f.parameters is None or contains(e["parameters"], f.parameters)))
+
+    def _row(self, e, detail=False) -> dict:
+        user = self.s.users.get(e["user_id"]) if e["user_id"] else None
+        row = {k: e[k] for k in ("id", "analysis_id", "user_id", "status", "error_code", "cached",
+                                 "execution_time_ms", "rows_affected", "result_size_bytes", "executed_at")}
+        row.update(analysis_name=self.s.analyses[e["analysis_id"]]["name"],
+                   user_name=user["name"] if user else None,
+                   user_email=user["external_id"] if user else None,
+                   parameters=copy.deepcopy(e["parameters"]))
+        if detail:
+            row["error_message"] = e["error_message"]
+        return row
+
+    async def search(self, filters, limit, offset):
+        self.calls.append("search")
+        rows = sorted((e for e in self.s.executions if self._matches(e, filters)),
+                      key=lambda e: (e["executed_at"], str(e["id"])), reverse=True)
+        return [self._row(e) for e in rows[offset:offset + limit]]
+
+    async def count(self, filters):
+        self.calls.append("count")
+        return sum(1 for e in self.s.executions if self._matches(e, filters))
+
+    async def get_detail(self, execution_id):
+        self.calls.append("get_detail")
+        e = next((e for e in self.s.executions if e["id"] == execution_id), None)
+        return self._row(e, detail=True) if e else None
+
+    async def resolve_period(self, executed_from, executed_to, default_days):
+        self.calls.append("resolve_period")
+        period_to = executed_to or self.s.now
+        return executed_from or period_to - timedelta(days=default_days), period_to
+
+    async def stats(self, executed_from, executed_to, analysis_id, user_id, top):
+        self.calls.append("stats")
+        rows = [e for e in self.s.executions
+                if executed_from <= e["executed_at"] < executed_to
+                and (analysis_id is None or e["analysis_id"] == analysis_id)
+                and (user_id is None or e["user_id"] == user_id)]
+        summary = {"total": len(rows)}
+        for status in ("success", "volume_exceeded", "error", "timeout"):
+            summary[status] = sum(1 for e in rows if e["status"] == status)
+        for prefix, hit in (("hit", True), ("miss", False)):
+            ok = [e for e in rows if e["status"] == "success" and bool(e["cached"]) == hit]
+            times = [e["execution_time_ms"] for e in ok if e["execution_time_ms"] is not None]
+            summary.update({
+                f"{prefix}_count": len(ok),
+                f"{prefix}_avg": sum(times) / len(times) if times else None,
+                f"{prefix}_p95": _percentile_cont(times, 0.95) if times else None,
+                f"{prefix}_max": max(times) if times else None,
+            })
+        codes: dict[str, int] = {}
+        for e in rows:
+            if e["error_code"]:
+                codes[e["error_code"]] = codes.get(e["error_code"], 0) + 1
+        by_analysis: dict = {}
+        by_user: dict = {}
+        for e in rows:
+            by_analysis[e["analysis_id"]] = by_analysis.get(e["analysis_id"], 0) + 1
+            if e["user_id"]:
+                by_user[e["user_id"]] = by_user.get(e["user_id"], 0) + 1
+        return {
+            "summary": summary,
+            "error_codes": [{"error_code": c, "count": n}
+                            for c, n in sorted(codes.items(), key=lambda kv: (-kv[1], kv[0]))],
+            "top_analyses": [{"analysis_id": a, "name": self.s.analyses[a]["name"], "count": n}
+                             for a, n in sorted(by_analysis.items(),
+                                                key=lambda kv: (-kv[1], self.s.analyses[kv[0]]["name"]))][:top],
+            "top_users": [{"user_id": u, "name": self.s.users[u]["name"], "email": self.s.users[u]["external_id"],
+                           "count": n}
+                          for u, n in sorted(by_user.items(),
+                                             key=lambda kv: (-kv[1], self.s.users[kv[0]]["name"]))][:top],
+        }

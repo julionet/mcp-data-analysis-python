@@ -63,7 +63,3 @@ class AuditService:
             )
         except Exception:
             logger.exception("Falha ao gravar execution_history (análise '%s')", analysis_id)
-
-    async def get_execution_history(self, limit: int = 100) -> list[dict]:
-        """Sem exposição via MCP nesta feature — método interno para uso futuro."""
-        return await self.execution_repo.get_all(limit=limit)

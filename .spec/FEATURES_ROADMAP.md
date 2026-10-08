@@ -163,7 +163,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | 🟩 Done (2026-10-07) |
 | F23 | API Admin: base + Usuários + Perfis (`/admin/users`, `/admin/profiles`, `/me`) | 🟠 Alta | 3.5d | F12 | 🟩 Done (2026-10-08; validação manual pendente: `features/F23_API_ADMIN_USUARIOS_PERFIS.md` §12) |
 | F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | 🟩 Done (2026-10-08; validação manual pendente: `features/F24_API_ADMIN_DATA_SOURCES_ANALYSES.md` §12) |
-| F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | ⬜ Todo (spec pendente) |
+| F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | 🟩 Done (2026-10-08) — `features/F25_API_ADMIN_HISTORICO_EXECUCOES.md` |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | ⬜ Todo |
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
 | F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
