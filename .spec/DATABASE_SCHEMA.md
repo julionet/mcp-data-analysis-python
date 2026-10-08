@@ -57,6 +57,8 @@ Representa uma conexão a um banco de dados externo (o "de onde" os dados de neg
 
 **Relacionamentos:** referenciada por `analyses.data_source_id` (1 fonte → N análises).
 
+**Gestão pela API (F24):** `POST/PATCH /admin/data-sources` cifram `connection_config.password` (Fernet) e rejeitam chaves desconhecidas para o `type`; alterar `connection_config` ou `is_active` atualiza o `updated_at` das analyses da fonte (o cache não conhece o data source). Em `postgresql`, o par efetivo `pool_min_size ≤ pool_max_size` (valor informado ou padrão `PG_POOL_*` do `.env`) é validado.
+
 ---
 
 ### 2.2 `analyses` — Análises (Definições)

@@ -3,7 +3,7 @@
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
 **Versão:** 1.22 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-08 (atualizado 2026-10-08 — API administrativa F23–F25 planejada)
+**Data:** 2026-10-08 (atualizado 2026-10-08 — API administrativa: F23 e F24 implementadas, F25 planejada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
@@ -162,7 +162,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | 🟩 Done (2026-10-03) |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | 🟩 Done (2026-10-07) |
 | F23 | API Admin: base + Usuários + Perfis (`/admin/users`, `/admin/profiles`, `/me`) | 🟠 Alta | 3.5d | F12 | 🟩 Done (2026-10-08; validação manual pendente: `features/F23_API_ADMIN_USUARIOS_PERFIS.md` §12) |
-| F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | ⬜ Todo (spec pendente) |
+| F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | 🟩 Done (2026-10-08; validação manual pendente: `features/F24_API_ADMIN_DATA_SOURCES_ANALYSES.md` §12) |
 | F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | ⬜ Todo (spec pendente) |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | ⬜ Todo |
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
@@ -186,7 +186,7 @@ F23 (base + Usuários + Perfis):
 ├─ /me (GET) e /me/password (PUT) — autosserviço de qualquer usuário autenticado
 └─ Proteções: último admin ativo e o próprio admin não podem ser bloqueados/excluídos/rebaixados
 
-F24 (Data Sources + Analyses):
+F24 (Data Sources + Analyses) — spec: features/F24_API_ADMIN_DATA_SOURCES_ANALYSES.md (cache/invalidate = bump de updated_at; validate só estático; PATCH de conexão mesclado; teste de conexão salvo e prévio):
 ├─ /admin/data-sources: CRUD (valida chaves por type; cifra password com Fernet; nunca devolve),
 │  test-connection, GET /types; editar/desativar invalida o pool em AnalysisService._adapters
 └─ /admin/analyses: CRUD com analysis_steps e perfis em transação, validate_schema dos parâmetros,
@@ -481,7 +481,7 @@ XXX_PARAM=value
 8. ✅ F8: Log de execução (analysis_id, params, status, tempo, cached flag)
 ```
 
-### Sprint 3 — Estado atual (4/10) e ordem sugerida do que resta (v1.22: inclui F23–F25, API administrativa, antes de F17/F16/F18)
+### Sprint 3 — Estado atual (6/12 com F23–F25) e ordem sugerida do que resta (v1.22: inclui F23–F25, API administrativa, antes de F17/F16/F18)
 ```markdown
 ✅ F12: Autenticação e Controle de Acesso via Perfis
 ✅ F13: Docker Setup (Local + Remote)
@@ -491,7 +491,7 @@ XXX_PARAM=value
    MySQL/SQL Server completos, SSE no nginx, Oracle 23ai, queda do Config DB, timeout de query,
    bloqueio de usuário, EXPLAIN com volume realista)
 1. 🟩 F23: API Admin — base + Usuários + Perfis (feito 2026-10-08)
-2. ⬜ F24: API Admin — Data Sources + Analyses (spec pendente)
+2. 🟩 F24: API Admin — Data Sources + Analyses (feito 2026-10-08)
 3. ⬜ F25: API Admin — Histórico de Execuções (spec pendente)
 4. ⬜ F17: Unit Tests (80% coverage) — medir cobertura e preencher lacunas (cobre também F23–F25)
 5. ⬜ F16: API Documentation (MCP + Multi-Cliente) — inclui contrato de erro da F14, /auth/* e /admin/*

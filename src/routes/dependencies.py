@@ -6,6 +6,8 @@ o Config DB ao importar este módulo.
 """
 
 from repositories.user_repo import UserRepository
+from services.analysis_admin_service import AnalysisAdminService
+from services.data_source_admin_service import DataSourceAdminService
 from services.profile_admin_service import ProfileAdminService
 from services.user_admin_service import UserAdminService
 
@@ -30,3 +32,33 @@ def get_profile_admin_service() -> ProfileAdminService:
     from repositories.profile_repo import ProfileRepository
 
     return ProfileAdminService(config_db_adapter, ProfileRepository(config_db_adapter))
+
+
+def get_data_source_admin_service() -> DataSourceAdminService:
+    # Import tardio: o singleton `analysis_service` (dono do pool de adapters) só é
+    # necessário para invalidá-lo ao editar/desativar/excluir um data source (F24 §4.3).
+    from database.connection import config_db_adapter
+    from mcp_transport.tools import analysis_service
+    from repositories.data_source_repo import DataSourceRepository
+
+    return DataSourceAdminService(
+        config_db_adapter,
+        DataSourceRepository(config_db_adapter),
+        analysis_service,
+        UserRepository(config_db_adapter),
+    )
+
+
+def get_analysis_admin_service() -> AnalysisAdminService:
+    from database.connection import config_db_adapter
+    from repositories.analysis_repo import AnalysisRepository
+    from repositories.data_source_repo import DataSourceRepository
+    from repositories.profile_repo import ProfileRepository
+
+    return AnalysisAdminService(
+        config_db_adapter,
+        AnalysisRepository(config_db_adapter),
+        DataSourceRepository(config_db_adapter),
+        ProfileRepository(config_db_adapter),
+        UserRepository(config_db_adapter),
+    )

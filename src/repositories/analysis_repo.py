@@ -18,6 +18,19 @@ from typing import Any
 from uuid import UUID
 
 from adapters.postgresql import PostgreSQLAdapter
+from repositories.sql_helpers import like_pattern
+
+_ADMIN_COLUMNS = (
+    "a.id, a.name, a.description, a.data_source_id, ds.name AS data_source_name, "
+    "a.cache_frequency, a.is_active, a.created_by, a.created_at, a.updated_at, "
+    "(SELECT COUNT(*) FROM profile_analyses pa WHERE pa.analysis_id = a.id) AS profiles_count"
+)
+_ADMIN_FROM = "FROM analyses a LEFT JOIN data_sources ds ON ds.id = a.data_source_id"
+_ADMIN_FILTERS = (
+    "WHERE ($1::text IS NULL OR a.name ILIKE $1 ESCAPE '\\' OR a.description ILIKE $1 ESCAPE '\\') "
+    "AND ($2::uuid IS NULL OR a.data_source_id = $2) "
+    "AND ($3::bool IS NULL OR a.is_active = $3)"
+)
 
 
 def _load_json(value: Any) -> Any:
@@ -122,10 +135,118 @@ class AnalysisRepository:
         )
         return [_to_analysis(row) for row in rows]
 
-    async def get_steps(self, analysis_id: UUID) -> list[AnalysisStep]:
-        rows = await self._db.execute_query(
+    async def get_steps(self, analysis_id: UUID, db=None) -> list[AnalysisStep]:
+        rows = await (db or self._db).execute_query(
             "SELECT id, analysis_id, step_order, step_type, definition "
             "FROM analysis_steps WHERE analysis_id = $1 ORDER BY step_order",
             {"analysis_id": analysis_id},
         )
         return [_to_step(row) for row in rows]
+
+    # ---- F24: administração (inclui inativas; aceitam `db` opcional: adapter ou Transaction) ----
+
+    async def admin_list(
+        self, q: str | None, data_source_id: UUID | None, is_active: bool | None,
+        limit: int, offset: int,
+    ) -> tuple[list[dict], int]:
+        filters = {"q": like_pattern(q), "data_source_id": data_source_id, "is_active": is_active}
+        total = await self._db.execute_query(
+            f"SELECT COUNT(*) {_ADMIN_FROM} {_ADMIN_FILTERS}", filters, scalar=True
+        )
+        rows = await self._db.execute_query(
+            f"SELECT {_ADMIN_COLUMNS} {_ADMIN_FROM} {_ADMIN_FILTERS} "
+            "ORDER BY a.name, a.id LIMIT $4 OFFSET $5",
+            {**filters, "limit": limit, "offset": offset},
+        )
+        return rows, total
+
+    async def get_admin_row(self, analysis_id: UUID, db=None) -> dict | None:
+        """Resumo + `parameters` (decodificado), ativa ou inativa."""
+        rows = await (db or self._db).execute_query(
+            f"SELECT {_ADMIN_COLUMNS}, a.parameters {_ADMIN_FROM} WHERE a.id = $1",
+            {"id": analysis_id},
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        row["parameters"] = _load_json(row["parameters"]) or {}
+        return row
+
+    async def get_profiles(self, analysis_id: UUID, db=None) -> list[dict]:
+        return await (db or self._db).execute_query(
+            "SELECT p.id, p.name, p.is_active FROM profiles p "
+            "JOIN profile_analyses pa ON pa.profile_id = p.id WHERE pa.analysis_id = $1 "
+            "ORDER BY p.name, p.id",
+            {"analysis_id": analysis_id},
+        )
+
+    async def create(self, fields: dict, db=None) -> UUID:
+        """`fields`: name, description, data_source_id, cache_frequency, parameters, is_active, created_by."""
+        return await (db or self._db).execute_query(
+            "INSERT INTO analyses (name, description, data_source_id, cache_frequency, "
+            "parameters, is_active, created_by) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7) RETURNING id",
+            {**fields, "parameters": json.dumps(fields["parameters"])},
+            scalar=True,
+        )
+
+    async def create_step(self, analysis_id: UUID, definition: dict, db=None) -> UUID:
+        return await (db or self._db).execute_query(
+            "INSERT INTO analysis_steps (analysis_id, step_order, step_type, definition) "
+            "VALUES ($1, 1, 'query', $2::jsonb) RETURNING id",
+            {"analysis_id": analysis_id, "definition": json.dumps(definition)},
+            scalar=True,
+        )
+
+    async def update_step(self, step_id: UUID, definition: dict, db=None) -> None:
+        await (db or self._db).execute_query(
+            "UPDATE analysis_steps SET definition = $2::jsonb, updated_at = NOW() "
+            "WHERE id = $1 RETURNING id",
+            {"id": step_id, "definition": json.dumps(definition)},
+        )
+
+    async def update(self, analysis_id: UUID, fields: dict, db=None) -> bool:
+        """`updated_at = NOW()` SEMPRE (entra na chave do cache — F7); `fields` pode ser vazio."""
+        values = {k: (json.dumps(v) if k == "parameters" else v) for k, v in fields.items()}
+        parts = [
+            f"{col} = ${i}::jsonb" if col == "parameters" else f"{col} = ${i}"
+            for i, col in enumerate(values, start=2)
+        ]
+        rows = await (db or self._db).execute_query(
+            f"UPDATE analyses SET {', '.join(parts + ['updated_at = NOW()'])} "
+            "WHERE id = $1 RETURNING id",
+            {"id": analysis_id, **values},
+        )
+        return bool(rows)
+
+    async def touch(self, analysis_id: UUID, db=None):
+        """Invalidação de cache: devolve o novo updated_at, ou None se a análise não existe."""
+        return await (db or self._db).execute_query(
+            "UPDATE analyses SET updated_at = NOW() WHERE id = $1 RETURNING updated_at",
+            {"id": analysis_id},
+            scalar=True,
+        )
+
+    async def has_history(self, analysis_id: UUID, db=None) -> bool:
+        return bool(
+            await (db or self._db).execute_query(
+                "SELECT 1 FROM execution_history WHERE analysis_id = $1 LIMIT 1",
+                {"analysis_id": analysis_id},
+                scalar=True,
+            )
+        )
+
+    async def delete(self, analysis_id: UUID, db=None) -> bool:
+        """Físico: analysis_steps e profile_analyses caem em cascata."""
+        rows = await (db or self._db).execute_query(
+            "DELETE FROM analyses WHERE id = $1 RETURNING id", {"id": analysis_id}
+        )
+        return bool(rows)
+
+    async def replace_profiles(self, analysis_id: UUID, profile_ids: list[UUID], db) -> None:
+        await db.execute("DELETE FROM profile_analyses WHERE analysis_id = $1", analysis_id)
+        if profile_ids:
+            await db.execute(
+                "INSERT INTO profile_analyses (analysis_id, profile_id) SELECT $1, UNNEST($2::uuid[])",
+                analysis_id,
+                profile_ids,
+            )

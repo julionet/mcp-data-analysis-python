@@ -30,6 +30,12 @@ _STRIP_PATTERN = re.compile(
     re.VERBOSE | re.DOTALL,
 )
 
+# Igual ao anterior, mas preserva os placeholders (F24: extract_placeholders)
+_STRIP_KEEP_PLACEHOLDERS = re.compile(
+    _STRIP_PATTERN.pattern.rsplit("| (?<!:):", 1)[0], re.VERBOSE | re.DOTALL
+)
+_PLACEHOLDER = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
+
 _FORBIDDEN_KEYWORDS = frozenset(
     {
         "INSERT", "UPDATE", "DELETE", "MERGE",  # REPLACE fica de fora: é função de string comum
@@ -61,3 +67,10 @@ def validate_select_only(sql: str) -> None:
         raise InvalidAnalysisSchemaError(
             f"SQL da análise não permitido: palavra(s) proibida(s) {', '.join(forbidden)} — só SELECT é aceito."
         )
+
+
+def extract_placeholders(sql: str) -> list[str]:
+    """Nomes `:param` usados no SQL, sem repetição e na ordem de aparição. Ignora literais,
+    identificadores entre aspas, comentários e casts `::tipo` (mesma limpeza de validate_select_only)."""
+    cleaned = _STRIP_KEEP_PLACEHOLDERS.sub(" ", sql)
+    return list(dict.fromkeys(_PLACEHOLDER.findall(cleaned)))

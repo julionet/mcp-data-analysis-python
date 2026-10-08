@@ -97,8 +97,8 @@ class ProfileRepository:
         )
 
     async def existing_ids(self, table: str, ids: list[UUID], db=None) -> set[UUID]:
-        """`table`: 'users' ou 'analyses' (fixo no código)."""
-        assert table in ("users", "analyses")
+        """`table`: 'users', 'analyses' ou 'profiles' (fixo no código)."""
+        assert table in ("users", "analyses", "profiles")
         rows = await (db or self._db).execute_query(
             f"SELECT id FROM {table} WHERE id = ANY($1::uuid[])", {"ids": ids}
         )

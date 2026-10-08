@@ -7,7 +7,7 @@ formato de erro `{"error", "message"}` (ADR-008); `routes/admin_route.py` a trad
 """
 
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -126,6 +126,84 @@ class InvalidReferenceError(AdminError):
     def __init__(self, kind: str, missing: list[UUID]) -> None:
         super().__init__(f"{kind} inexistentes: {', '.join(str(i) for i in missing)}.")
         self.missing = missing
+
+
+class DataSourceNotFoundError(AdminError):
+    status_code = 404
+    error = "data_source_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("Data source não encontrado.")
+
+
+class AdminAnalysisNotFoundError(AdminError):
+    status_code = 404
+    error = "analysis_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("Análise não encontrada.")
+
+
+class DataSourceNameAlreadyExistsError(AdminError):
+    status_code = 409
+    error = "data_source_name_already_exists"
+
+    def __init__(self) -> None:
+        super().__init__("Já existe um data source com este nome.")
+
+
+class AnalysisNameAlreadyExistsError(AdminError):
+    status_code = 409
+    error = "analysis_name_already_exists"
+
+    def __init__(self) -> None:
+        super().__init__("Já existe uma análise com este nome.")
+
+
+class DataSourceHasAnalysesError(AdminError):
+    status_code = 409
+    error = "data_source_has_analyses"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "O data source tem análises vinculadas e não pode ser excluído; desative-o."
+        )
+
+
+class AnalysisHasHistoryError(AdminError):
+    status_code = 409
+    error = "analysis_has_history"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A análise tem histórico de execuções e não pode ser excluída; desative-a."
+        )
+
+
+class InvalidConnectionConfigError(AdminError):
+    status_code = 422
+    error = "invalid_connection_config"
+
+
+class UnsupportedDataSourceTypeError(AdminError):
+    status_code = 422
+    error = "unsupported_data_source_type"
+
+    def __init__(self, type_: str, supported: list[str]) -> None:
+        super().__init__(
+            f"Tipo de data source '{type_}' não suportado. Tipos disponíveis: {', '.join(supported)}."
+        )
+
+
+class InvalidAnalysisDefinitionError(AdminError):
+    status_code = 422
+    error = "invalid_analysis_definition"
+
+    def __init__(self, issues: list["Issue"]) -> None:
+        super().__init__(
+            "Definição da análise inválida: " + "; ".join(f"{i.field}: {i.message}" for i in issues)
+        )
+        self.issues = issues
 
 
 # ---- requests ----
@@ -266,3 +344,144 @@ class ProfileAnalysisRef(BaseModel):
 class ProfileDetail(ProfileSummary):
     users: list[ProfileUserRef]
     analyses: list[ProfileAnalysisRef]
+
+
+# ---- F24: data sources ----
+
+
+class DataSourceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    type: str = Field(min_length=1, max_length=50)
+    connection_config: dict[str, Any]
+    is_active: bool = True
+
+
+class DataSourceUpdate(_AtLeastOneField):
+    """`type` não é alterável (F24 decisão 9). `connection_config` é mesclado com o salvo."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    is_active: bool | None = None
+    connection_config: dict[str, Any] | None = None
+
+
+class ConnectionTestBody(BaseModel):
+    type: str = Field(min_length=1, max_length=50)
+    connection_config: dict[str, Any]
+
+
+class DataSourceSummary(BaseModel):
+    id: UUID
+    name: str
+    type: str
+    is_active: bool
+    analyses_count: int
+    created_by: str | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class DataSourceAnalysisRef(BaseModel):
+    id: UUID
+    name: str
+    is_active: bool
+
+
+class DataSourceDetail(DataSourceSummary):
+    connection_config: dict[str, Any]  # nunca contém `password`
+    has_password: bool
+    analyses: list[DataSourceAnalysisRef]
+
+
+class ConnectionTestResult(BaseModel):
+    ok: bool
+    message: str
+    error_type: str | None = None
+    elapsed_ms: int
+
+
+class DataSourceTypeInfo(BaseModel):
+    type: str
+    required: list[str]
+    optional: list[dict[str, Any]]
+    one_of: list[list[str]]
+
+
+# ---- F24: analyses ----
+
+
+class Issue(BaseModel):
+    code: str
+    field: str
+    message: str
+
+
+class ValidationReport(BaseModel):
+    valid: bool
+    errors: list[Issue]
+    warnings: list[Issue]
+
+
+class StepInput(BaseModel):
+    sql: str = Field(min_length=1)
+    params: list[str] = []
+
+
+class StepUpdate(_AtLeastOneField):
+    sql: str | None = Field(default=None, min_length=1)
+    params: list[str] | None = None
+
+
+class AnalysisCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    data_source_id: UUID
+    cache_frequency: str = "daily"
+    parameters: dict[str, Any] = {}
+    is_active: bool = True
+    step: StepInput
+    profile_ids: list[UUID] = []
+
+
+class AnalysisUpdate(_AtLeastOneField):
+    """`parameters` substitui o objeto inteiro; `step` mescla `sql`/`params` sobre o atual."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    data_source_id: UUID | None = None
+    cache_frequency: str | None = None
+    parameters: dict[str, Any] | None = None
+    is_active: bool | None = None
+    step: StepUpdate | None = None
+
+
+class AnalysisSummary(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    data_source_id: UUID | None
+    data_source_name: str | None
+    cache_frequency: str
+    is_active: bool
+    profiles_count: int
+    created_by: str | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class StepOut(BaseModel):
+    id: UUID
+    step_order: int
+    step_type: str
+    sql: str | None
+    params: list[str]
+
+
+class AnalysisDetail(AnalysisSummary):
+    parameters: dict[str, Any]
+    step: StepOut | None
+    profiles: list[ProfileRef]
+
+
+class InvalidateResult(BaseModel):
+    invalidated: bool
+    updated_at: datetime

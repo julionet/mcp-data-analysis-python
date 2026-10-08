@@ -27,6 +27,7 @@ _TTL_BY_FREQUENCY: dict[str, int | None] = {
     "weekly": 604800,
     "none": None,
 }
+CACHE_FREQUENCIES = tuple(_TTL_BY_FREQUENCY)  # valores aceitos em analyses.cache_frequency (F24)
 
 
 @dataclass

@@ -7,6 +7,8 @@
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Atualização 2026-10-08 (sem mudar a versão):** **F24 implementada** (`features/F24_*.md` §12) — spec confirmada (`features/F24_*.md`) — `validate` só estático, `cache/invalidate` por `updated_at`, `connection_config` mesclado no PATCH, teste de conexão salvo e prévio, invalidação do pool `AnalysisService._adapters` ao editar/desativar/excluir data source. Sem mudança de schema.
+>
 > **Nota de revisão (v1.25 → v1.26):** planejada a **API administrativa (`/admin/*`)** — features **F23** (base + usuários + perfis + `/me`), **F24** (data sources + analyses) e **F25** (histórico de execuções), para suportar um frontend de gestão (NEGOCIO.md v1.12, RF6/UC4). Nada disso está implementado ainda; este documento registra o desenho aprovado e as specs (`features/F23_*.md`, `F24_*.md`, `F25_*.md`) o detalham antes do código. Novos: **§2.4** (API administrativa: convenções, endpoints, regras), **§3.6** (fluxo de autorização administrativa), **ADR-008** (papel `is_admin`; formato de erro; exclusão híbrida). Mudanças de schema (§2.2): `users.is_admin BOOLEAN NOT NULL DEFAULT false` (bancos existentes: `ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false;`, manual — sem migrations). Mudanças de código previstas: novos routers em `routes/`, services `*_admin_service.py`, métodos de list/count/create/update nos repositórios (hoje só leem), `hash_password` em `security/password_hash.py`, `transaction()` em `PostgreSQLAdapter`, método de invalidação de pool em `AnalysisService`, `PUT`/`PATCH` no CORS (§5.2, §2.4). O desenho do `/mcp` (§3.5, ADR-006/007) **não muda**.
 
 > **Nota de revisão (v1.24 → v1.25):** F14 (Error Handling & Validation) implementada (2026-10-03). Nova §3.4.1 (contrato de erro: `error_code`/`retryable`, retry, status `timeout`); `execution_history` ganha `error_code` (§2.2 DDL; bancos existentes: `ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);`). Ver `features/F14_ERROR_HANDLING_VALIDATION.md`.
@@ -480,11 +482,11 @@ Proteções: o último administrador ativo e o próprio administrador autenticad
 
 Código previsto: métodos novos em `user_repo.py`, `profile_repo.py` e `access_token_repo.py` (listar por usuário, revogar por id, revogar todos); `services/user_admin_service.py`, `services/profile_admin_service.py`; `schemas/admin.py`; `routes/admin_users.py`, `routes/admin_profiles.py`, `routes/me.py`.
 
-#### F24 — Data Sources + Analyses
+#### F24 — Data Sources + Analyses (✅ implementada 2026-10-08)
 
 `/admin/data-sources`: listar/detalhar (config sem `password`); criar (valida as chaves obrigatórias por `type` conforme DATABASE_SCHEMA.md §4 e cifra `password` com `encrypt_password`, `security/crypto.py`); alterar (a senha só é regravada se enviada); excluir (409 se há analyses → desativar); `POST /admin/data-sources/{id}/test-connection` (usa o `test_connection` do adapter); `GET /admin/data-sources/types` (tipos e campos exigidos, para formulários).
 
-`/admin/analyses`: listar (`q`, `data_source_id`, `is_active`) e detalhar (com steps e perfis); criar (análise + step + perfis numa única transação); alterar (name, description, `cache_frequency`, `parameters`, `is_active`, SQL/params do step); excluir (409 se há histórico → desativar); `PUT /admin/analyses/{id}/profiles`; `POST /admin/analyses/{id}/validate` (confere os placeholders `:param` do SQL contra `analyses.parameters`; um dry-run de `COUNT(*)` é opcional e fica para a spec); `POST /admin/analyses/{id}/cache/invalidate`.
+`/admin/analyses`: listar (`q`, `data_source_id`, `is_active`) e detalhar (com steps e perfis); criar (análise + step + perfis numa única transação); alterar (name, description, `cache_frequency`, `parameters`, `is_active`, SQL/params do step); excluir (409 se há histórico → desativar); `PUT /admin/analyses/{id}/profiles`; `POST /admin/analyses/{id}/validate` (**só estático**, sem tocar no data source: parâmetros, SQL, `params` do step × `analyses.parameters` × placeholders `:param` do SQL; sem dry-run — decisão 2026-10-08); `POST /admin/analyses/{id}/cache/invalidate` (faz `updated_at = NOW()`: as chaves antigas ficam inalcançáveis e saem por TTL/LRU, sem mudar o `CacheBackend`). Detalhes, erros e decisões: `features/F24_API_ADMIN_DATA_SOURCES_ANALYSES.md`.
 
 Regras que vêm do código atual:
 - `analyses.updated_at` entra na chave do cache (`CacheService.build_key`, §3.2): **toda** alteração de análise ou de step deve atualizá-lo, senão o resultado antigo continua sendo servido.

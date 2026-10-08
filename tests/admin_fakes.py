@@ -31,6 +31,10 @@ class Store:
         self.profile_analyses: set[tuple[UUID, UUID]] = set()
         self.tokens: dict[UUID, dict] = {}
         self.history_user_ids: set[UUID] = set()
+        self.data_sources: dict[UUID, dict] = {}  # F24
+        self.steps: dict[UUID, dict] = {}  # F24: step_id -> linha
+        self.history_analysis_ids: set[UUID] = set()  # F24
+        self.clock = 0  # F24: relógio fake de updated_at
 
     def snapshot(self):
         return copy.deepcopy(self.__dict__)
@@ -58,7 +62,41 @@ class Store:
 
     def add_analysis(self, name="Vendas", is_active=True) -> UUID:
         aid = uuid4()
-        self.analyses[aid] = dict(id=aid, name=name, is_active=is_active)
+        self.analyses[aid] = dict(
+            id=aid, name=name, is_active=is_active, description=None, data_source_id=None,
+            cache_frequency="daily", parameters={}, created_by=None,
+            created_at=datetime(2026, 1, 1), updated_at=datetime(2026, 1, 1),
+        )
+        return aid
+
+    def tick(self) -> datetime:
+        self.clock += 1
+        return datetime(2026, 6, 1) + timedelta(seconds=self.clock)
+
+    def add_data_source(self, name="vendas_db", type_="postgresql", is_active=True, config=None) -> UUID:
+        from security.crypto import encrypt_password
+
+        did = uuid4()
+        self.data_sources[did] = dict(
+            id=did, name=name, type=type_, is_active=is_active, created_by=None,
+            created_at=datetime(2026, 1, 1), updated_at=datetime(2026, 1, 1),
+            connection_config=config or dict(
+                host="h", port=5432, database="d", user="u", password=encrypt_password("segredo")
+            ),
+        )
+        return did
+
+    def add_full_analysis(self, name="vendas", ds_id=None, sql="SELECT 1 WHERE :a = 1",
+                          step_params=("a",), parameters=None, with_step=True) -> UUID:
+        aid = self.add_analysis(name)
+        self.analyses[aid].update(
+            data_source_id=ds_id,
+            parameters=parameters if parameters is not None else {"a": {"type": "integer", "required": True}},
+        )
+        if with_step:
+            sid = uuid4()
+            self.steps[sid] = dict(id=sid, analysis_id=aid, step_order=1, step_type="query",
+                                   definition={"sql": sql, "params": list(step_params)})
         return aid
 
     def add_token(self, user_id: UUID, raw: str, days: int = 1, revoked: bool = False) -> UUID:
@@ -267,7 +305,7 @@ class FakeProfileRepo:
         return [self.s.analyses[aid] for (pid, aid) in self.s.profile_analyses if pid == profile_id]
 
     async def existing_ids(self, table, ids, db=None):
-        source = self.s.users if table == "users" else self.s.analyses
+        source = {"users": self.s.users, "analyses": self.s.analyses, "profiles": self.s.profiles}[table]
         return {i for i in ids if i in source}
 
     async def replace_analyses(self, profile_id, analysis_ids, db):
@@ -277,3 +315,160 @@ class FakeProfileRepo:
     async def replace_users(self, profile_id, user_ids, db):
         self.s.user_profiles = {p for p in self.s.user_profiles if p[1] != profile_id}
         self.s.user_profiles |= {(u, profile_id) for u in user_ids}
+
+
+# ---- F24 ----
+
+
+class FakeDataSourceRepo:
+    def __init__(self, store: Store) -> None:
+        self.s = store
+
+    def _count(self, did):
+        return sum(1 for a in self.s.analyses.values() if a["data_source_id"] == did)
+
+    def _summary(self, d):
+        keys = ("id", "name", "type", "is_active", "created_by", "created_at", "updated_at")
+        return {**{k: d[k] for k in keys}, "analyses_count": self._count(d["id"])}
+
+    async def get_by_id(self, ds_id, db=None):
+        from repositories.data_source_repo import DataSource
+
+        d = self.s.data_sources.get(ds_id)
+        return DataSource(d["id"], d["name"], d["type"], copy.deepcopy(d["connection_config"]),
+                          d["is_active"]) if d else None
+
+    async def list_page(self, q, type_, is_active, limit, offset):
+        rows = [d for d in self.s.data_sources.values()
+                if _contains(d["name"], q) and (type_ is None or d["type"] == type_)
+                and (is_active is None or d["is_active"] == is_active)]
+        rows.sort(key=lambda d: (d["name"], str(d["id"])))
+        return [self._summary(d) for d in rows[offset:offset + limit]], len(rows)
+
+    async def get_summary(self, ds_id, db=None):
+        d = self.s.data_sources.get(ds_id)
+        return self._summary(d) if d else None
+
+    async def get_analyses(self, ds_id, db=None):
+        return [{k: a[k] for k in ("id", "name", "is_active")}
+                for a in self.s.analyses.values() if a["data_source_id"] == ds_id]
+
+    async def create(self, name, type_, connection_config, is_active, created_by, db=None):
+        if any(d["name"] == name for d in self.s.data_sources.values()):
+            import asyncpg
+
+            raise asyncpg.UniqueViolationError("duplicate")
+        did = self.s.add_data_source(name, type_, is_active, copy.deepcopy(connection_config))
+        self.s.data_sources[did]["created_by"] = created_by
+        return did
+
+    async def update(self, ds_id, fields, db=None):
+        if ds_id not in self.s.data_sources:
+            return False
+        if "name" in fields and any(
+            d["name"] == fields["name"] and d["id"] != ds_id for d in self.s.data_sources.values()
+        ):
+            import asyncpg
+
+            raise asyncpg.UniqueViolationError("duplicate")
+        self.s.data_sources[ds_id].update(copy.deepcopy(fields))
+        self.s.data_sources[ds_id]["updated_at"] = self.s.tick()
+        return True
+
+    async def delete(self, ds_id, db=None):
+        return self.s.data_sources.pop(ds_id, None) is not None
+
+    async def touch_analyses(self, ds_id, db=None):
+        for a in self.s.analyses.values():
+            if a["data_source_id"] == ds_id:
+                a["updated_at"] = self.s.tick()
+
+
+class FakeAnalysisRepo:
+    def __init__(self, store: Store) -> None:
+        self.s = store
+
+    def _summary(self, a):
+        ds = self.s.data_sources.get(a["data_source_id"])
+        keys = ("id", "name", "description", "data_source_id", "cache_frequency", "is_active",
+                "created_by", "created_at", "updated_at")
+        return {**{k: a[k] for k in keys}, "data_source_name": ds["name"] if ds else None,
+                "profiles_count": sum(1 for _, aid in self.s.profile_analyses if aid == a["id"])}
+
+    async def admin_list(self, q, data_source_id, is_active, limit, offset):
+        rows = [a for a in self.s.analyses.values()
+                if (_contains(a["name"], q) or _contains(a["description"], q))
+                and (data_source_id is None or a["data_source_id"] == data_source_id)
+                and (is_active is None or a["is_active"] == is_active)]
+        rows.sort(key=lambda a: (a["name"], str(a["id"])))
+        return [self._summary(a) for a in rows[offset:offset + limit]], len(rows)
+
+    async def get_admin_row(self, analysis_id, db=None):
+        a = self.s.analyses.get(analysis_id)
+        return {**self._summary(a), "parameters": copy.deepcopy(a["parameters"])} if a else None
+
+    async def get_steps(self, analysis_id, db=None):
+        from repositories.analysis_repo import AnalysisStep
+
+        return [AnalysisStep(s["id"], s["analysis_id"], s["step_order"], s["step_type"],
+                             copy.deepcopy(s["definition"]))
+                for s in sorted(self.s.steps.values(), key=lambda s: s["step_order"])
+                if s["analysis_id"] == analysis_id]
+
+    async def get_profiles(self, analysis_id, db=None):
+        return [{k: self.s.profiles[pid][k] for k in ("id", "name", "is_active")}
+                for pid, aid in self.s.profile_analyses if aid == analysis_id]
+
+    async def create(self, fields, db=None):
+        if any(a["name"] == fields["name"] for a in self.s.analyses.values()):
+            import asyncpg
+
+            raise asyncpg.UniqueViolationError("duplicate")
+        aid = self.s.add_analysis(fields["name"], fields["is_active"])
+        self.s.analyses[aid].update(copy.deepcopy(fields))
+        self.s.analyses[aid]["updated_at"] = self.s.tick()
+        return aid
+
+    async def create_step(self, analysis_id, definition, db=None):
+        sid = uuid4()
+        self.s.steps[sid] = dict(id=sid, analysis_id=analysis_id, step_order=1, step_type="query",
+                                 definition=copy.deepcopy(definition))
+        return sid
+
+    async def update_step(self, step_id, definition, db=None):
+        self.s.steps[step_id]["definition"] = copy.deepcopy(definition)
+
+    async def update(self, analysis_id, fields, db=None):
+        a = self.s.analyses.get(analysis_id)
+        if a is None:
+            return False
+        if "name" in fields and any(
+            x["name"] == fields["name"] and x["id"] != analysis_id for x in self.s.analyses.values()
+        ):
+            import asyncpg
+
+            raise asyncpg.UniqueViolationError("duplicate")
+        a.update(copy.deepcopy(fields))
+        a["updated_at"] = self.s.tick()
+        return True
+
+    async def touch(self, analysis_id, db=None):
+        a = self.s.analyses.get(analysis_id)
+        if a is None:
+            return None
+        a["updated_at"] = self.s.tick()
+        return a["updated_at"]
+
+    async def has_history(self, analysis_id, db=None):
+        return analysis_id in self.s.history_analysis_ids
+
+    async def delete(self, analysis_id, db=None):
+        if self.s.analyses.pop(analysis_id, None) is None:
+            return False
+        self.s.steps = {k: v for k, v in self.s.steps.items() if v["analysis_id"] != analysis_id}
+        self.s.profile_analyses = {p for p in self.s.profile_analyses if p[1] != analysis_id}
+        return True
+
+    async def replace_profiles(self, analysis_id, profile_ids, db):
+        self.s.profile_analyses = {p for p in self.s.profile_analyses if p[1] != analysis_id}
+        self.s.profile_analyses |= {(pid, analysis_id) for pid in profile_ids}

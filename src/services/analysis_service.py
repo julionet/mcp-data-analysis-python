@@ -346,6 +346,20 @@ class AnalysisService:
             self._adapters[data_source.id] = adapter
             return adapter
 
+    async def invalidate_data_source(self, data_source_id: UUID) -> None:
+        """F24: remove e fecha o adapter cacheado do data source (se houver); a próxima
+        execução recria o adapter com o connection_config atual. Idempotente. Execuções em
+        andamento que seguram o adapter antigo podem falhar (F14 as classifica)."""
+        async with self._adapters_lock:
+            adapter = self._adapters.pop(data_source_id, None)
+        if adapter is not None:
+            try:
+                await adapter.disconnect()
+            except Exception:
+                logger.warning(
+                    "Falha ao fechar o adapter do data source '%s'", data_source_id, exc_info=True
+                )
+
     async def aclose(self) -> None:
         """Fecha todos os pools de adapter cacheados. Chamado no shutdown do
         FastAPI (main.py), nunca durante execute()."""
