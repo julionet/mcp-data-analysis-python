@@ -9,6 +9,7 @@ Como subir, configurar, operar, limpar e empacotar a aplicação. Os comandos s�
 1. [Subir a aplicação (passo a passo)](#1-subir-a-aplicação-passo-a-passo)
    - [Passo 0: preparar o ambiente (.env em HTTP)](#passo-0-preparar-o-ambiente-env-em-http)
    - [Passo 1: subir e criar o Config DB](#passo-1-subir-e-criar-o-config-db)
+   - [Setup automático com setup-admin.ps1 (alternativa aos Passos 2-6)](#setup-automático-com-setup-adminps1-alternativa-aos-passos-2-6)
    - [Passo 2: criar o banco de análises e um usuário só de leitura](#passo-2-criar-o-banco-de-análises-e-um-usuário-só-de-leitura)
    - [Passo 3: inserir usuário e perfil da aplicação](#passo-3-inserir-usuário-e-perfil-da-aplicação)
    - [Passo 4: cifrar a senha do data source](#passo-4-cifrar-a-senha-do-data-source)
@@ -79,6 +80,168 @@ Na primeira subida, isso cria sozinho, com os valores do `.env`:
 
 Espere `app` e `postgres` ficarem *healthy* (cerca de 1 minuto). Para usar outro usuário, mude `POSTGRES_CONFIG_USER` e `POSTGRES_CONFIG_PASSWORD` no `.env` **antes do primeiro `up`**.
 
+### Setup automático com setup-admin.ps1 (alternativa aos Passos 2-6)
+
+O script `scripts/setup-admin.ps1` (PowerShell/Windows) ou `scripts/setup-admin.sh` (macOS/Linux) automatiza toda a configuração inicial: gera a `FERNET_KEY`, cria o usuário admin, configura o perfil e emite o token. Use isto **em vez dos Passos 2, 3, 4, 5 e 6** se quiser um setup rápido.
+
+#### Uso básico (setup automático completo)
+
+Após o Passo 1, com o app e postgres *healthy*, rode:
+
+**PowerShell (Windows):**
+
+```powershell
+.\scripts\setup-admin.ps1
+```
+
+**Bash (macOS/Linux):**
+
+```bash
+./scripts/setup-admin.sh
+```
+
+O script fará automaticamente:
+
+1. **Gera `FERNET_KEY`** no `.env` se não existir (nunca sobrescreve uma chave real)
+2. **Sobe o compose** (`docker compose up -d`)
+3. **Aguarda o healthcheck** do app em `http://localhost:3000/health`
+4. **Executa o seed** (`src/database/seed_admin.sh`) que cria:
+   - Banco de análises `analysis_data` com tabela `vendas` (6 linhas de exemplo)
+   - Usuário `analysis_reader` (só leitura) com senha `ReaderPwd_123`
+   - Usuário `admin` na aplicação com senha padrão `Senh@123` (conhecida)
+   - Perfil `admin` liberado para todas as análises
+   - Data source `vendas_pg` configurado
+   - Análise `vendas_por_regiao` com filtros por data e região
+5. **Emite o token** por `POST /auth/token` e salva em `secrets/admin-token.txt`
+
+Ao final, exibe no terminal:
+
+```
+Pronto.
+  Login:      admin
+  Token:      <seu-token-aqui>
+  Expira em:  2026-10-17T10:30:45Z
+  Salvo em:   secrets/admin-token.txt   (fora do git; o token NÃO pode ser recuperado depois)
+
+Cliente MCP (Claude Desktop com mcp-remote):
+"analise-dados": {
+  "command": "npx",
+  "args": ["mcp-remote", "http://localhost:3000/mcp", "--header", "Authorization:${AUTH_HEADER}"],
+  "env": {"NODE_OPTIONS": "--use-system-ca", "AUTH_HEADER": "Bearer <seu-token-aqui>"}
+}
+```
+
+#### Mudar a senha do admin
+
+A senha padrão `Senh@123` é **conhecida** e destina-se apenas ao desenvolvimento. Para trocar:
+
+**PowerShell (Windows):**
+
+```powershell
+.\scripts\setup-admin.ps1 -NoUp -Password 'SuaNovaSenha!1' -ResetPassword
+```
+
+**Bash (macOS/Linux):**
+
+```bash
+./scripts/setup-admin.sh --no-up --password 'SuaNovaSenha!1' --reset-password
+```
+
+Flags:
+- `--no-up` / `-NoUp`: não resubiria o compose (os containers já estão rodando)
+- `--password` / `-Password`: define a nova senha
+- `--reset-password` / `-ResetPassword`: regrava a senha no banco
+
+Após isso, o script emite um novo token com a senha atualizada.
+
+#### Exemplos de uso avançado
+
+**Trocar senha fora do desenvolvimento:**
+
+PowerShell:
+```powershell
+.\scripts\setup-admin.ps1 -NoUp -Password 'Outra@Senha!123' -ResetPassword
+```
+
+Bash:
+```bash
+./scripts/setup-admin.sh --no-up --password 'Outra@Senha!123' --reset-password
+```
+
+**Emitir token com validade customizada (365 dias) e label personalizado:**
+
+PowerShell:
+```powershell
+.\scripts\setup-admin.ps1 -NoUp -ExpireDays 365 -TokenLabel "Claude Desktop"
+```
+
+Bash:
+```bash
+./scripts/setup-admin.sh --no-up --expire-days 365 --token-label "Claude Desktop"
+```
+
+**Rodar sem subir o compose (se já estiver up):**
+
+PowerShell:
+```powershell
+.\scripts\setup-admin.ps1 -NoUp
+```
+
+Bash:
+```bash
+./scripts/setup-admin.sh --no-up
+```
+
+**Pular a emissão de token (apenas setup):**
+
+PowerShell:
+```powershell
+.\scripts\setup-admin.ps1 -SkipToken
+```
+
+Bash:
+```bash
+./scripts/setup-admin.sh --skip-token
+```
+
+#### Opções principais do script
+
+| Descrição | PowerShell | Bash | Padrão |
+|---|---|---|---|
+| Não subir o compose | `-NoUp` | `--no-up` | (não usa) |
+| Senha do admin | `-Password <pwd>` | `--password <pwd>` | `Senh@123` |
+| Regrava senha no banco | `-ResetPassword` | `--reset-password` | (não usa) |
+| Dias até expirar | `-ExpireDays <n>` | `--expire-days <n>` | `0` (sem expiração) |
+| Label do token | `-TokenLabel <txt>` | `--token-label <txt>` | `admin-mcp` |
+| Pular emissão de token | `-SkipToken` | `--skip-token` | (não usa) |
+| Gerar nova FERNET_KEY | `-ForceNewFernetKey` | `--force-new-fernet-key` | (não usa) |
+| Arquivo de compose | `-ComposeFile <arq>` | `--compose-file <arq>` | `docker-compose.local.yml` |
+| Arquivo .env | `-EnvFile <arq>` | `--env-file <arq>` | `.env` |
+| Email/login do admin | `-Login <email>` | `--login <email>` | `admin` |
+| Arquivo para salvar token | | `--token-file <arq>` | `secrets/admin-token.txt` |
+| Nome do projeto (compose -p) | `-ProjectName <nome>` | `--project-name <nome>` | (não usa) |
+
+> **Nota:** PowerShell usa prefixo `-` (e.g., `-NoUp`), Bash usa prefixo `--` (e.g., `--no-up`)
+
+#### Notas importantes
+
+- **Primeira vez:** é normal o script levar ~2 minutos esperando o healthcheck.
+- **Banco existente:** se o banco `analysis_config` já existe, o seed é idempotente (não duplica dados nem recreia o admin).
+- **Token salvo:** o token é gravado em `secrets/admin-token.txt` (fora do git). É impossível recuperá-lo depois; guarde-o.
+- **Senha padrão:** avisar se esquecer de trocar a senha `Senh@123` em produção.
+
+#### Quando usar o setup automático vs. manual
+
+| Situação | Use o script | Use Passos 2-6 |
+|---|---|---|
+| Primeira vez, setup rápido | ✅ Sim | ❌ Não |
+| Desenvolvimento local | ✅ Sim | ❌ Não |
+| Customizar nomes/senhas | ❌ Não (ajuste depois) | ✅ Sim |
+| Integrar com pipeline | ✅ Sim (com `-NoUp` etc.) | ❌ Não |
+| Produção | ✅ Sim (trocar senha com `-ResetPassword`) | ❌ Não |
+
+---
+
 ### Passo 2: criar o banco de análises e um usuário só de leitura
 
 O Config DB guarda a estrutura do app. Os dados que você vai analisar ficam num banco à parte, `analysis_data`, no mesmo container. O exemplo cria uma tabela `vendas` com 6 linhas.
@@ -120,7 +283,7 @@ SELECT u.id, p.id FROM users u, profiles p WHERE u.external_id = 'admin@empresa.
 '@ | docker compose -f docker-compose.local.yml exec -T postgres psql -U postgres -d analysis_config -v ON_ERROR_STOP=1
 ```
 
-> **Alternativa automática:** no compose local, o `src/database/seed_admin.sh` já cria na criação do banco o perfil `admin` e o usuário `admin` (senha padrão **conhecida** `Senh@123`), e o `scripts/setup-admin.ps1` emite o token em `secrets/admin-token.txt`. Se usar o script, os e-mails/senhas dos passos 3 e 6 abaixo mudam para `admin` / `Senh@123`.
+> **Dica:** Se seguiu o [Setup automático com setup-admin.ps1](#setup-automático-com-setup-adminps1-alternativa-aos-passos-2-6), este passo já foi feito automaticamente. Estes Passos 2-6 são apenas para setup **manual**, caso prefira customizar cada etapa.
 
 ### Passo 4: cifrar a senha do data source
 
