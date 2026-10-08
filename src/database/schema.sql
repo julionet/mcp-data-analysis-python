@@ -45,6 +45,7 @@ CREATE TABLE users (
     external_id VARCHAR(255) UNIQUE,   -- e-mail de login, cadastrado SEMPRE em minúsculas
     password_hash VARCHAR(255),        -- hash bcrypt ($2b$...); NULL = não consegue emitir token
     is_blocked BOOLEAN NOT NULL DEFAULT false,
+    is_admin BOOLEAN NOT NULL DEFAULT false,  -- F23: papel administrativo (API /admin/*), independente dos perfis (ADR-008)
     created_by VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

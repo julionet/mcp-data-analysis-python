@@ -2,9 +2,9 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Referência:** ARQUITETURA.md §2.2, §2.3 e §3.5 (v1.25)
+**Referência:** ARQUITETURA.md §2.2, §2.3, §2.4 e §3.5 (v1.26)
 **Banco:** `analysis_config` (PostgreSQL — config DB, separado dos data sources de negócio; nome real definido por `POSTGRES_CONFIG_DATABASE` no `.env`). **Fonte única do DDL:** `src/database/schema.sql` (sem migrations)
-**Data:** 2026-10-05 (alinhado ao código: §2.1 `type` aceito pelo `AdapterFactory`, §2.3 `definition` = `{sql, params}`, §2.5 `result_location` sempre `NULL`, §3 regras de validação de `parameters`, §4 `connection_config` por banco, §6 seed do admin com `pgcrypto`, §8 convenções — `updated_at` sem trigger) · 2026-10-03 (F14: `execution_history.error_code`, status `timeout`/`error` documentados; bancos existentes precisam do `ALTER TABLE` da §2.5) · 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; migrations e seed da F12 canceladas — `schema.sql` é a única fonte (F13, decisão 7); atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
+**Data:** 2026-10-08 (F23, API administrativa: `users.is_admin` em §2.6 + `ALTER TABLE` para bancos existentes, seed do admin marcado `is_admin = true` em §6, convenções em §8) · 2026-10-05 (alinhado ao código: §2.1 `type` aceito pelo `AdapterFactory`, §2.3 `definition` = `{sql, params}`, §2.5 `result_location` sempre `NULL`, §3 regras de validação de `parameters`, §4 `connection_config` por banco, §6 seed do admin com `pgcrypto`, §8 convenções — `updated_at` sem trigger) · 2026-10-03 (F14: `execution_history.error_code`, status `timeout`/`error` documentados; bancos existentes precisam do `ALTER TABLE` da §2.5) · 2026-09-30 (F12 implementada — `database/schema.sql` atualizado; migrations e seed da F12 canceladas — `schema.sql` é a única fonte (F13, decisão 7); atualizado — F12: `users.password_hash` (login por e-mail e senha); tabelas `users`, `profiles`, `user_profiles`, `profile_analyses`, `access_tokens`; `execution_history` ganha `user_id`)
 
 > Este documento descreve apenas o **banco de configuração** da própria plataforma (onde ficam análises, histórico etc.). Os bancos de negócio conectados como `data_sources` (PostgreSQL/MySQL/SQL Server/Oracle dos clientes) não têm schema fixo — são externos e arbitrários.
 
@@ -155,9 +155,16 @@ ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);
 | `external_id` | VARCHAR(255) | — (UNIQUE) | **E-mail de login (F12)**, cadastrado sempre em minúsculas; a aplicação normaliza (`strip().lower()`) o e-mail recebido em `POST /auth/token`/`/auth/revoke` antes de buscar. Sem `CHECK` no banco — cadastro com maiúscula nunca casa com o login |
 | `password_hash` | VARCHAR(255) | — | **Hash bcrypt da senha (F12)**, nunca a senha. `NULL` = usuário não consegue emitir token. Gerado fora do código e inserido à mão (ver F12 §8.2); o usuário `admin` do seed (§6) é gerado com `crypt(..., gen_salt('bf', 12))` do `pgcrypto` |
 | `is_blocked` | BOOLEAN | ✅ (NOT NULL) | Default `false`. Bloqueado perde acesso imediato a todas as analyses (ver ARQUITETURA.md §3.5) |
+| `is_admin` | BOOLEAN | ✅ (NOT NULL) | Default `false`. **Papel administrativo (F23, ADR-008):** só quem tem `true` usa as rotas `/admin/*`. Independente dos perfis de acesso a analyses; lido do BD a cada chamada, nunca do token. O usuário `admin` do seed (§6) é gravado com `true` |
 | `created_by` | VARCHAR(255) | — | Quem criou o registro |
 | `created_at` | TIMESTAMP | — | Default `NOW()` |
 | `updated_at` | TIMESTAMP | — | Default `NOW()` |
+
+**Bancos já criados (pré-F23):** sem migration (decisão do projeto) — executar uma vez, direto no banco:
+```sql
+ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false;
+```
+Sem ela, reexecutar o seed do admin (`seed_admin.sh` / `setup-admin`) falha. A coluna já consta de `schema.sql`; a API que a usa (`/admin/*`, F23) ainda não está implementada.
 
 **Relacionamentos:** 1:N com `access_tokens`; N:N com `profiles` via `user_profiles`; referenciado por `execution_history.user_id`.
 
@@ -315,7 +322,8 @@ O `schema.sql` **não** cria extensões nem dados. O seed do administrador (`src
 - `CREATE EXTENSION IF NOT EXISTS pgcrypto;` — necessária só para o seed (`crypt`/`gen_salt` geram o bcrypt). A aplicação em si não usa.
 - `profiles`: perfil `admin`.
 - `users`: usuário `admin` (`ADMIN_LOGIN`, padrão `admin`; `external_id` sempre em minúsculas; `created_by = 'seed_admin'`), senha `ADMIN_PASSWORD` — **padrão conhecido `Senh@123`: trocar em qualquer ambiente acessível por outras pessoas** (`ADMIN_RESET_PASSWORD=1` ou `setup-admin.ps1 -ResetPassword` regrava a senha).
-- `user_profiles`: vínculo admin ↔ `admin`.
+  O usuário é gravado com `is_admin = true` (F23) e, se já existia sem o papel, o seed o atualiza (`UPDATE ... WHERE is_admin = false`) — reexecutar o seed volta a marcá-lo administrador.
+- `user_profiles`: vínculo admin ↔ `admin`. (O perfil `admin` é de **acesso a analyses**; o papel administrativo é `users.is_admin` — são independentes, ADR-008.)
 - `profile_analyses`: perfil `admin` ↔ **todas as análises existentes no momento**. Análises cadastradas depois **não** entram sozinhas: reexecute o seed ou faça `INSERT` em `profile_analyses`.
 - O seed **não** emite token (o token só existe na resposta de `POST /auth/token`).
 
@@ -336,11 +344,12 @@ Para não haver confusão ao ler versões antigas de código/specs:
 ## 8. Convenções do Schema
 
 - **Sem triggers:** nenhum `updated_at` é atualizado automaticamente — quem edita por SQL deve setá-lo. Só `analyses.updated_at` tem efeito funcional (chave do cache, F7); `users.updated_at` é gravado só pelo seed ao regravar a senha.
-- **Sem migrations:** o `schema.sql` é a única fonte; mudanças em bancos existentes são `ALTER TABLE` manuais, registrados na seção da tabela (ex.: `execution_history.error_code`, §2.5).
+- **Sem migrations:** o `schema.sql` é a única fonte; mudanças em bancos existentes são `ALTER TABLE` manuais, registrados na seção da tabela (ex.: `execution_history.error_code`, §2.5; `users.is_admin`, §2.6).
 - **Sem `CHECK`:** valores como `data_sources.type`, `analyses.cache_frequency`, `execution_history.status` são validados só em código.
 - **Fuso:** `access_tokens` usa `TIMESTAMPTZ`; as demais tabelas, `TIMESTAMP`.
-- **Cascata:** `analysis_steps`, `user_profiles`, `profile_analyses` e `access_tokens` apagam em cascata. `analyses.data_source_id`, `execution_history.analysis_id` e `execution_history.user_id` **não** — preservam a auditoria (bloqueie/desative em vez de apagar).
+- **Cascata:** `analysis_steps`, `user_profiles`, `profile_analyses` e `access_tokens` apagam em cascata. `analyses.data_source_id`, `execution_history.analysis_id` e `execution_history.user_id` **não** — preservam a auditoria (bloqueie/desative em vez de apagar). A API administrativa (F23–F25, ARQUITETURA.md §2.4/ADR-008) segue isso: `DELETE` físico só sem dependentes, senão 409 orientando desativar/bloquear.
+- **Índices de `execution_history` e a consulta da F25:** os índices atuais (§5) são simples; índices compostos ou GIN em `parameters` só serão criados se o `EXPLAIN` justificar (decisão da F25, ARQUITETURA.md §2.4) — nenhum foi criado ainda.
 
 ---
 
-**Fonte:** `src/database/schema.sql`, `src/database/seed_admin.sh`, repositórios/adapters em `src/` e ARQUITETURA.md v1.25, §2.2, §2.3 e §3.5.
+**Fonte:** `src/database/schema.sql`, `src/database/seed_admin.sh`, repositórios/adapters em `src/` e ARQUITETURA.md v1.26, §2.2, §2.3, §2.4 e §3.5.

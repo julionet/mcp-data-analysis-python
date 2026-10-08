@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.21 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-08 (atualizado 2026-10-08 — sincronização de contadores e timeline pós-F15)
+**Versão:** 1.22 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-08 (atualizado 2026-10-08 — API administrativa F23–F25 planejada)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
+
+> **Nota de revisão (v1.21 → v1.22):** adicionadas **F23, F24 e F25 — API Administrativa (`/admin/*`)** para suportar um frontend de gestão (hoje usuários, perfis, data sources e analyses só são cadastrados por INSERT manual; nenhum repositório tem create/update/delete/list). Entram na Sprint 3 **antes de F16/F17/F18** (numeração mantida; a ordem de implementação é F23 → F24 → F25 → F17 → F16 → F18). Decisões: papel admin por coluna `users.is_admin` (ALTER TABLE manual; dependência `require_admin` sobre o Bearer existente, checando BD a cada chamada); erros no formato slug `{"error","message"}` das rotas `/auth/*` (contrato F14 segue só no `/mcp`); DELETE híbrido (físico só sem dependentes, senão 409 sugerindo desativar/bloquear). Esforço +8d (Sprint 3: ~12,5 → ~20,5 dias; projeto: 22 → 25 features, ~31 → ~39 dias). Plano: `~/.claude/plans/j-sei-que-tem-nested-milner.md`; specs a criar em `features/F23_*.md`, `F24_*.md`, `F25_*.md` antes de qualquer código.
 
 > **Nota de revisão (v1.20 → v1.21):** F15 (Performance Optimization) implementada (2026-10-07) e registrada no roadmap; sincronização de partes que ficaram desatualizadas: métrica "Features Implementadas" (13/22 → **15/22**), Timeline (§7) com ✅ em F13, F14 e F15, e "Próximos Passos" (§4) com o estado da Sprint 3 (4/7; restam F16, F17 e F18). F15: pool PostgreSQL configurável (`PG_POOL_MIN/MAX_SIZE`, `CONFIG_DB_POOL_MIN/MAX_SIZE`), `scripts/benchmark.py` e `scripts/load_test.py`; sem cache de token/permissão (F12/ADR-007); nenhum índice criado (EXPLAIN sem evidência); 500/500 testes ✅. Ver `features/F15_PERFORMANCE_OPTIMIZATION.md` §12. Nenhuma feature adicionada, removida ou renumerada; esforços inalterados.
 
@@ -159,11 +161,45 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F13 | Docker Setup (Local + Remote) | 🔴 Crítica | 2d | F1-F8, F12 | 🟩 Done (2026-10-03) |
 | F14 | Error Handling & Validation | 🟠 Alta | 1d | F4 | 🟩 Done (2026-10-03) |
 | F15 | Performance Optimization | 🟠 Alta | 2d | F7 | 🟩 Done (2026-10-07) |
-| F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5 | ⬜ Todo |
+| F23 | API Admin: base + Usuários + Perfis (`/admin/users`, `/admin/profiles`, `/me`) | 🟠 Alta | 3.5d | F12 | ⬜ Todo (spec pendente) |
+| F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | ⬜ Todo (spec pendente) |
+| F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | ⬜ Todo (spec pendente) |
+| F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | ⬜ Todo |
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
 | F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
 
-**Total Sprint 3:** ~12.5 dias
+**Total Sprint 3:** ~20.5 dias (12.5 + 8 da API administrativa F23–F25)
+
+**F23–F25 em detalhe (API Administrativa) — resumo do escopo aprovado (plano completo com tabelas de endpoints em `~/.claude/plans/j-sei-que-tem-nested-milner.md`):**
+```
+Convenções: prefixo /admin, require_admin em todo router (as rotas ficam fora do AuthMiddleware,
+que só cobre /mcp), paginação {items,total,limit,offset}, updated_at = NOW() em toda escrita,
+e-mail normalizado, hash_password (bcrypt) novo, PostgreSQLAdapter.transaction(), CORS com PUT/PATCH.
+Nunca devolver password_hash, token_hash ou connection_config.password.
+
+F23 (base + Usuários + Perfis):
+├─ users.is_admin (ALTER TABLE manual + schema.sql + seed_admin.sh) e require_admin
+├─ /admin/users: listar/pesquisar, criar, detalhar, alterar, excluir (409 se há histórico),
+│  redefinir senha (revoga tokens), block/unblock, vincular perfis, listar/revogar tokens
+├─ /admin/profiles: listar/pesquisar, criar, detalhar, alterar, excluir (CASCADE),
+│  vincular analyses e usuários
+├─ /me (GET) e /me/password (PUT) — autosserviço de qualquer usuário autenticado
+└─ Proteções: último admin ativo e o próprio admin não podem ser bloqueados/excluídos/rebaixados
+
+F24 (Data Sources + Analyses):
+├─ /admin/data-sources: CRUD (valida chaves por type; cifra password com Fernet; nunca devolve),
+│  test-connection, GET /types; editar/desativar invalida o pool em AnalysisService._adapters
+└─ /admin/analyses: CRUD com analysis_steps e perfis em transação, validate_schema dos parâmetros,
+   updated_at sempre atualizado (entra na chave do cache), validate, cache/invalidate
+
+F25 (Histórico):
+├─ GET /admin/executions (filtros analysis/user/status/error_code/cached/período; paginação; com parâmetros)
+├─ GET /admin/executions/{id} e /stats; GET /admin/analyses/{id}/executions
+└─ Índices compostos em execution_history só se o EXPLAIN justificar
+
+Fora de escopo: tabela de auditoria das ações admin, rate limit/tentativas de senha (pré-requisito
+antes de expor fora da rede interna), papéis granulares, retenção/purge, reset de senha por e-mail.
+```
 
 **F12 em detalhe (Autenticação e Controle de Acesso via Perfis):**
 ```
@@ -445,7 +481,7 @@ XXX_PARAM=value
 8. ✅ F8: Log de execução (analysis_id, params, status, tempo, cached flag)
 ```
 
-### Sprint 3 — Estado atual (4/7) e ordem sugerida do que resta
+### Sprint 3 — Estado atual (4/10) e ordem sugerida do que resta (v1.22: inclui F23–F25, API administrativa, antes de F17/F16/F18)
 ```markdown
 ✅ F12: Autenticação e Controle de Acesso via Perfis
 ✅ F13: Docker Setup (Local + Remote)
@@ -454,9 +490,12 @@ XXX_PARAM=value
 ⬜ Validações manuais pendentes de F13/F14/F15 (fluxo /auth/token → /mcp com cliente real,
    MySQL/SQL Server completos, SSE no nginx, Oracle 23ai, queda do Config DB, timeout de query,
    bloqueio de usuário, EXPLAIN com volume realista)
-1. ⬜ F17: Unit Tests (80% coverage) — depende só de F1-F12; medir cobertura e preencher lacunas
-2. ⬜ F16: API Documentation (MCP + Multi-Cliente) — inclui contrato de erro da F14 e /auth/*
-3. ⬜ F18: Integration Tests (múltiplos clientes MCP) — depende de F6 e F17
+1. ⬜ F23: API Admin — base + Usuários + Perfis (spec pendente)
+2. ⬜ F24: API Admin — Data Sources + Analyses (spec pendente)
+3. ⬜ F25: API Admin — Histórico de Execuções (spec pendente)
+4. ⬜ F17: Unit Tests (80% coverage) — medir cobertura e preencher lacunas (cobre também F23–F25)
+5. ⬜ F16: API Documentation (MCP + Multi-Cliente) — inclui contrato de erro da F14, /auth/* e /admin/*
+6. ⬜ F18: Integration Tests (múltiplos clientes MCP) — depende de F6 e F17
 Depois: Sprint 4 (F19 → F20 → F21 → F22); F20 só depende de F13 e pode ser adiantada.
 ```
 
@@ -496,7 +535,7 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 22/22 | 15/22 🟩 |
+| **Features Implementadas** | 25/25 | 15/25 🟩 |
 | **Code Coverage** | 80%+ | TBD |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 4 (PostgreSQL, MySQL, SQL Server, Oracle) ✅ |

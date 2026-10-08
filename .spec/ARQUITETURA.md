@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.25 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-03
+**Versão:** 1.26 (Aprovado — Streamable HTTP **stateless, com TLS obrigatório** Multi-Cliente, **com autenticação por token opaco + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-08
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.25 → v1.26):** planejada a **API administrativa (`/admin/*`)** — features **F23** (base + usuários + perfis + `/me`), **F24** (data sources + analyses) e **F25** (histórico de execuções), para suportar um frontend de gestão (NEGOCIO.md v1.12, RF6/UC4). Nada disso está implementado ainda; este documento registra o desenho aprovado e as specs (`features/F23_*.md`, `F24_*.md`, `F25_*.md`) o detalham antes do código. Novos: **§2.4** (API administrativa: convenções, endpoints, regras), **§3.6** (fluxo de autorização administrativa), **ADR-008** (papel `is_admin`; formato de erro; exclusão híbrida). Mudanças de schema (§2.2): `users.is_admin BOOLEAN NOT NULL DEFAULT false` (bancos existentes: `ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false;`, manual — sem migrations). Mudanças de código previstas: novos routers em `routes/`, services `*_admin_service.py`, métodos de list/count/create/update nos repositórios (hoje só leem), `hash_password` em `security/password_hash.py`, `transaction()` em `PostgreSQLAdapter`, método de invalidação de pool em `AnalysisService`, `PUT`/`PATCH` no CORS (§5.2, §2.4). O desenho do `/mcp` (§3.5, ADR-006/007) **não muda**.
 
 > **Nota de revisão (v1.24 → v1.25):** F14 (Error Handling & Validation) implementada (2026-10-03). Nova §3.4.1 (contrato de erro: `error_code`/`retryable`, retry, status `timeout`); `execution_history` ganha `error_code` (§2.2 DDL; bancos existentes: `ALTER TABLE execution_history ADD COLUMN error_code VARCHAR(50);`). Ver `features/F14_ERROR_HANDLING_VALIDATION.md`.
 
@@ -207,6 +209,7 @@ identificação de cliente MCP, rate limiting e SSO/OAuth DEVEM ser avaliados
 │  │  │  ├─ resolve_ttl(cache_frequency) -> int | None           │   │
 │  │  │  └─ get_or_execute(key, ttl, confirmar_volume_alto, executor) │   │
 │  │  │     (invalidate_by_source fora do F7 — backlog futuro)   │   │
+│  │  ├─ (F23–F25: services da API admin — ver §2.4)    │   │
 │  │  ├─ AuditService (grava execution_history.user_id, │   │
 │  │  │  │  quando disponível — F12)                    │   │
 │  │  │  ├─ log_execution(analysis_id, params, result,  │   │
@@ -295,6 +298,7 @@ CREATE TABLE users (
     external_id VARCHAR(255) UNIQUE,  -- e-mail de login (F12), cadastrado em minúsculas; a app normaliza o e-mail recebido
     password_hash VARCHAR(255),       -- hash bcrypt da senha (F12); NULL = usuário não consegue emitir token
     is_blocked BOOLEAN NOT NULL DEFAULT false,
+    is_admin BOOLEAN NOT NULL DEFAULT false,  -- F23: papel administrativo (API /admin/*); independente dos perfis (ADR-008)
     created_by VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -366,6 +370,8 @@ CREATE INDEX idx_access_tokens_user ON access_tokens(user_id);
 > As tabelas `mcp_clients` e `user_api_keys` (do desenho original de FB1/FB2, removido em v1.2) seguem fora de V1.0 — `mcp_clients` porque identificação de cliente MCP/software (FB1) continua sem requisito de negócio; `user_api_keys` porque F12 (§2.2 acima) usa um desenho diferente (`access_tokens`, token opaco com hash, sem "API Key" nomeada por serviço externo). As colunas `client_llm_name`, `client_llm_version`, `client_identifier` em `execution_history` continuam fora de escopo pelo mesmo motivo (FB1). `users` e `user_id` em `execution_history`, removidas em v1.2, **voltam nesta revisão (F12)** com um desenho revisado (perfis N:N em vez de API Key + quota direta) — ver ADR-007 e nota de revisão v1.16 no topo do documento.
 >
 > A tabela `custom_handlers` também foi removida do schema (revisão v1.9) — a camada de Handlers Python deixou de existir; ver nota de revisão no topo do documento e `PROPOSTA_REVISAO_HANDLERS_E_VOLUME.md`.
+>
+> **F23 (planejada):** `users.is_admin` é a única mudança de schema decidida para a API administrativa. Bancos existentes precisam rodar manualmente `ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false;` (sem migrations); `schema.sql` e `seed_admin.sh` (que passa a marcar o usuário `admin`) são atualizados na F23. Índices compostos em `execution_history` (F25) só serão criados se o `EXPLAIN` justificar — ver §2.4.
 
 ---
 
@@ -418,6 +424,86 @@ schemas/analysis_parameters.py
 
 > O parâmetro reservado `confirmar_volume_alto` (§3.4) não passa por este módulo — é injetado
 > diretamente pelo `mcp_transport/tools.py` no `inputSchema` de toda tool, por ser global.
+
+---
+
+### 2.4 API Administrativa (F23, F24, F25 — planejada)
+
+Rotas HTTP para gestão da plataforma por um frontend (NEGOCIO.md RF6, UC4). Ficam **fora do `/mcp`**: são routers FastAPI registrados em `main.py` com `include_router` (como `routes/auth.py`), portanto **fora do `AuthMiddleware`**, que envolve só o `/mcp` (§3.5). Por isso a autorização é uma dependência FastAPI aplicada ao router inteiro (`dependencies=[Depends(require_admin)]`) — ver fluxo em §3.6 e decisões em ADR-008.
+
+**Estado do código hoje (verificado antes do desenho):** nenhum repositório tem create/update/delete/list (só `AccessTokenRepository.create` e `ExecutionRepository.create` gravam); `security/password_hash.py` só verifica senha (o hash vem hoje do `crypt()` do pgcrypto no seed); o conceito de admin existe só como perfil/usuário criados por `seed_admin.sh`, nunca testado pela aplicação; `ExecutionRepository.get_all(limit)` não tem filtro nem offset.
+
+**Convenções comuns (definidas na F23, usadas por F24 e F25):**
+- Prefixo `/admin`; um router por recurso em `routes/admin_*.py`; dependências por serviço no padrão de `get_auth_service` (import tardio de `mcp_transport.tools`), para permitir `dependency_overrides` nos testes.
+- Listagens paginadas com `?limit=&offset=` (máximo 200), busca `?q=` onde aplicável; resposta `{items, total, limit, offset}`.
+- Erros no formato `{"error": "<slug>", "message": "..."}` das rotas `/auth/*` (ADR-008); códigos HTTP 400/401/403/404/409/422. O contrato `error_code`/`retryable` da F14 (§3.4.1) continua só no `/mcp`. Os slugs exatos são definidos na spec da F23.
+- Toda escrita atualiza `updated_at = NOW()` (o schema não tem triggers). E-mail normalizado com `strip().lower()` (mesma regra de `AuthService._validate_credentials`). Senha com no máximo 72 bytes (limite do bcrypt).
+- `hash_password` (bcrypt, custo 12, executado em thread como a verificação) é adicionado a `security/password_hash.py`.
+- `PostgreSQLAdapter` ganha `transaction()` (context manager sobre `pool.acquire()` + `conn.transaction()`) para escritas multi-tabela (análise + step + vínculos); hoje o adapter só expõe `execute`/`execute_query` sem transação.
+- CORS (`mcp_transport/__init__.py`) passa a permitir `PUT` e `PATCH` (hoje `GET, POST, DELETE, OPTIONS`).
+- Nunca devolver `users.password_hash`, `access_tokens.token_hash` nem `connection_config.password`.
+- **Exclusão híbrida (ADR-008):** `DELETE` físico apenas quando não há dependentes; com dependentes, 409 orientando a desativar/bloquear. As FKs de `execution_history.user_id`, `execution_history.analysis_id` e `analyses.data_source_id` não têm `ON DELETE`, então usuário, análise e data source com histórico/dependentes não podem ser apagados. Vínculos N:N (`user_profiles`, `profile_analyses`) e `access_tokens` são apagados junto (`ON DELETE CASCADE`).
+- Ações administrativas geram log estruturado sem senha, hash ou token. **Não há tabela de auditoria das ações administrativas** (fora de escopo).
+
+#### F23 — Base + Usuários + Perfis + Autosserviço
+
+`/admin/users`:
+
+| Método | Path | Função |
+|---|---|---|
+| GET | `/admin/users?q=&is_blocked=&profile_id=` | pesquisar/listar |
+| POST | `/admin/users` | criar (name, e-mail, senha, `is_admin` opcional, `profile_ids` opcional) |
+| GET | `/admin/users/{id}` | detalhe (perfis, nº de tokens ativos) |
+| PATCH | `/admin/users/{id}` | alterar name / e-mail / `is_admin` |
+| DELETE | `/admin/users/{id}` | excluir (409 se há `execution_history` → bloquear) |
+| PUT | `/admin/users/{id}/password` | redefinir senha (revoga os tokens do usuário) |
+| POST | `/admin/users/{id}/block` · `/unblock` | bloquear / desbloquear |
+| PUT | `/admin/users/{id}/profiles` | substituir os perfis vinculados |
+| GET | `/admin/users/{id}/tokens` | listar tokens (id, label, `expires_at`, `revoked_at`, `last_used_at`) |
+| DELETE | `/admin/users/{id}/tokens/{token_id}` · `/admin/users/{id}/tokens` | revogar um / todos |
+
+`/admin/profiles`:
+
+| Método | Path | Função |
+|---|---|---|
+| GET | `/admin/profiles?q=&is_active=` | pesquisar/listar (com contagem de usuários e analyses) |
+| POST | `/admin/profiles` | criar |
+| GET | `/admin/profiles/{id}` | detalhe (usuários, analyses) |
+| PATCH | `/admin/profiles/{id}` | alterar name / description / `is_active` |
+| DELETE | `/admin/profiles/{id}` | excluir (vínculos em cascata) |
+| PUT | `/admin/profiles/{id}/analyses` | substituir as analyses liberadas |
+| PUT | `/admin/profiles/{id}/users` | substituir os usuários vinculados |
+
+Autosserviço (qualquer usuário autenticado por Bearer, não exige `is_admin`): `GET /me` e `PUT /me/password` (senha atual + nova; **revoga todos os tokens do usuário**, inclusive o usado na chamada).
+
+Proteções: o último administrador ativo e o próprio administrador autenticado não podem ser bloqueados, excluídos nem ter `is_admin` removido por essa API.
+
+Código previsto: métodos novos em `user_repo.py`, `profile_repo.py` e `access_token_repo.py` (listar por usuário, revogar por id, revogar todos); `services/user_admin_service.py`, `services/profile_admin_service.py`; `schemas/admin.py`; `routes/admin_users.py`, `routes/admin_profiles.py`, `routes/me.py`.
+
+#### F24 — Data Sources + Analyses
+
+`/admin/data-sources`: listar/detalhar (config sem `password`); criar (valida as chaves obrigatórias por `type` conforme DATABASE_SCHEMA.md §4 e cifra `password` com `encrypt_password`, `security/crypto.py`); alterar (a senha só é regravada se enviada); excluir (409 se há analyses → desativar); `POST /admin/data-sources/{id}/test-connection` (usa o `test_connection` do adapter); `GET /admin/data-sources/types` (tipos e campos exigidos, para formulários).
+
+`/admin/analyses`: listar (`q`, `data_source_id`, `is_active`) e detalhar (com steps e perfis); criar (análise + step + perfis numa única transação); alterar (name, description, `cache_frequency`, `parameters`, `is_active`, SQL/params do step); excluir (409 se há histórico → desativar); `PUT /admin/analyses/{id}/profiles`; `POST /admin/analyses/{id}/validate` (confere os placeholders `:param` do SQL contra `analyses.parameters`; um dry-run de `COUNT(*)` é opcional e fica para a spec); `POST /admin/analyses/{id}/cache/invalidate`.
+
+Regras que vêm do código atual:
+- `analyses.updated_at` entra na chave do cache (`CacheService.build_key`, §3.2): **toda** alteração de análise ou de step deve atualizá-lo, senão o resultado antigo continua sendo servido.
+- `AnalysisService` guarda um pool de adapter por `data_source_id` (`_adapters`) que nunca é invalidado: editar `connection_config` ou desativar o data source exige um método novo de invalidação (`invalidate_data_source(id)`), senão a conexão antiga segue em uso.
+- A validação do cadastro reaproveita `validate_schema` de `schemas/analysis_parameters.py` (§2.3) e a validação de SQL de `schemas/sql_validation.py` (o engine só executa `SELECT`).
+- O engine executa apenas o primeiro step: a criação de análise tem de gravar o step, senão a análise não executa.
+- As listagens administrativas devem incluir análises inativas (hoje `AnalysisRepository.get_by_id`/`get_all` filtram `is_active=true`).
+
+Código previsto: CRUD em `data_source_repo.py` e `analysis_repo.py` (incluindo steps); `services/data_source_admin_service.py`, `services/analysis_admin_service.py`; `routes/admin_data_sources.py`, `routes/admin_analyses.py`.
+
+#### F25 — Histórico de execuções
+
+- `GET /admin/executions` — filtros `analysis_id`, `user_id`, `status`, `error_code`, `cached`, `from`/`to`, `min_time_ms`; ordenado por `executed_at` desc; paginação obrigatória; com nome da análise e do usuário e os `parameters` de cada execução, tempo, linhas e bytes.
+- `GET /admin/executions/{id}` — detalhe completo (inclui `error_message`).
+- `GET /admin/executions/stats?from=&to=` — contagem por status, p95 de tempo, taxa de cache hit, análises e usuários mais frequentes.
+- `GET /admin/analyses/{id}/executions` — atalho por análise; filtro por valor de parâmetro (`parameters @> ...`) opcional.
+- `ExecutionRepository.get_all(limit)` é substituído por `search(filtros, limit, offset)` + `count`.
+- Os `parameters` gravados são os enviados pelo cliente, antes da validação (`AnalysisService`), podem conter dado sensível e não trazem defaults resolvidos; após editar uma análise podem divergir do schema atual. A tabela não tem política de retenção e cresce sem limite — por isso a paginação é obrigatória.
+- Índices atuais de `execution_history`: `analysis_id`, `executed_at`, `user_id` (simples). Índices compostos (ex.: `analysis_id, executed_at`) ou GIN em `parameters` só entram se o `EXPLAIN` justificar (mesmo critério da F15), como `ALTER`/`CREATE INDEX` manual.
 
 ---
 
@@ -712,7 +798,7 @@ POST /auth/revoke  {"email", "password", "token"}
 Renovação: quando o token expira, o usuário chama POST /auth/token de novo e atualiza a
 config do cliente MCP. Sem admin no processo, sem tool MCP de renovação (ver ADR-007).
 Os dois endpoints ficam FORA do middleware de autenticação do /mcp (não usam Bearer).
-Usuários (e-mail em minúsculas + hash bcrypt) continuam cadastrados por INSERT direto, sem CRUD.
+Usuários (e-mail em minúsculas + hash bcrypt) são cadastrados por INSERT direto; a partir da F23 (planejada) também pela API administrativa (§2.4).
 ```
 
 > **Decisão sobre acesso ao header de autenticação dentro de `list_tools()`/`call_tool()`
@@ -732,6 +818,26 @@ Usuários (e-mail em minúsculas + hash bcrypt) continuam cadastrados por INSERT
 > Descartada a alternativa de ler `mcp_server.request_context.request.headers` dentro dos
 > handlers (funciona nos dois modos, mas depende de detalhe interno do SDK e só cobre
 > `list_tools`/`call_tool`, não a recusa HTTP).
+
+---
+
+### 3.6 Fluxo: Autorização da API Administrativa (F23 — planejada)
+
+As rotas `/admin/*` e `/me` não passam pelo `AuthMiddleware` (que só envolve o `/mcp`, §3.5), então a autenticação e a autorização são dependências FastAPI. O token é o mesmo da F12 (mesma tabela, mesmo hash, mesma emissão em `POST /auth/token`) — não há segundo esquema.
+
+```
+1. Cliente (frontend) envia Authorization: Bearer <token> em toda requisição
+2. Dependência de autenticação (reaproveita AuthService.authenticate, §3.5):
+   ├─ token ausente/malformado/inexistente/expirado/revogado → 401
+   └─ usuário inexistente ou is_blocked=true → 401
+3. Para /admin/* — dependência require_admin (aplicada ao router inteiro):
+   ├─ lê users.is_admin no BD A CADA chamada (nunca de claim no token)
+   └─ is_admin=false → 403, sem executar nada
+4. Para /me e /me/password: só o passo 2 (qualquer usuário autenticado)
+5. A rota executa; escritas multi-tabela rodam em transação (PostgreSQLAdapter.transaction())
+```
+
+Efeitos imediatos, como na F12: bloquear um administrador, remover seu `is_admin` ou revogar seu token corta o acesso na chamada seguinte. Fail-closed: uma rota `/admin/*` sem `require_admin` ficaria pública (o middleware não a cobre), por isso a dependência é aplicada no router e os testes devem cobrir 401/403 em cada rota. O formato da recusa segue o das rotas `/auth/*` (`{"error","message"}`); os slugs exatos são definidos na spec da F23. `AuthenticatedUser` hoje só tem `id` e `name` — como o papel é lido do BD, ele não precisa mudar.
 
 ---
 
@@ -969,7 +1075,14 @@ src/
 │
 ├── routes/                    # F12 — rotas HTTP fora do /mcp, registradas em main.py (include_router)
 │   ├── __init__.py
-│   └── auth.py                # POST /auth/token, POST /auth/revoke (§3.5)
+│   ├── auth.py                # POST /auth/token, POST /auth/revoke (§3.5)
+│   ├── admin_users.py         # F23 (planejada) — /admin/users (§2.4)
+│   ├── admin_profiles.py      # F23 (planejada) — /admin/profiles
+│   ├── me.py                  # F23 (planejada) — GET /me, PUT /me/password
+│   ├── admin_data_sources.py  # F24 (planejada) — /admin/data-sources
+│   ├── admin_analyses.py      # F24 (planejada) — /admin/analyses
+│   └── admin_executions.py    # F25 (planejada) — /admin/executions
+│                              # (nome do arquivo da F25 a confirmar na spec)
 │
 ├── adapters/
 │   ├── __init__.py
@@ -986,13 +1099,17 @@ src/
 │   ├── volume_guard_service.py  # Pré-checagem de linhas/KB (ver §3.4, §4.3)
 │   ├── cache_service.py      # Caching logic
 │   ├── audit_service.py      # Logging (grava user_id — F12)
-│   └── auth_service.py       # F12 — authenticate() + get_allowed_analysis_ids() (§3.5)
+│   ├── auth_service.py       # F12 — authenticate() + get_allowed_analysis_ids() (§3.5)
+│   ├── user_admin_service.py        # F23 (planejada) — §2.4
+│   ├── profile_admin_service.py     # F23 (planejada)
+│   ├── data_source_admin_service.py # F24 (planejada)
+│   └── analysis_admin_service.py    # F24 (planejada); F25: ver spec (consulta ao histórico)
 │
 ├── security/
 │   ├── __init__.py
 │   ├── crypto.py             # Fernet — cifra connection_config.password (já existente)
 │   ├── token_auth.py         # F12 — generate_token()/hash_token()/authenticate() (§4.5)
-│   ├── password_hash.py      # F12 — verify_password() (bcrypt, em thread) (§4.5)
+│   ├── password_hash.py      # F12 — verify_password() (bcrypt, em thread) (§4.5); F23 (planejada): hash_password()
 │   └── auth_middleware.py    # F12 — middleware ASGI do /mcp: 401 + contextvar do AuthenticatedUser (§3.5)
 │
 ├── repositories/
@@ -1224,6 +1341,34 @@ Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 
 ---
 
+### ADR-008: API Administrativa — Papel `is_admin`, Erros em Slug e Exclusão Híbrida (F23–F25, planejada)
+
+**Contexto:** não há CRUD para usuários, perfis, data sources e analyses (cadastro por INSERT direto) nem consulta ao histórico além de SQL. Um frontend de gestão exige uma API HTTP (§2.4). Três decisões foram tomadas com o responsável pelo projeto:
+
+**Decisão 1 — Papel administrativo: coluna `users.is_admin`.** Dependência `require_admin` sobre o token existente (ADR-007), lendo `is_admin` e `is_blocked` do BD a cada chamada.
+- ✅ Papel explícito e separado dos perfis de acesso a analyses
+- ❌ Descartado: usar o perfil de nome `admin` — misturaria papel administrativo com perfil de acesso a dados, e quem pudesse editar perfis poderia se promover
+- ❌ Descartado: coluna `users.role` com múltiplos valores — mais flexível (ex.: auditor somente leitura), porém mais complexa que o necessário para V1.0
+- Custo: `ALTER TABLE` manual em bancos existentes (sem migrations) e `seed_admin.sh` passa a marcar o usuário `admin`
+
+**Decisão 2 — Formato de erro: slug `{"error","message"}`**, igual às rotas `/auth/*`.
+- ✅ Consistente com as rotas HTTP existentes e simples para um frontend (status HTTP + slug)
+- ❌ Descartado: contrato da F14 (`error_code` + `retryable`) — `retryable` e os códigos de query não fazem sentido para CRUD; o contrato da F14 segue restrito ao `/mcp`
+
+**Decisão 3 — Exclusão híbrida.** `DELETE` físico só sem dependentes (senão 409 orientando desativar/bloquear); vínculos N:N e tokens são apagados junto.
+- ✅ Preserva a auditoria (as FKs de `execution_history` e `analyses.data_source_id` não têm `ON DELETE`) e ainda permite remover cadastros criados por engano
+- ❌ Descartado: soft delete sempre — nunca libera os nomes `UNIQUE` (`analyses.name`, `profiles.name`, `users.external_id`)
+
+**Consequências:**
+- As rotas `/admin/*` ficam **fora do `AuthMiddleware`** (que envolve só o `/mcp`); o controle é a dependência `require_admin` aplicada ao router — esquecê-la deixa a rota pública (§3.6)
+- Superfície de ataque maior: sem rate limit nem bloqueio por tentativas (mesma pendência do ADR-007) — rever antes de expor fora da rede interna
+- Sem tabela de auditoria das ações administrativas em V1.0 (só log estruturado, sem segredos)
+- Dado sensível: o histórico expõe `parameters` brutos enviados pelos clientes — acesso só a administradores
+- CORS passa a permitir `PUT` e `PATCH`
+- Editar `connection_config` ou desativar data source exige invalidar o pool de adapter em `AnalysisService`; editar análise exige atualizar `updated_at` (chave do cache) — §2.4
+
+---
+
 ## 8. Considerações de Segurança
 
 ### 8.1 Rede Interna, Com Autenticação por Token (V1.0 — F12)
@@ -1249,6 +1394,10 @@ Detalhes, evidências e receitas de diagnóstico: ver **§14.1**.
 ├─ Controle de acesso via perfis (F12, RBAC básico)
 │  └─ Usuário → perfil → analyses (N:N); permissão recalculada a cada chamada,
 │     nunca cacheada no token
+├─ API administrativa (F23–F25, planejada, ADR-008)
+│  └─ Papel users.is_admin lido do BD a cada chamada; rotas /admin/* fora do
+│     AuthMiddleware, protegidas por require_admin (§3.6); senhas só como hash bcrypt;
+│     senha de data source cifrada com Fernet e nunca devolvida (§2.4)
 └─ Log de execução
    ├─ O quê (qual análise) foi executado
    ├─ Quando (timestamp)
@@ -1528,7 +1677,8 @@ V1.0 (MVP Local):
 ├─ MCP via Streamable HTTP, com autenticação por token opaco + perfis (F12, ADR-007)
 ├─ Multi-cliente simultâneo (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.),
 │  cada um com seu próprio token
-└─ Log de execução com identificação de usuário (execution_history.user_id)
+├─ Log de execução com identificação de usuário (execution_history.user_id)
+└─ API administrativa /admin/* para gestão por frontend (F23–F25, planejada — §2.4, ADR-008)
 
 V1.1 (Identificação de Cliente + Rate Limiting — quando necessário):
 ├─ ClientIdentificationService: qual cliente MCP/software executou (FB1)
@@ -1564,6 +1714,7 @@ V2.0 (Ecosystem):
 | **Task Queue** | Celery | Escala horizontal, remoto |
 | **Controle de Volume** | VolumeGuardService (COUNT(*) + checagem de KB) | Evita estourar tokens do cliente, sem handler nenhum |
 | **Autenticação** | Token opaco (hash SHA-256), sem JWT/OAuth2 | Bloqueio imediato e permissões dinâmicas já exigem BD por chamada — ver ADR-007 |
+| **API Administrativa** | Routers FastAPI `/admin/*` + `users.is_admin` (F23–F25, planejada) | Gestão por frontend sem acesso direto ao Config DB; mesmo token da F12, papel lido do BD — ver ADR-008 |
 | **Containerização** | Docker | Portabilidade local ↔ remoto |
 | **Orchestração** | Docker Compose (local), Kubernetes (remoto) | Simplicity + power |
 

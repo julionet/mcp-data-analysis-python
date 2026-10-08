@@ -2,10 +2,12 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP
 
-**Versão:** 1.11 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-03 (v1.11 — RNF4: retry só de falha rápida de conexão, F14); 2026-09-30
+**Versão:** 1.12 (Aprovado — Streamable HTTP **com TLS obrigatório** Multi-Cliente, **com autenticação por token + perfis (F12)**, com PostgreSQL + MySQL + SQL Server + Oracle, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-08 (v1.12 — RF6: API administrativa, F23–F25); 2026-10-03 (v1.11 — RNF4: retry só de falha rápida de conexão, F14); 2026-09-30
 **Autor:** Jose
 **Status:** ✅ Aprovado
+
+> **Nota de revisão (v1.11 → v1.12):** entra no escopo de V1.0 uma **API administrativa HTTP (`/admin/*`)** para gestão da plataforma por um futuro frontend, nova **RF6** (§7), nova **UC4** (§6), novo papel de **administrador** (RNF5, Restrição T5, Glossário) e as features **F23, F24 e F25** (ver FEATURES_ROADMAP.md v1.22 e ARQUITETURA.md v1.26, §2.4 e ADR-008). Motivação: hoje usuários, perfis, data sources e analyses só são cadastrados por INSERT direto no banco (UC1, UC3), e o histórico de execuções só é consultável por SQL; um frontend de gestão precisa de endpoints para isso. O **frontend em si continua fora de escopo** (§4). Não muda nenhum requisito existente (RF1–RF5): o uso do `/mcp` por clientes MCP segue idêntico; o cadastro por INSERT direto continua possível, a API é um caminho adicional. Ficam **fora de escopo** da RF6: tabela de auditoria das ações administrativas, rate limit/bloqueio por tentativas de senha, papéis administrativos granulares, retenção/purge do histórico e reset de senha por e-mail (ver §12).
 
 > **Nota de implementação (2026-09-30):** o RF5 (autenticação por token + perfis) está **implementado** (F12 ✅ Done), sem mudança de requisito. O servidor passa a exigir `Authorization: Bearer` em toda chamada ao `/mcp` (401 genérico caso contrário). Segue pendente, antes de expor fora da rede interna, a proteção contra tentativas de senha em `/auth/token` (ver §12). F12 **implementada** (2026-09-30): `POST /auth/token` e `POST /auth/revoke` (`routes/auth.py`), `AuthMiddleware` ASGI + `contextvar` no `/mcp` (transporte stateless), `AuthService`, repositórios `UserRepository`/`ProfileRepository`/`AccessTokenRepository`, `list_tools()` filtrado por perfil e `call_tool()` com revalidação de permissão, `execution_history.user_id`. Testes: 295 ✅ (189 anteriores ajustados + 106 novos). Schema em `src/database/schema.sql` (migration e seed da F12 canceladas — F13, decisão 7). Validado com cliente MCP real via `mcp-remote --header`. Spec e notas de implementação: `features/F12_AUTENTICACAO_PERFIS.md` §11.
 >
@@ -145,6 +147,7 @@ Versionamento de análises (mudanças na query SQL) não é necessário em V1.0 
 - [x] Servidor MCP via **Streamable HTTP**, acessível por múltiplos clientes simultaneamente na rede local
 - [x] Protocolo MCP padrão (sem customizações proprietárias)
 - [x] Autenticação por token de acesso (opaco) e controle de acesso via perfis — usuário → perfil → analyses (N:N); usuário bloqueado perde acesso imediato (ver RF5)
+- [ ] API administrativa HTTP (`/admin/*`) para gestão de usuários, perfis, data sources, analyses e consulta ao histórico de execuções, restrita a administradores (ver RF6 — F23, F24, F25; planejada)
 
 ✅ **Não-Funcionais**
 - [x] Rodar localmente em rede interna (sem exposição pública)
@@ -155,7 +158,7 @@ Versionamento de análises (mudanças na query SQL) não é necessário em V1.0 
 ### Out of Scope (O Que NÃO Será Feito em V1.0)
 
 ❌ **Fora do Escopo V1.0**
-- [ ] Interface Web/Dashboard (usar cliente MCP como interface)
+- [ ] Interface Web/Dashboard em si (usar cliente MCP como interface). A **API administrativa** que um frontend de gestão consumiria (RF6) está em escopo; o frontend não
 - [ ] **Identificação de qual cliente MCP/software está chamando** (Claude Desktop vs. Gemini Desktop vs. outro) — diferente de identificação de usuário (essa entra em escopo via F12); sem requisito de negócio que a justifique hoje
 - [ ] Rate limiting / quotas por usuário (autenticação por usuário entra em escopo via F12, mas sem quota/rate limit associado ainda)
 - [ ] SSO/OAuth (Azure AD, Google, LDAP) — avaliado e descartado para V1.0 (ver ARQUITETURA.md ADR-007); autenticação em V1.0 é por token de acesso administrado, não delegada
@@ -265,6 +268,8 @@ Scenario: Jose quer análise de "Vendas por Região"
 
 **Esforço:** ~5 minutos (tudo SQL)
 
+> Com a API administrativa (RF6, F24), o mesmo cadastro também pode ser feito por `POST /admin/analyses` (análise, step e perfis numa única operação) e `POST /admin/data-sources`; o INSERT direto continua possível.
+
 ---
 
 ### UC2: Executar Análise (Múltiplos Clientes MCP Simultâneos)
@@ -326,7 +331,40 @@ Scenario: Análise não liberada para o perfil do usuário
 ```
 
 **Benefício:** cada usuário só vê e executa as analyses do(s) perfil(is) vinculado(s) a ele; bloqueio e mudança de perfil têm efeito imediato, sem depender de o token expirar.
-**Esforço:** ~0 minutos do ponto de vista do usuário final (token configurado 1 vez no cliente MCP); o usuário emite o próprio token com e-mail e senha (ver RF5); o cadastro de usuários e perfis é feito direto no banco.
+**Esforço:** ~0 minutos do ponto de vista do usuário final (token configurado 1 vez no cliente MCP); o usuário emite o próprio token com e-mail e senha (ver RF5); o cadastro de usuários e perfis é feito direto no banco (ou, a partir da F23, pela API administrativa — ver UC4).
+
+---
+
+### UC4: Gerir a Plataforma pela API Administrativa (Administrador)
+
+```gherkin
+Feature: Gestão de usuários, perfis, data sources, analyses e histórico via API
+
+Scenario: Administrador cadastra um usuário e libera uma análise
+  Given Um administrador autenticado (token válido, users.is_admin=true)
+  When O administrador cria o usuário (POST /admin/users) e o vincula a um perfil
+  And Vincula a análise "vendas_por_regiao" a esse perfil
+  Then O novo usuário emite o próprio token (POST /auth/token) e passa a ver a análise
+  And A mudança tem efeito imediato (sem cache de permissão — ver RF5)
+
+Scenario: Administrador bloqueia um usuário
+  Given Um administrador autenticado
+  When O administrador bloqueia o usuário Y
+  Then Y perde acesso imediatamente, mesmo com token ainda válido (ver UC3)
+
+Scenario: Usuário comum tenta usar a API administrativa
+  Given Um usuário autenticado sem is_admin
+  When O usuário chama qualquer rota /admin/*
+  Then A chamada é recusada (403) e nenhum dado é alterado ou devolvido
+
+Scenario: Administrador consulta o histórico de execuções
+  Given Execuções registradas em execution_history
+  When O administrador consulta GET /admin/executions com filtros (análise, usuário, status, período)
+  Then Recebe a lista paginada com os parâmetros de cada execução, tempo, linhas e tamanho
+```
+
+**Benefício:** a gestão deixa de depender de acesso direto ao banco de configuração e passa a poder ser feita por um frontend.
+**Esforço:** ~0 minutos de SQL; operação pela API.
 
 ---
 
@@ -438,6 +476,39 @@ Então:
 
 ---
 
+### RF6: API Administrativa para Gestão da Plataforma (F23, F24, F25 — planejada)
+
+```
+Dado: Usuário autenticado por token (RF5) marcado como administrador (users.is_admin=true)
+Quando: Chama uma rota /admin/* (HTTP, sobre TLS, header Authorization: Bearer <token>)
+Então:
+├─ Sistema valida o token e confirma, no BD a cada chamada, que o usuário é administrador
+│  e não está bloqueado
+├─ Usuário comum, sem token ou com token inválido é recusado antes de qualquer leitura/escrita
+└─ A operação é executada e o resultado devolvido em JSON
+```
+
+**Escopo funcional (resumo — endpoints detalhados em ARQUITETURA.md §2.4):**
+- **Usuários (F23):** pesquisar/listar, criar, detalhar, alterar, excluir, redefinir senha (revoga os tokens do usuário), bloquear/desbloquear, vincular perfis, listar e revogar tokens
+- **Perfis (F23):** pesquisar/listar, criar, detalhar, alterar, excluir, vincular analyses e usuários
+- **Autosserviço (F23):** qualquer usuário autenticado consulta os próprios dados (`GET /me`) e troca a própria senha (`PUT /me/password`, com a senha atual; revoga todos os tokens do usuário)
+- **Data sources (F24):** listar/detalhar, criar, alterar, excluir, testar conexão, listar tipos suportados e campos exigidos; a senha da conexão é cifrada ao gravar e nunca devolvida
+- **Analyses (F24):** listar/detalhar (com step e perfis), criar (análise, step e perfis numa única operação), alterar, excluir, vincular perfis, validar a definição e invalidar o cache da análise
+- **Histórico (F25):** consultar execuções com filtros (análise, usuário, status, código de erro, cache, período, tempo mínimo), com os parâmetros de cada execução; detalhe de uma execução; estatísticas por período
+
+**Critério de Aceitação:**
+- ✅ Toda rota `/admin/*` exige token válido e `is_admin=true`, verificado no BD a cada chamada (sem claim no token); administrador bloqueado perde acesso imediatamente
+- ✅ Nunca são devolvidos `password_hash`, `token_hash` nem a senha de `connection_config`
+- ✅ Exclusão: física apenas quando não há dependentes (histórico de execuções, analyses vinculadas); com dependentes a API recusa (409) e orienta desativar/bloquear. Vínculos N:N e tokens são apagados junto
+- ✅ O último administrador ativo e o próprio administrador não podem ser bloqueados, excluídos nem ter `is_admin` removido por essa API
+- ✅ Alterar uma análise atualiza `updated_at` (invalida o cache de resultados dela); alterar ou desativar um data source faz a próxima execução usar a configuração nova
+- ✅ Listagens paginadas (`limit`/`offset`), com busca por texto onde aplicável
+- ✅ Erros no formato `{"error", "message"}` das rotas `/auth/*` (o contrato `error_code`/`retryable` da F14 continua restrito ao `/mcp`)
+- ✅ Parâmetros e dados sensíveis não aparecem em log (senha, hash, token)
+- ⚠️ Sem proteção contra tentativas de senha e sem tabela de auditoria das ações administrativas em V1.0 (só log) — rever antes de expor fora da rede interna (ver §12)
+
+---
+
 ## 8. Requisitos Não-Funcionais
 
 ### RNF1: Performance
@@ -497,8 +568,13 @@ Então:
 ├─ Credenciais BD: criptografadas em repouso
 ├─ SQL injection: parametrized queries obrigatório
 ├─ Validação: todos inputs validados antes execução
-└─ Log de execução: qual análise foi executada, quando, com qual resultado
-   e por qual usuário (execution_history.user_id, ver RF5)
+├─ Log de execução: qual análise foi executada, quando, com qual resultado
+│  e por qual usuário (execution_history.user_id, ver RF5)
+└─ API administrativa (RF6): papel de administrador (users.is_admin) verificado no BD
+   a cada chamada; senha de usuário só como hash bcrypt (nunca devolvida); senha de
+   data source cifrada com Fernet (nunca devolvida); o histórico de execuções expõe os
+   parâmetros brutos enviados pelos clientes (podem conter dado sensível) — acesso só
+   para administradores
 ```
 
 ---
@@ -534,6 +610,7 @@ Então:
 - ❌ Não requer OAuth2/SSO/LDAP em V1.0 (ver ARQUITETURA.md ADR-007 para o racional)
 - ❌ Não requer identificação de qual cliente MCP/software está chamando em V1.0 (ex.: Claude Desktop vs. Gemini Desktop — ver FB1 em §12)
 - ❌ Não há rate limiting/quota por usuário em V1.0 (ver §12)
+- ✅ (RF6) As rotas `/admin/*` seguem o mesmo mecanismo de token (nada de segundo esquema de autenticação) e exigem o papel de administrador (`users.is_admin`); não há papéis administrativos granulares em V1.0
 - ⚠️ Antes de expor a aplicação além dessa rede confiável (remoto, internet), SSO/OAuth e rate limiting **devem** ser avaliados (ver seção 12)
 
 ---
@@ -573,6 +650,7 @@ Então:
 - ✅ Cache local funcional
 - ✅ Autenticação por token funcional: usuário sem token, com token expirado/revogado, ou bloqueado é recusado; usuário autenticado só vê/executa analyses liberadas pelo(s) perfil(is) vinculado(s)
 - ✅ Docker compose (local + remoto)
+- ✅ API administrativa funcional (RF6): usuário comum e não autenticado são recusados em `/admin/*`; administrador gere usuários, perfis, data sources e analyses e consulta o histórico com parâmetros
 - ✅ Testes automatizados (80%+ coverage)
 
 ### Sprint 4 (Deploy)
@@ -590,7 +668,12 @@ V1.0: Autenticação por Token + Perfis (F12 — já no escopo desta versão)
 ├─ Token de acesso opaco, emitido pelo usuário por e-mail e senha, sem OAuth/SSO
 ├─ ✅ Implementado (F12, 2026-09-30)
 ├─ (Pendente antes de expor fora da rede interna) rate limit/bloqueio por tentativas em /auth/token
-└─ Ver RF5, Restrição T5 e ARQUITETURA.md ADR-007
+├─ Ver RF5, Restrição T5 e ARQUITETURA.md ADR-007
+└─ API administrativa (RF6, F23–F25 — planejada): papel is_admin, CRUD de usuários/perfis/data sources/analyses e consulta ao histórico; ARQUITETURA.md §2.4 e ADR-008
+
+Fora do escopo de V1.0 (candidatos a revisão futura): tabela de auditoria das ações administrativas,
+papéis administrativos granulares (ex.: auditor somente leitura), retenção/purge de execution_history
+e reset de senha por e-mail.
 
 V1.1: Identificação de Cliente + Rate Limiting (quando necessário)
 ├─ ClientIdentificationService: qual cliente MCP executou (Claude, Gemini, OpenAI, etc.) — FB1
@@ -679,6 +762,8 @@ Nossa Plataforma: Funciona com QUALQUER cliente MCP (protocolo padrão, via Stre
 | **Perfil** | Agrupamento de analyses liberadas; vinculado a usuários (N:N) e a analyses (N:N) |
 | **Token de Acesso** | Segredo opaco (não JWT/OAuth2) que identifica o usuário nas chamadas MCP; validade configurável, revogável |
 | **Permissão Efetiva** | Conjunto de analyses ativas vinculadas a um perfil ativo vinculado ao usuário autenticado — recalculado a cada chamada, nunca cacheado no token |
+| **Administrador** | Usuário com `users.is_admin=true`; único papel autorizado a usar a API administrativa. É independente dos perfis de acesso a analyses |
+| **API Administrativa** | Conjunto de rotas HTTP `/admin/*` (mais `/me` para autosserviço) para gerir usuários, perfis, data sources, analyses e consultar o histórico de execuções; base para um frontend de gestão (RF6) |
 
 ---
 
