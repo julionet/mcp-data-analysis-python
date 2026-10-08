@@ -457,3 +457,47 @@ class TestCacheServiceLockCleanup:
             await service.get_or_execute("k", 3600, False, failing_executor)
 
         assert service._locks == {}
+
+
+class TestInMemoryBackendEdges:
+    """F17 M1 — substituição de chave existente, purga de expirados e contabilidade de bytes."""
+
+    @pytest.mark.asyncio
+    async def test_set_on_existing_key_replaces_value_and_adjusts_total_bytes(self):
+        backend = InMemoryBackend(max_entries=10, max_size_mb=1)
+        await backend.set("k", {"v": "a"}, 60)
+        small = backend._total_bytes
+        await backend.set("k", {"v": "a" * 100}, 60)
+
+        assert (await backend.get("k")) == {"v": "a" * 100}
+        assert len(backend._store) == 1
+        assert backend._total_bytes > small  # não somou o valor antigo junto
+
+    @pytest.mark.asyncio
+    async def test_expired_entries_are_purged_on_next_set_and_free_their_bytes(self):
+        backend = InMemoryBackend(max_entries=10, max_size_mb=1)
+        with patch("services.cache_backend.time.monotonic", return_value=1000.0):
+            await backend.set("old", {"v": "x" * 50}, 10)
+        with patch("services.cache_backend.time.monotonic", return_value=2000.0):
+            await backend.set("new", {"v": 1}, 10)
+
+        assert list(backend._store) == ["new"]
+        assert backend._total_bytes == backend._store["new"].size_bytes
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_entry_and_missing_key_is_noop(self):
+        backend = InMemoryBackend(max_entries=10, max_size_mb=1)
+        await backend.set("k", {"v": 1}, 60)
+
+        await backend.delete("k")
+        await backend.delete("inexistente")
+
+        assert await backend.get("k") is None and backend._total_bytes == 0
+
+    @pytest.mark.asyncio
+    async def test_null_backend_delete_is_a_safe_noop(self):
+        backend = NullBackend()
+        await backend.set("k", {"v": 1}, 60)
+        await backend.delete("k")
+
+        assert await backend.get("k") is None

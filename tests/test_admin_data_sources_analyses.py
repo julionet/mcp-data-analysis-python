@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from cryptography.fernet import InvalidToken
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from adapters import oracle, sqlserver
@@ -21,6 +21,7 @@ from routes.auth import get_auth_service
 from routes.dependencies import (
     get_analysis_admin_service,
     get_data_source_admin_service,
+    get_user_admin_service,
     get_user_repo,
 )
 from schemas.admin import InvalidConnectionConfigError, UnsupportedDataSourceTypeError
@@ -702,3 +703,108 @@ class TestWiring:
         for method, path in new:
             r = client.request(method, _fill(path), json={})
             assert r.status_code == 401, (method, path)
+
+
+class TestDependencyFactories:
+    """F17 M4 — as fábricas de dependência montam cada serviço sobre o `config_db_adapter`."""
+
+    def test_user_profile_execution_services_and_user_repo_are_built(self):
+        from repositories.user_repo import UserRepository
+        from routes.dependencies import (
+            get_execution_admin_service,
+            get_profile_admin_service,
+            get_user_admin_service,
+        )
+        from services.execution_admin_service import ExecutionAdminService
+        from services.profile_admin_service import ProfileAdminService
+        from services.user_admin_service import UserAdminService
+
+        assert isinstance(get_user_repo(), UserRepository)
+        assert isinstance(get_user_admin_service(), UserAdminService)
+        assert isinstance(get_profile_admin_service(), ProfileAdminService)
+        assert isinstance(get_execution_admin_service(), ExecutionAdminService)
+
+    def test_every_factory_uses_the_shared_config_db_adapter(self):
+        from database.connection import config_db_adapter
+
+        service = get_user_admin_service()
+
+        assert service._db is config_db_adapter
+
+
+class TestAdminRacesAndEdges:
+    """F17 — corridas de FK na exclusão, PATCH sem mudança efetiva e erros de limpeza."""
+
+    def test_delete_data_source_foreign_key_race_is_409(self, env):
+        import asyncpg
+
+        ds = env.store.add_data_source()
+        env.ds_service._repo.delete = AsyncMock(side_effect=asyncpg.ForeignKeyViolationError("fk"))
+
+        r = env.call("DELETE", f"/admin/data-sources/{ds}")
+
+        assert r.status_code == 409 and r.json()["error"] == "data_source_has_analyses"
+        assert ds in env.store.data_sources and env.pool.calls == []  # não derrubou o pool
+
+    def test_delete_analysis_foreign_key_race_is_409(self, env):
+        import asyncpg
+
+        aid = env.store.add_full_analysis(ds_id=env.store.add_data_source())
+        env.an_service._analyses.delete = AsyncMock(side_effect=asyncpg.ForeignKeyViolationError("fk"))
+
+        r = env.call("DELETE", f"/admin/analyses/{aid}")
+
+        assert r.status_code == 409 and r.json()["error"] == "analysis_has_history"
+        assert aid in env.store.analyses
+
+    @pytest.mark.parametrize("password", ["", 123, None])
+    def test_patch_password_must_be_a_non_empty_string(self, env, password):
+        ds = env.store.add_data_source()
+
+        r = env.call("PATCH", f"/admin/data-sources/{ds}", json={"connection_config": {"password": password}})
+
+        assert r.status_code == 422 and r.json()["error"] == "invalid_connection_config"
+
+    def test_patch_with_no_effective_change_writes_and_invalidates_nothing(self, env):
+        ds = env.store.add_data_source()
+        env.ds_service._repo.update = AsyncMock()
+        env.ds_service._repo.touch_analyses = AsyncMock()
+
+        r = env.call("PATCH", f"/admin/data-sources/{ds}", json={"connection_config": {"host": "h"}})
+
+        assert r.status_code == 200
+        env.ds_service._repo.update.assert_not_awaited()
+        env.ds_service._repo.touch_analyses.assert_not_awaited()
+        assert env.pool.calls == []
+
+    def test_failure_closing_the_test_adapter_does_not_change_the_result(self, env):
+        adapter = _adapter()
+        adapter.disconnect.side_effect = RuntimeError("fechar falhou")
+        ds = env.store.add_data_source()
+
+        with patch.object(AdapterFactory, "create_adapter", return_value=adapter):
+            r = env.call("POST", f"/admin/data-sources/{ds}/test-connection")
+
+        assert r.status_code == 200 and r.json()["ok"] is True
+
+
+class TestAdminRouteSafetyNet:
+    """F17 M5 — PasswordPolicyError que escape do serviço vira 400 invalid_password."""
+
+    def test_password_policy_error_is_translated(self):
+        from routes.admin_route import AdminRoute
+        from security.password_hash import PasswordPolicyError
+
+        router = APIRouter(route_class=AdminRoute)
+
+        @router.get("/boom")
+        async def boom():
+            raise PasswordPolicyError("A senha deve ter ao menos um número.")
+
+        app = FastAPI()
+        app.include_router(router)
+
+        r = TestClient(app).get("/boom")
+
+        assert r.status_code == 400
+        assert r.json() == {"error": "invalid_password", "message": "A senha deve ter ao menos um número."}

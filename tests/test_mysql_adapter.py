@@ -114,3 +114,60 @@ class TestMySQLAdapterQueryTimeout:
 
         init_command = mock_create_pool.await_args.kwargs["init_command"]
         assert init_command == f"SET SESSION max_execution_time={settings.query_timeout_seconds * 1000}"
+
+
+class TestMySQLAdapterLifecycle:
+    """F17 M2 — disconnect/execute/test_connection (padrão dos testes de PostgreSQL/SQL Server)."""
+
+    @staticmethod
+    def _adapter_with_pool():
+        from unittest.mock import AsyncMock, MagicMock
+
+        cursor = AsyncMock()
+        conn = MagicMock()
+        conn.commit = AsyncMock()
+        conn.cursor.return_value.__aenter__ = AsyncMock(return_value=cursor)
+        conn.cursor.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool = MagicMock()
+        pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+        pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool.wait_closed = AsyncMock()
+        adapter = MySQLAdapter(CONFIG)
+        adapter._pool = pool
+        return adapter, pool, conn, cursor
+
+    @pytest.mark.asyncio
+    async def test_disconnect_closes_the_pool_and_waits(self):
+        adapter, pool, _, _ = self._adapter_with_pool()
+
+        await adapter.disconnect()
+
+        pool.close.assert_called_once()
+        pool.wait_closed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_without_pool_is_noop(self):
+        adapter = MySQLAdapter(CONFIG)
+        adapter._pool = None
+
+        await adapter.disconnect()  # não levanta
+
+    @pytest.mark.asyncio
+    async def test_execute_runs_with_positional_args_and_commits(self):
+        adapter, _, conn, cursor = self._adapter_with_pool()
+
+        await adapter.execute("INSERT INTO t VALUES (%s, %s)", 1, "a")
+
+        cursor.execute.assert_awaited_once_with("INSERT INTO t VALUES (%s, %s)", (1, "a"))
+        conn.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_test_connection_true_and_false(self):
+        from unittest.mock import AsyncMock
+
+        adapter, _, _, cursor = self._adapter_with_pool()
+        cursor.fetchall.return_value = [{"1": 1}]
+        assert await adapter.test_connection() is True
+
+        cursor.execute = AsyncMock(side_effect=RuntimeError("down"))
+        assert await adapter.test_connection() is False

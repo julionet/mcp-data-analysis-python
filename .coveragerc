@@ -1,0 +1,14 @@
+[run]
+source = src
+branch = True
+
+[report]
+# F17 decisão 8: a meta do roadmap é 80%; 90% na suíte unitária protege contra regressão.
+fail_under = 90
+show_missing = True
+skip_covered = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    ^\s*(async )?def .*:\s*\.\.\.\s*$

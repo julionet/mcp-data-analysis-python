@@ -155,3 +155,38 @@ class TestMcpTools:
             result = await tools.call_tool("execute_vendas_por_regiao", {}, user)
 
         assert result == {"status": "error", "mensagem": "Erro interno ao executar a análise."}
+
+
+class TestCacheBackendSelection:
+    """F17 M3 — CACHE_BACKEND=none instala o NullBackend (kill-switch global) e avisa no log."""
+
+    @staticmethod
+    def _load_fresh_copy(cache_backend: str):
+        """Executa uma CÓPIA de mcp_transport/tools.py com outro `settings.cache_backend`,
+        sem tocar nos singletons do módulo real (que o resto da suíte usa)."""
+        import importlib.util
+
+        from config import settings
+        from mcp_transport import tools as real
+
+        spec = importlib.util.spec_from_file_location("tools_cache_backend_copy", real.__file__)
+        module = importlib.util.module_from_spec(spec)
+        with patch.object(settings, "cache_backend", cache_backend):
+            spec.loader.exec_module(module)
+        return module
+
+    def test_none_installs_null_backend_and_logs_warning(self, caplog):
+        import logging
+
+        from services.cache_backend import NullBackend
+
+        with caplog.at_level(logging.WARNING):
+            module = self._load_fresh_copy("none")
+
+        assert isinstance(module._cache_backend, NullBackend)
+        assert any("CACHE_BACKEND=none" in r.getMessage() for r in caplog.records)
+
+    def test_memory_installs_in_memory_backend(self):
+        from services.cache_backend import InMemoryBackend
+
+        assert isinstance(self._load_fresh_copy("memory")._cache_backend, InMemoryBackend)

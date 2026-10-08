@@ -19,6 +19,8 @@ from repositories.execution_repo import ExecutionFilters, ExecutionRepository
 from services.audit_service import AuditService
 from services.execution_admin_service import ExecutionAdminService, build_filters
 
+pytestmark = pytest.mark.integration  # F17: exige o Config DB (pulado sozinho sem banco)
+
 CONFIG = dict(
     host=settings.postgres_config_host,
     port=settings.postgres_config_port,

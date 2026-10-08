@@ -30,6 +30,8 @@ from security.password_hash import verify_password
 from services.profile_admin_service import ProfileAdminService
 from services.user_admin_service import UserAdminService
 
+pytestmark = pytest.mark.integration  # F17: exige o Config DB (pulado sozinho sem banco)
+
 PASSWORD = "Nova#Senha1"
 
 

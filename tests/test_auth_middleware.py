@@ -188,3 +188,42 @@ class TestAuthMiddleware:
         assert RAW_TOKEN not in caplog.text
         assert hash_token(RAW_TOKEN) not in caplog.text
         assert "Authorization" not in caplog.text and "Bearer" not in caplog.text
+
+
+class TestAuthMiddlewareScopes:
+    """F17 A4 — escopos não-HTTP atravessam o middleware; sem usuário no contexto, fail-closed."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scope_type", ["lifespan", "websocket"])
+    async def test_non_http_scope_passes_through_without_authentication(self, scope_type):
+        seen = []
+
+        async def app(scope, receive, send):
+            seen.append(scope["type"])
+
+        async def never_authenticate(raw_token):
+            raise AssertionError("não deve autenticar escopo não-HTTP")
+
+        await AuthMiddleware(app, never_authenticate)({"type": scope_type}, None, None)
+
+        assert seen == [scope_type]
+
+    def test_require_user_without_authenticated_user_raises_permission_error(self):
+        from mcp_transport import _require_user
+
+        token = current_user.set(None)
+        try:
+            with pytest.raises(PermissionError):
+                _require_user()
+        finally:
+            current_user.reset(token)
+
+    def test_require_user_returns_the_authenticated_user(self):
+        from mcp_transport import _require_user
+
+        user = make_user("Zé")
+        token = current_user.set(user)
+        try:
+            assert _require_user() is user
+        finally:
+            current_user.reset(token)

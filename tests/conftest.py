@@ -28,7 +28,16 @@ def client():
     # session_manager (mcp_transport) é um singleton de módulo cujo .run()
     # só pode ser chamado uma vez por processo — por isso um único TestClient
     # (um único ciclo de lifespan) é reusado por todos os testes que usam o app real.
-    with TestClient(app) as test_client:
+    #
+    # F17: o lifespan sobe SEM Config DB — conexão, desconexão e health são simulados em `main`,
+    # para a suíte unitária rodar em qualquer máquina. O fail-fast de verdade (sem banco o app não
+    # sobe) é testado em test_database_connection.py; o Postgres real, nos testes `integration`.
+    with (
+        patch("main.connect_config_db", AsyncMock()),
+        patch("main.disconnect_config_db", AsyncMock()),
+        patch("main.check_postgres", AsyncMock(return_value=True)),
+        TestClient(app) as test_client,
+    ):
         yield test_client
 
 

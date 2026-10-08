@@ -165,7 +165,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | 🟩 Done (2026-10-08; validação manual pendente: `features/F24_API_ADMIN_DATA_SOURCES_ANALYSES.md` §12) |
 | F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | 🟩 Done (2026-10-08) — `features/F25_API_ADMIN_HISTORICO_EXECUCOES.md` |
 | F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | ⬜ Todo |
-| F17 | Unit Tests (80% coverage) | 🟠 Alta | 2d | F1-F12 | ⬜ Todo |
+| F17 | Unit Tests (80% coverage) | 🟠 Alta | ~1d (revisto; era 2d) | F1-F12 | 🟩 Done (2026-10-08) — `features/F17_UNIT_TESTS_COBERTURA.md` |
 | F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
 
 **Total Sprint 3:** ~20.5 dias (12.5 + 8 da API administrativa F23–F25)
@@ -493,7 +493,7 @@ XXX_PARAM=value
 1. 🟩 F23: API Admin — base + Usuários + Perfis (feito 2026-10-08)
 2. 🟩 F24: API Admin — Data Sources + Analyses (feito 2026-10-08)
 3. ⬜ F25: API Admin — Histórico de Execuções (spec pendente)
-4. ⬜ F17: Unit Tests (80% coverage) — medir cobertura e preencher lacunas (cobre também F23–F25)
+4. ✅ F17: Unit Tests (80% coverage) — concluída 2026-10-08: suíte unitária sem banco, 99,97% (cobre também F23–F25)
 5. ⬜ F16: API Documentation (MCP + Multi-Cliente) — inclui contrato de erro da F14, /auth/* e /admin/*
 6. ⬜ F18: Integration Tests (múltiplos clientes MCP) — depende de F6 e F17
 Depois: Sprint 4 (F19 → F20 → F21 → F22); F20 só depende de F13 e pode ser adiantada.
@@ -536,7 +536,7 @@ Para cada feature, siga este workflow:
 | Métrica | Target | Status |
 |---------|--------|--------|
 | **Features Implementadas** | 25/25 | 15/25 🟩 |
-| **Code Coverage** | 80%+ | TBD |
+| **Code Coverage** | 80%+ | 99,97% (suíte unitária sem banco, linhas+branches; F17, 2026-10-08) ✅ |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 4 (PostgreSQL, MySQL, SQL Server, Oracle) ✅ |
 | **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |

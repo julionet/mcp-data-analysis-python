@@ -122,3 +122,50 @@ class TestAnalysisParametersSchema:
         }
         assert result["properties"]["pago"]["type"] == "boolean"
         assert "pago" not in result["required"]
+
+
+class TestJsonSchemaConversion:
+    """F17 A2 — o que o cliente MCP/LLM vê no `list_tools` (min/max/enum/default/description)."""
+
+    def test_numeric_bounds_enum_default_and_description_reach_the_json_schema(self):
+        schema = to_json_schema({
+            "limite": {"type": "integer", "required": True, "min": 1, "max": 100,
+                       "default": 10, "description": "Máximo de linhas"},
+            "regiao": {"type": "string", "required": False, "enum": ["SP", "RJ"]},
+            "inicio": {"type": "date", "required": True},
+            "em": {"type": "datetime", "required": False},
+        })
+
+        assert schema["properties"]["limite"] == {
+            "type": "integer", "minimum": 1, "maximum": 100, "default": 10, "description": "Máximo de linhas",
+        }
+        assert schema["properties"]["regiao"] == {"type": "string", "enum": ["SP", "RJ"]}
+        assert schema["properties"]["inicio"] == {"type": "string", "format": "date"}
+        assert schema["properties"]["em"] == {"type": "string", "format": "date-time"}
+        assert schema["required"] == ["limite", "inicio"]
+
+    def test_zero_is_a_valid_bound_and_default(self):
+        """0 não pode ser tratado como 'ausente' (is not None, não truthiness)."""
+        prop = to_json_schema({"n": {"type": "integer", "min": 0, "max": 0, "default": 0}})["properties"]["n"]
+
+        assert (prop["minimum"], prop["maximum"], prop["default"]) == (0, 0, 0)
+
+    def test_empty_or_missing_parameters(self):
+        assert to_json_schema({}) == {"type": "object", "properties": {}, "required": []}
+        assert to_json_schema(None) == {"type": "object", "properties": {}, "required": []}
+
+    def test_model_enforces_bounds_on_values(self):
+        model = to_pydantic_model({"limite": {"type": "integer", "required": True, "min": 1, "max": 100}})
+
+        assert model(limite=50).limite == 50
+        for invalid in (0, 101):
+            with pytest.raises(ValidationError):
+                model(limite=invalid)
+
+    def test_model_default_and_description_are_applied(self):
+        model = to_pydantic_model({
+            "pago": {"type": "boolean", "required": False, "default": True, "description": "Só pagos"},
+        })
+
+        assert model().pago is True
+        assert model.model_fields["pago"].description == "Só pagos"

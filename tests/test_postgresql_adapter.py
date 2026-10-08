@@ -139,3 +139,78 @@ class TestPostgreSQLAdapterScalar:
 
         assert result == [{"id": 1, "nome": "produto"}]
         assert isinstance(result, list)
+
+
+class TestPostgresTransactionAndPool:
+    """F17 — Transaction, execute(), transaction() e disconnect() sem banco (pool simulado)."""
+
+    @staticmethod
+    def _pool():
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[{"a": 1}])
+        conn.fetchval = AsyncMock(return_value=7)
+        conn.execute = AsyncMock()
+        conn.transaction.return_value.__aenter__ = AsyncMock()
+        conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool = MagicMock()
+        pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+        pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+        pool.close = AsyncMock()
+        return pool, conn
+
+    @pytest.mark.asyncio
+    async def test_execute_passes_positional_args(self):
+        pool, conn = self._pool()
+        adapter = PostgreSQLAdapter({})
+        adapter._pool = pool
+
+        await adapter.execute("UPDATE t SET a = $1", 5)
+
+        conn.execute.assert_awaited_once_with("UPDATE t SET a = $1", 5)
+
+    @pytest.mark.asyncio
+    async def test_transaction_wraps_connection_with_same_semantics(self):
+        pool, conn = self._pool()
+        adapter = PostgreSQLAdapter({})
+        adapter._pool = pool
+
+        async with adapter.transaction() as tx:
+            assert await tx.execute_query("SELECT $1", {"x": 1}) == [{"a": 1}]
+            assert await tx.execute_query("SELECT COUNT(*)", scalar=True) == 7
+            await tx.execute("DELETE FROM t WHERE id = $1", 3)
+
+        conn.fetch.assert_awaited_once_with("SELECT $1", 1)
+        conn.execute.assert_awaited_once_with("DELETE FROM t WHERE id = $1", 3)
+        conn.transaction.return_value.__aexit__.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_transaction_propagates_the_exception_from_the_block(self):
+        pool, _ = self._pool()
+        adapter = PostgreSQLAdapter({})
+        adapter._pool = pool
+
+        with pytest.raises(RuntimeError):
+            async with adapter.transaction():
+                raise RuntimeError("falhou")
+
+    @pytest.mark.asyncio
+    async def test_disconnect_closes_pool_and_without_pool_is_noop(self):
+        pool, _ = self._pool()
+        adapter = PostgreSQLAdapter({})
+        adapter._pool = pool
+        await adapter.disconnect()
+        pool.close.assert_awaited_once()
+
+        adapter._pool = None
+        await adapter.disconnect()
+
+
+class TestPostgresTestConnection:
+    @pytest.mark.asyncio
+    async def test_true_when_select_works_false_when_it_fails(self):
+        adapter = PostgreSQLAdapter({})
+        adapter.execute_query = AsyncMock(return_value=[{"?column?": 1}])
+        assert await adapter.test_connection() is True
+
+        adapter.execute_query = AsyncMock(side_effect=OSError("down"))
+        assert await adapter.test_connection() is False

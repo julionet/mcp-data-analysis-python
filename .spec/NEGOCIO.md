@@ -651,7 +651,7 @@ Então:
 - ✅ Autenticação por token funcional: usuário sem token, com token expirado/revogado, ou bloqueado é recusado; usuário autenticado só vê/executa analyses liberadas pelo(s) perfil(is) vinculado(s)
 - ✅ Docker compose (local + remoto)
 - ✅ API administrativa funcional (RF6): usuário comum e não autenticado são recusados em `/admin/*`; administrador gere usuários, perfis, data sources e analyses e consulta o histórico com parâmetros
-- ✅ Testes automatizados (80%+ coverage)
+- ✅ Testes automatizados (80%+ coverage) — F17: 99,97% de linhas+branches na suíte unitária sem banco (2026-10-08)
 
 ### Sprint 4 (Deploy)
 - ✅ Documentação completa

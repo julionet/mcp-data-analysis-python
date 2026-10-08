@@ -41,6 +41,8 @@ from services.cache_service import CacheService
 from services.data_source_admin_service import DataSourceAdminService
 from services.volume_guard_service import VolumeGuardService
 
+pytestmark = pytest.mark.integration  # F17: exige o Config DB (pulado sozinho sem banco)
+
 SELF_CONFIG = dict(
     host=settings.postgres_config_host,
     port=settings.postgres_config_port,

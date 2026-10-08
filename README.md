@@ -50,6 +50,9 @@ Como subir, configurar, operar, limpar e empacotar a aplicação. Os comandos s�
    - [Conferir](#conferir)
    - [Se já existir uma entrada analise-dados](#se-já-existir-uma-entrada-analise-dados)
    - [Pontos de atenção](#pontos-de-atenção)
+7. [Testes e cobertura](#7-testes-e-cobertura)
+   - [Rodar os testes](#rodar-os-testes)
+   - [Medir a cobertura](#medir-a-cobertura)
 
 ---
 
@@ -612,3 +615,37 @@ Se o `remove` não encontrar a entrada, confira em qual escopo ela está com `cl
   ```
 
 - Para remover o servidor depois: `claude mcp remove analise-dados --scope user`.
+
+---
+
+## 7. Testes e cobertura
+
+Use o Python do `.venv` (o Python global pode ter outra versão do pacote `mcp`, incompatível). No Windows: `.venv\Scripts\python`. Instale as dependências de desenvolvimento uma vez: `.venv/bin/python -m pip install -r requirements-dev.txt`.
+
+### Rodar os testes
+
+```bash
+# unitários — não precisam de banco (referência do critério de cobertura)
+.venv/bin/python -m pytest tests -m "not integration"
+
+# tudo, inclusive integração (Config DB do compose local no ar, localhost:5433)
+.venv/bin/python -m pytest tests
+```
+
+Os testes marcados `integration` (`tests/test_*_integration.py`) exigem o Postgres do compose e se pulam sozinhos quando o banco não está disponível. Teste novo que precisa de banco real recebe `pytestmark = pytest.mark.integration`; os demais não podem depender de rede nem de banco.
+
+### Medir a cobertura
+
+```bash
+# só unitários, sem banco: falha se a cobertura (linhas + branches de src/) ficar abaixo de 90%
+.venv/bin/python -m pytest tests -m "not integration" --cov
+
+# mesma medição com o Config DB no ar
+.venv/bin/python -m pytest tests --cov
+
+# relatório HTML opcional em htmlcov/index.html
+.venv/bin/python -m pytest tests -m "not integration" --cov --cov-report=html
+```
+
+A configuração está em `.coveragerc` (`source = src`, branch coverage, `fail_under = 90`). A meta do projeto é 80%; o limite de 90% protege contra regressão. Linhas faltantes aparecem na coluna `Missing` do relatório. Todo `# pragma: no cover` precisa de um comentário com o motivo.
+

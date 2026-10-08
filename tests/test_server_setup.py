@@ -18,12 +18,19 @@ from tests.helpers import make_user
 
 class TestServerSetup:
     def test_health_check_returns_ok(self, client: TestClient):
-        # F2: TestClient dispara o lifespan real, que conecta ao Config DB
-        # configurado em .env — ver F2_POSTGRESQL_ADAPTER.md §6.2 (teste de integração).
+        # F17: o lifespan do `client` usa um Config DB simulado (conftest.py); a conexão real é
+        # coberta pelos testes de integração — ver F2_POSTGRESQL_ADAPTER.md §6.2.
         response = client.get("/health")
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "db": True}
+
+    def test_health_check_degraded_when_config_db_is_down(self, client: TestClient):
+        with patch("main.check_postgres", AsyncMock(return_value=False)):
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "degraded", "db": False}
 
     def test_mcp_route_no_redirect_without_trailing_slash(self, client: TestClient):
         response = client.post("/mcp", json={}, follow_redirects=False)

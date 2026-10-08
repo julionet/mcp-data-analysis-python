@@ -14,6 +14,8 @@ from config import settings
 from repositories.analysis_repo import AnalysisRepository
 from repositories.profile_repo import ProfileRepository
 
+pytestmark = pytest.mark.integration  # F17: exige o Config DB (pulado sozinho sem banco)
+
 
 @pytest_asyncio.fixture
 async def db():

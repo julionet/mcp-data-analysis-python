@@ -248,3 +248,14 @@ class TestOracleAdapter:
         adapter, _ = adapter_with(cursor)
 
         assert await adapter.test_connection() is False
+
+
+class TestOracleDisconnectWithoutPool:
+    @pytest.mark.asyncio
+    async def test_disconnect_without_pool_is_noop(self):
+        from adapters.oracle import OracleAdapter
+
+        adapter = OracleAdapter({})
+        adapter._pool = None
+
+        await adapter.disconnect()  # não levanta

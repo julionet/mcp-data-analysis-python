@@ -490,3 +490,126 @@ class TestAnalysisServiceAllowedAnalyses:
 
         assert result == analyses
         analysis_repo.get_allowed_for_user.assert_awaited_once_with(user_id)
+
+
+class TestVolumePostSerialization:
+    """F17 A1 — passa no COUNT(*) mas estoura o limite em KB depois de serializado (F3)."""
+
+    @staticmethod
+    def _setup(max_size_kb: int):
+        analysis = _make_analysis(cache_frequency="none")
+        analysis_repo = AsyncMock()
+        analysis_repo.get_by_id.return_value = analysis
+        analysis_repo.get_steps.return_value = [_make_step(analysis)]
+        data_source_repo = AsyncMock()
+        data_source_repo.get_by_id.return_value = _make_data_source(analysis)
+        adapter = make_fake_adapter()
+        big_dataset = [{"texto": "x" * 600} for _ in range(5)]  # ~3 KB serializado, só 5 linhas
+        adapter.execute_query.side_effect = [5, big_dataset]
+        audit = AsyncMock()
+        service = _service(
+            analysis_repo, data_source_repo, VolumeGuardService(max_rows=500, max_size_kb=max_size_kb),
+            audit_service=audit,
+        )
+        return analysis, adapter, big_dataset, service, audit
+
+    @pytest.mark.asyncio
+    async def test_refines_instead_of_returning_data_when_serialized_size_exceeds_limit(self):
+        analysis, adapter, _, service, audit = self._setup(max_size_kb=1)
+        params = {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+
+        with (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=adapter),
+            patch("services.analysis_service.decrypt_password", return_value="x"),
+        ):
+            result = await service.execute(analysis.id, params)
+
+        assert result["status"] == "volume_exceeded"
+        assert "data" not in result  # o dataset grande NUNCA vai na resposta
+        assert result["limite"]["tamanho_kb"] == 1 and result["estimativa"]["tamanho_estimado_kb"] > 1
+        assert audit.log_execution.await_args.kwargs["status"] == "volume_exceeded"
+
+    @pytest.mark.asyncio
+    async def test_explicit_confirmation_bypasses_the_size_limit_with_warning(self):
+        analysis, adapter, big_dataset, service, _ = self._setup(max_size_kb=1)
+        adapter.execute_query.side_effect = [big_dataset]  # com confirmação não há COUNT(*)
+        params = {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+
+        with (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=adapter),
+            patch("services.analysis_service.decrypt_password", return_value="x"),
+        ):
+            result = await service.execute(analysis.id, params, confirmar_volume_alto=True)
+
+        assert result["status"] == "success" and result["data"] == big_dataset
+        assert "aviso" in result
+
+    @pytest.mark.asyncio
+    async def test_within_limit_returns_the_data(self):
+        analysis, adapter, big_dataset, service, _ = self._setup(max_size_kb=150)
+        params = {"data_inicial": "2026-01-01", "data_final": "2026-01-31"}
+
+        with (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=adapter),
+            patch("services.analysis_service.decrypt_password", return_value="x"),
+        ):
+            result = await service.execute(analysis.id, params)
+
+        assert result["status"] == "success" and result["data"] == big_dataset
+
+
+class TestAdapterPoolConcurrency:
+    """F17 A3 — double-check do lock de _get_adapter e list_analyses()."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_calls_create_and_connect_a_single_adapter(self):
+        import asyncio
+
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+        adapter = make_fake_adapter()
+
+        async def slow_connect():
+            await asyncio.sleep(0.02)  # as demais chamadas esperam no lock
+
+        adapter.connect.side_effect = slow_connect
+        service = _service()
+
+        with (
+            patch(
+                "services.analysis_service.AdapterFactory.create_adapter", return_value=adapter
+            ) as create,
+            patch("services.analysis_service.decrypt_password", return_value="x"),
+        ):
+            adapters = await asyncio.gather(*(service._get_adapter(data_source) for _ in range(5)))
+
+        assert all(a is adapter for a in adapters)
+        create.assert_called_once()
+        adapter.connect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_failed_connect_is_not_cached(self):
+        analysis = _make_analysis()
+        data_source = _make_data_source(analysis)
+        adapter = make_fake_adapter()
+        adapter.connect.side_effect = OSError("down")
+        service = _service()
+
+        with (
+            patch("services.analysis_service.AdapterFactory.create_adapter", return_value=adapter),
+            patch("services.analysis_service.decrypt_password", return_value="x"),
+            patch("services.analysis_service.retry_async", AsyncMock(side_effect=OSError("down"))),
+        ):
+            with pytest.raises(OSError):
+                await service._get_adapter(data_source)
+
+        assert service._adapters == {}
+
+    @pytest.mark.asyncio
+    async def test_get_all_analyses_delegates_to_repository(self):
+        analysis_repo = AsyncMock()
+        analysis_repo.get_all.return_value = [_make_analysis()]
+
+        result = await _service(analysis_repo).get_all_analyses()
+
+        assert result == analysis_repo.get_all.return_value

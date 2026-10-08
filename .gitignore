@@ -14,3 +14,6 @@ certs/
 # token de acesso gerado por scripts/setup-admin.ps1
 secrets/
 benchmark-*.json
+# cobertura de testes (F17)
+.coverage
+htmlcov/
