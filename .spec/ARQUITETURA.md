@@ -436,7 +436,7 @@ Rotas HTTP para gestão da plataforma por um frontend (NEGOCIO.md RF6, UC4). Fic
 **Convenções comuns (definidas na F23, usadas por F24 e F25):**
 - Prefixo `/admin`; um router por recurso em `routes/admin_*.py`; dependências por serviço no padrão de `get_auth_service` (import tardio de `mcp_transport.tools`), para permitir `dependency_overrides` nos testes.
 - Listagens paginadas com `?limit=&offset=` (máximo 200), busca `?q=` onde aplicável; resposta `{items, total, limit, offset}`.
-- Erros no formato `{"error": "<slug>", "message": "..."}` das rotas `/auth/*` (ADR-008); códigos HTTP 400/401/403/404/409/422. O contrato `error_code`/`retryable` da F14 (§3.4.1) continua só no `/mcp`. Os slugs exatos são definidos na spec da F23.
+- Erros no formato `{"error": "<slug>", "message": "..."}` das rotas `/auth/*` (ADR-008); códigos HTTP 400/401/403/404/409/422. O contrato `error_code`/`retryable` da F14 (§3.4.1) continua só no `/mcp`. Os slugs exatos estão na spec da F23 (`features/F23_API_ADMIN_USUARIOS_PERFIS.md` §4.5).
 - Toda escrita atualiza `updated_at = NOW()` (o schema não tem triggers). E-mail normalizado com `strip().lower()` (mesma regra de `AuthService._validate_credentials`). Senha com no máximo 72 bytes (limite do bcrypt).
 - `hash_password` (bcrypt, custo 12, executado em thread como a verificação) é adicionado a `security/password_hash.py`.
 - `PostgreSQLAdapter` ganha `transaction()` (context manager sobre `pool.acquire()` + `conn.transaction()`) para escritas multi-tabela (análise + step + vínculos); hoje o adapter só expõe `execute`/`execute_query` sem transação.
@@ -837,7 +837,7 @@ As rotas `/admin/*` e `/me` não passam pelo `AuthMiddleware` (que só envolve o
 5. A rota executa; escritas multi-tabela rodam em transação (PostgreSQLAdapter.transaction())
 ```
 
-Efeitos imediatos, como na F12: bloquear um administrador, remover seu `is_admin` ou revogar seu token corta o acesso na chamada seguinte. Fail-closed: uma rota `/admin/*` sem `require_admin` ficaria pública (o middleware não a cobre), por isso a dependência é aplicada no router e os testes devem cobrir 401/403 em cada rota. O formato da recusa segue o das rotas `/auth/*` (`{"error","message"}`); os slugs exatos são definidos na spec da F23. `AuthenticatedUser` hoje só tem `id` e `name` — como o papel é lido do BD, ele não precisa mudar.
+Efeitos imediatos, como na F12: bloquear um administrador, remover seu `is_admin` ou revogar seu token corta o acesso na chamada seguinte. Fail-closed: uma rota `/admin/*` sem `require_admin` ficaria pública (o middleware não a cobre), por isso a dependência é aplicada no router e os testes devem cobrir 401/403 em cada rota. O formato da recusa segue o das rotas `/auth/*` (`{"error","message"}`); os slugs exatos estão na spec da F23 (§4.5). `AuthenticatedUser` hoje só tem `id` e `name` — como o papel é lido do BD, ele não precisa mudar.
 
 ---
 
