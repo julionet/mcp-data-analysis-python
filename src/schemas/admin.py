@@ -224,6 +224,34 @@ class InvalidParametersFilterError(AdminError):
     error = "invalid_parameters_filter"
 
 
+# ---- F16: corpos de erro (só descrevem o OpenAPI; as rotas seguem devolvendo JSONResponse) ----
+
+
+class ErrorResponse(BaseModel):
+    """Erro de domínio das rotas `/auth`, `/me` e `/admin` (ADR-008)."""
+
+    error: str = Field(description="Slug estável do erro, ex.: `user_not_found`.")
+    message: str = Field(description="Mensagem legível, em português.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {"error": "user_not_found", "message": "Usuário não encontrado."}
+        }
+    }
+
+
+class ValidationErrorItem(BaseModel):
+    loc: list[str | int] = Field(description="Caminho do campo inválido, ex.: `[\"body\", \"email\"]`.")
+    msg: str = Field(description="Descrição do problema.")
+    type: str = Field(description="Tipo do erro de validação (pydantic).")
+
+
+class ValidationErrorBody(BaseModel):
+    """422 de validação de corpo/parâmetros no formato padrão do FastAPI (não é o slug `error`/`message`)."""
+
+    detail: list[ValidationErrorItem]
+
+
 # ---- requests ----
 
 
@@ -236,50 +264,89 @@ class _AtLeastOneField(BaseModel):
 
 
 class UserCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    email: EmailStr = Field(max_length=255)
-    password: str = Field(max_length=256)  # a política (72 bytes etc.) é validada no serviço
-    is_admin: bool = False
-    profile_ids: list[UUID] = []
+    name: str = Field(min_length=1, max_length=255, description="Nome do usuário.")
+    email: EmailStr = Field(max_length=255, description="E-mail de login (único; normalizado em minúsculas).")
+    password: str = Field(
+        max_length=256,
+        description="Senha inicial. Política: mínimo 6 caracteres, com maiúscula, minúscula, número e símbolo.",
+    )  # a política (72 bytes etc.) é validada no serviço
+    is_admin: bool = Field(default=False, description="Concede acesso à API administrativa.")
+    profile_ids: list[UUID] = Field(default=[], description="Perfis a vincular ao usuário.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "Maria Souza",
+                "email": "maria@exemplo.com",
+                "password": "Exemplo@123",
+                "is_admin": False,
+                "profile_ids": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+            }
+        }
+    }
 
 
 class UserUpdate(_AtLeastOneField):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    email: EmailStr | None = Field(default=None, max_length=255)
-    is_admin: bool | None = None
+    """Informe ao menos um campo; os omitidos não são alterados."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255, description="Novo nome.")
+    email: EmailStr | None = Field(default=None, max_length=255, description="Novo e-mail (único).")
+    is_admin: bool | None = Field(default=None, description="Concede ou remove o papel de administrador.")
+
+    model_config = {"json_schema_extra": {"example": {"name": "Maria Souza Lima"}}}
 
 
 class PasswordBody(BaseModel):
-    password: str = Field(max_length=256)
+    password: str = Field(max_length=256, description="Nova senha (mesma política da criação).")
+
+    model_config = {"json_schema_extra": {"example": {"password": "NovaSenha@456"}}}
 
 
 class ProfileIdsBody(BaseModel):
-    profile_ids: list[UUID]
+    profile_ids: list[UUID] = Field(description="Conjunto completo de perfis; substitui o atual (lista vazia remove todos).")
+
+    model_config = {"json_schema_extra": {"example": {"profile_ids": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]}}}
 
 
 class ProfileCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    description: str | None = None
-    is_active: bool = True
+    name: str = Field(min_length=1, max_length=255, description="Nome do perfil (único).")
+    description: str | None = Field(default=None, description="Descrição livre.")
+    is_active: bool = Field(default=True, description="Perfil inativo não libera nenhuma análise.")
+
+    model_config = {
+        "json_schema_extra": {"example": {"name": "vendas", "description": "Equipe comercial", "is_active": True}}
+    }
 
 
 class ProfileUpdate(_AtLeastOneField):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
-    is_active: bool | None = None
+    """Informe ao menos um campo; os omitidos não são alterados."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255, description="Novo nome (único).")
+    description: str | None = Field(default=None, description="Nova descrição.")
+    is_active: bool | None = Field(default=None, description="Ativa ou desativa o perfil.")
+
+    model_config = {"json_schema_extra": {"example": {"is_active": False}}}
 
 
 class AnalysisIdsBody(BaseModel):
-    analysis_ids: list[UUID]
+    analysis_ids: list[UUID] = Field(description="Conjunto completo de analyses liberadas ao perfil; substitui o atual.")
+
+    model_config = {"json_schema_extra": {"example": {"analysis_ids": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]}}}
 
 
 class UserIdsBody(BaseModel):
-    user_ids: list[UUID]
+    user_ids: list[UUID] = Field(description="Conjunto completo de usuários do perfil; substitui o atual.")
+
+    model_config = {"json_schema_extra": {"example": {"user_ids": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]}}}
 
 
 class ChangePasswordBody(BaseModel):
-    current_password: str = Field(max_length=256)
-    new_password: str = Field(max_length=256)
+    current_password: str = Field(max_length=256, description="Senha atual.")
+    new_password: str = Field(max_length=256, description="Nova senha (mesma política da criação).")
+
+    model_config = {
+        "json_schema_extra": {"example": {"current_password": "Exemplo@123", "new_password": "NovaSenha@456"}}
+    }
 
 
 # ---- responses ----
@@ -368,23 +435,62 @@ class ProfileDetail(ProfileSummary):
 
 
 class DataSourceCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    type: str = Field(min_length=1, max_length=50)
-    connection_config: dict[str, Any]
-    is_active: bool = True
+    name: str = Field(min_length=1, max_length=255, description="Nome do data source (único).")
+    type: str = Field(min_length=1, max_length=50, description="Tipo do banco; veja `GET /admin/data-sources/types`.")
+    connection_config: dict[str, Any] = Field(
+        description="Parâmetros de conexão do tipo escolhido. A `password` é cifrada (Fernet) e nunca é devolvida."
+    )
+    is_active: bool = Field(default=True, description="Data source inativo não executa analyses.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "vendas_pg",
+                "type": "postgresql",
+                "connection_config": {
+                    "host": "db.exemplo.com",
+                    "port": 5432,
+                    "database": "vendas",
+                    "user": "leitura",
+                    "password": "segredo",
+                },
+                "is_active": True,
+            }
+        }
+    }
 
 
 class DataSourceUpdate(_AtLeastOneField):
     """`type` não é alterável (F24 decisão 9). `connection_config` é mesclado com o salvo."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    is_active: bool | None = None
-    connection_config: dict[str, Any] | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=255, description="Novo nome (único).")
+    is_active: bool | None = Field(default=None, description="Ativa ou desativa o data source.")
+    connection_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Mesclado com a configuração salva: envie só as chaves a alterar (a senha só muda se enviada).",
+    )
+
+    model_config = {"json_schema_extra": {"example": {"connection_config": {"host": "novo-host.exemplo.com"}}}}
 
 
 class ConnectionTestBody(BaseModel):
-    type: str = Field(min_length=1, max_length=50)
-    connection_config: dict[str, Any]
+    type: str = Field(min_length=1, max_length=50, description="Tipo do banco.")
+    connection_config: dict[str, Any] = Field(description="Configuração a testar (não é salva).")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "postgresql",
+                "connection_config": {
+                    "host": "db.exemplo.com",
+                    "port": 5432,
+                    "database": "vendas",
+                    "user": "leitura",
+                    "password": "segredo",
+                },
+            }
+        }
+    }
 
 
 class DataSourceSummary(BaseModel):
@@ -440,36 +546,53 @@ class ValidationReport(BaseModel):
 
 
 class StepInput(BaseModel):
-    sql: str = Field(min_length=1)
-    params: list[str] = []
+    sql: str = Field(min_length=1, description="SQL da análise, com placeholders `:param`. Somente SELECT.")
+    params: list[str] = Field(default=[], description="Nomes dos parâmetros usados no SQL, na ordem de uso.")
 
 
 class StepUpdate(_AtLeastOneField):
-    sql: str | None = Field(default=None, min_length=1)
-    params: list[str] | None = None
+    sql: str | None = Field(default=None, min_length=1, description="Novo SQL (somente SELECT).")
+    params: list[str] | None = Field(default=None, description="Nova lista de parâmetros.")
 
 
 class AnalysisCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    description: str | None = None
-    data_source_id: UUID
-    cache_frequency: str = "daily"
-    parameters: dict[str, Any] = {}
-    is_active: bool = True
-    step: StepInput
-    profile_ids: list[UUID] = []
+    name: str = Field(min_length=1, max_length=255, description="Nome da análise (único); vira a tool `execute_<name>` no MCP.")
+    description: str | None = Field(default=None, description="Descrição mostrada ao LLM no cliente MCP.")
+    data_source_id: UUID = Field(description="Data source onde o SQL é executado.")
+    cache_frequency: str = Field(default="daily", description="Frequência de renovação do cache.")
+    parameters: dict[str, Any] = Field(default={}, description="Definição dos parâmetros de entrada (vira o `inputSchema` da tool).")
+    is_active: bool = Field(default=True, description="Análise inativa não aparece nem executa no MCP.")
+    step: StepInput = Field(description="Query da análise.")
+    profile_ids: list[UUID] = Field(default=[], description="Perfis que podem executar a análise.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "vendas_por_regiao",
+                "description": "Total de vendas por região no período",
+                "data_source_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "cache_frequency": "daily",
+                "parameters": {},
+                "is_active": True,
+                "step": {"sql": "SELECT regiao, SUM(valor) AS total FROM vendas GROUP BY regiao", "params": []},
+                "profile_ids": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"],
+            }
+        }
+    }
 
 
 class AnalysisUpdate(_AtLeastOneField):
     """`parameters` substitui o objeto inteiro; `step` mescla `sql`/`params` sobre o atual."""
 
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
-    data_source_id: UUID | None = None
-    cache_frequency: str | None = None
-    parameters: dict[str, Any] | None = None
-    is_active: bool | None = None
-    step: StepUpdate | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=255, description="Novo nome (único).")
+    description: str | None = Field(default=None, description="Nova descrição.")
+    data_source_id: UUID | None = Field(default=None, description="Novo data source.")
+    cache_frequency: str | None = Field(default=None, description="Nova frequência de cache.")
+    parameters: dict[str, Any] | None = Field(default=None, description="Substitui a definição de parâmetros inteira.")
+    is_active: bool | None = Field(default=None, description="Ativa ou desativa a análise.")
+    step: StepUpdate | None = Field(default=None, description="Mescla `sql`/`params` sobre a query atual.")
+
+    model_config = {"json_schema_extra": {"example": {"is_active": False}}}
 
 
 class AnalysisSummary(BaseModel):

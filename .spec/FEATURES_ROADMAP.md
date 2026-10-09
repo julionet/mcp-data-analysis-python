@@ -2,11 +2,13 @@
 
 ## Plataforma de Análise de Dados Genérica com MCP (Multi-Cliente, Streamable HTTP)
 
-**Versão:** 1.22 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
-**Data:** 2026-10-08 (atualizado 2026-10-08 — API administrativa: F23 e F24 implementadas, F25 planejada)
+**Versão:** 1.23 (Aprovado — com PostgreSQL + MySQL (F10 ✅ Done) + SQL Server (F11 ✅ Done) + Oracle (F9 ✅ Done), TLS obrigatório, **com Autenticação por Token + Perfis (F12 ✅ Done)**, **sem Handlers — servidor entrega dataset bruto**, sem Versionamento de Análises)
+**Data:** 2026-10-08 (atualizado 2026-10-08 — F16 implementada: Swagger só local, `docs/openapi.json` e `docs/MCP.md`)
 **Status:** ✅ Aprovado
 **Escopo:** Qualquer cliente MCP via Streamable HTTP **com TLS** (Claude Desktop, Gemini Desktop, OpenAI Desktop, etc.)
 
+> **Nota de revisão (v1.22 → v1.23):** F16 (API Documentation) implementada (2026-10-08) e registrada. Entregas: Swagger (`/docs`, `/redoc`, `/openapi.json`) **só com `DOCS_ENABLED=true`** (padrão `false` = 404; `true` no `.env.example` e no compose local, não repassado pelos compose remote/dist), botão **Authorize** (esquema Bearer `BearerToken`, `auto_error=False` — o 401 do projeto não muda), `summary`/`description`/`responses`/exemplos nas 44 operações HTTP, `docs/openapi.json` gerado por `scripts/export_openapi.py` (teste de sincronia) e `docs/MCP.md` (contrato do `/mcp`; só Claude Code — demais clientes na F21). 852 testes ✅ unitários, cobertura 99,89%. Sincronização do estado da Sprint 3 (F25 e F17 já concluídas): 9/10, resta só a F18; "Features Implementadas" 15/25 → 20/25. Nenhuma feature adicionada, removida ou renumerada; esforços inalterados. Ver `features/F16_API_DOCUMENTATION.md` §11.
+>
 > **Nota de revisão (v1.21 → v1.22):** adicionadas **F23, F24 e F25 — API Administrativa (`/admin/*`)** para suportar um frontend de gestão (hoje usuários, perfis, data sources e analyses só são cadastrados por INSERT manual; nenhum repositório tem create/update/delete/list). Entram na Sprint 3 **antes de F16/F17/F18** (numeração mantida; a ordem de implementação é F23 → F24 → F25 → F17 → F16 → F18). Decisões: papel admin por coluna `users.is_admin` (ALTER TABLE manual; dependência `require_admin` sobre o Bearer existente, checando BD a cada chamada); erros no formato slug `{"error","message"}` das rotas `/auth/*` (contrato F14 segue só no `/mcp`); DELETE híbrido (físico só sem dependentes, senão 409 sugerindo desativar/bloquear). Esforço +8d (Sprint 3: ~12,5 → ~20,5 dias; projeto: 22 → 25 features, ~31 → ~39 dias). Plano: `~/.claude/plans/j-sei-que-tem-nested-milner.md`; specs a criar em `features/F23_*.md`, `F24_*.md`, `F25_*.md` antes de qualquer código.
 
 > **Nota de revisão (v1.20 → v1.21):** F15 (Performance Optimization) implementada (2026-10-07) e registrada no roadmap; sincronização de partes que ficaram desatualizadas: métrica "Features Implementadas" (13/22 → **15/22**), Timeline (§7) com ✅ em F13, F14 e F15, e "Próximos Passos" (§4) com o estado da Sprint 3 (4/7; restam F16, F17 e F18). F15: pool PostgreSQL configurável (`PG_POOL_MIN/MAX_SIZE`, `CONFIG_DB_POOL_MIN/MAX_SIZE`), `scripts/benchmark.py` e `scripts/load_test.py`; sem cache de token/permissão (F12/ADR-007); nenhum índice criado (EXPLAIN sem evidência); 500/500 testes ✅. Ver `features/F15_PERFORMANCE_OPTIMIZATION.md` §12. Nenhuma feature adicionada, removida ou renumerada; esforços inalterados.
@@ -164,7 +166,7 @@ reforçando a evidência de "agnóstico de cliente" além de apps desktop.
 | F23 | API Admin: base + Usuários + Perfis (`/admin/users`, `/admin/profiles`, `/me`) | 🟠 Alta | 3.5d | F12 | 🟩 Done (2026-10-08; validação manual pendente: `features/F23_API_ADMIN_USUARIOS_PERFIS.md` §12) |
 | F24 | API Admin: Data Sources + Analyses (`/admin/data-sources`, `/admin/analyses`) | 🟠 Alta | 3d | F23 | 🟩 Done (2026-10-08; validação manual pendente: `features/F24_API_ADMIN_DATA_SOURCES_ANALYSES.md` §12) |
 | F25 | API Admin: Histórico de Execuções + estatísticas (`/admin/executions`) | 🟡 Média | 1.5d | F23 | 🟩 Done (2026-10-08) — `features/F25_API_ADMIN_HISTORICO_EXECUCOES.md` |
-| F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | ⬜ Todo |
+| F16 | API Documentation (MCP + Multi-Cliente) | 🟡 Média | 1d | F5, F23-F25 | 🟩 Done (2026-10-08) |
 | F17 | Unit Tests (80% coverage) | 🟠 Alta | ~1d (revisto; era 2d) | F1-F12 | 🟩 Done (2026-10-08) — `features/F17_UNIT_TESTS_COBERTURA.md` |
 | F18 | Integration Tests (com múltiplos clientes MCP) | 🟡 Média | 1d | F6, F17 | ⬜ Todo |
 
@@ -481,7 +483,7 @@ XXX_PARAM=value
 8. ✅ F8: Log de execução (analysis_id, params, status, tempo, cached flag)
 ```
 
-### Sprint 3 — Estado atual (6/12 com F23–F25) e ordem sugerida do que resta (v1.22: inclui F23–F25, API administrativa, antes de F17/F16/F18)
+### Sprint 3 — Estado atual (9/10; resta F18) e ordem sugerida do que resta (v1.23: F16 concluída)
 ```markdown
 ✅ F12: Autenticação e Controle de Acesso via Perfis
 ✅ F13: Docker Setup (Local + Remote)
@@ -492,9 +494,9 @@ XXX_PARAM=value
    bloqueio de usuário, EXPLAIN com volume realista)
 1. 🟩 F23: API Admin — base + Usuários + Perfis (feito 2026-10-08)
 2. 🟩 F24: API Admin — Data Sources + Analyses (feito 2026-10-08)
-3. ⬜ F25: API Admin — Histórico de Execuções (spec pendente)
-4. ✅ F17: Unit Tests (80% coverage) — concluída 2026-10-08: suíte unitária sem banco, 99,97% (cobre também F23–F25)
-5. ⬜ F16: API Documentation (MCP + Multi-Cliente) — inclui contrato de erro da F14, /auth/* e /admin/*
+3. 🟩 F25: API Admin — Histórico de Execuções (feito 2026-10-08)
+4. ✅ F17: Unit Tests (80% coverage) — concluída 2026-10-08: suíte unitária sem banco, 99,97% na época (cobre também F23–F25)
+5. ✅ F16: API Documentation (MCP + Multi-Cliente) — Swagger só local (`DOCS_ENABLED`) com Authorize, `docs/openapi.json` e `docs/MCP.md` (spec: `features/F16_API_DOCUMENTATION.md`)
 6. ⬜ F18: Integration Tests (múltiplos clientes MCP) — depende de F6 e F17
 Depois: Sprint 4 (F19 → F20 → F21 → F22); F20 só depende de F13 e pode ser adiantada.
 ```
@@ -535,8 +537,8 @@ Para cada feature, siga este workflow:
 
 | Métrica | Target | Status |
 |---------|--------|--------|
-| **Features Implementadas** | 25/25 | 15/25 🟩 |
-| **Code Coverage** | 80%+ | 99,97% (suíte unitária sem banco, linhas+branches; F17, 2026-10-08) ✅ |
+| **Features Implementadas** | 25/25 | 20/25 🟩 (F1–F17 exceto F18 + F23–F25) |
+| **Code Coverage** | 80%+ | 99,89% (suíte unitária sem banco, linhas+branches; F17, 2026-10-08; medida de novo na F16) ✅ |
 | **Análises Funcionando** | 5+ | 1+ ✅ |
 | **Bancos de Dados Suportados** | 4 (PostgreSQL, MySQL, SQL Server, Oracle) | 4 (PostgreSQL, MySQL, SQL Server, Oracle) ✅ |
 | **Clientes MCP testados simultaneamente** | 2+ (ex.: Claude Desktop + Gemini Desktop) | 2+ ✅ |
@@ -641,4 +643,4 @@ A especificação técnica completa (código de middleware, schema SQL, fluxos) 
 ---
 
 **Documento de Roadmap Completo — Multi-Cliente, Com Autenticação por Token + Perfis (F12), Sem Versionamento de Análises.**
-**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3: F12 ✅, F13 ✅, F14 ✅ e F15 ✅ concluídas; próximas F16 (API Documentation), F17 e F18, depois Sprint 4 (Deploy).**
+**Sprint 1 (8/8) e Sprint 2 (3/3) concluídos. Sprint 3 (9/10): F12–F17 ✅ e F23–F25 ✅ concluídas; resta a F18 (Integration Tests), depois Sprint 4 (Deploy).**

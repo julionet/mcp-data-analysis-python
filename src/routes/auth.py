@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from routes.openapi_docs import TAG_AUTH, slug_response
 from schemas.auth import (
     CREDENTIALS_ERROR_MESSAGE,
     ExpireDaysTooLargeError,
@@ -23,7 +24,7 @@ from services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=[TAG_AUTH])
 
 
 def get_auth_service() -> AuthService:
@@ -53,7 +54,21 @@ def _invalid_credentials(endpoint: str, request: Request, exc: InvalidCredential
     )
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post(
+    "/token",
+    response_model=TokenResponse,
+    summary="Emitir token de acesso",
+    description=(
+        "Troca e-mail + senha por um token opaco, usado em `Authorization: Bearer <token>` no `/mcp`, "
+        "em `/me` e em `/admin/*` (botão **Authorize** do Swagger). O token só é exibido nesta resposta. "
+        "`expire_days` omitido usa o padrão do servidor e não pode passar do máximo configurado. "
+        "Não exige `Authorization`."
+    ),
+    responses={
+        400: slug_response(400, ["invalid_expire_days"], "`expire_days` acima do máximo permitido"),
+        401: slug_response(401, ["invalid_credentials"], "E-mail ou senha inválidos (ou usuário bloqueado); mensagem sempre genérica"),
+    },
+)
 async def issue_token(
     body: TokenRequest, request: Request, auth_service: AuthService = Depends(get_auth_service)
 ):
@@ -79,7 +94,19 @@ async def issue_token(
     return TokenResponse(token=token, expires_at=expires_at)
 
 
-@router.post("/revoke")
+@router.post(
+    "/revoke",
+    summary="Revogar token de acesso",
+    description=(
+        "Revoga um token do próprio usuário, provando a identidade com e-mail + senha. "
+        "Não exige `Authorization`."
+    ),
+    responses={
+        200: {"description": "Token revogado.", "content": {"application/json": {"example": {"status": "revoked"}}}},
+        401: slug_response(401, ["invalid_credentials"], "E-mail ou senha inválidos (ou usuário bloqueado); mensagem sempre genérica"),
+        404: slug_response(404, ["token_not_found"], "Token inexistente ou de outro usuário"),
+    },
+)
 async def revoke_token(
     body: RevokeRequest, request: Request, auth_service: AuthService = Depends(get_auth_service)
 ):

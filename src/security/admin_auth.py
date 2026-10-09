@@ -8,6 +8,7 @@ chamada: remover o papel ou bloquear corta o acesso na chamada seguinte.
 import logging
 
 from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from repositories.user_repo import UserRepository
 from routes.auth import get_auth_service
@@ -21,9 +22,23 @@ logger = logging.getLogger(__name__)
 
 FORBIDDEN_MESSAGE = "Acesso restrito a administradores."
 
+# F16: declara o esquema Bearer no OpenAPI (botão "Authorize" do Swagger). `auto_error=False` é
+# essencial: sem token esta dependência NÃO levanta o 403 do FastAPI — quem responde é
+# `get_current_user`, com o 401 {"error": "unauthorized"} de sempre.
+bearer_scheme = HTTPBearer(
+    scheme_name="BearerToken",
+    description=(
+        "Token opaco emitido por `POST /auth/token`. Cole apenas o token "
+        "(o Swagger acrescenta o prefixo `Bearer`)."
+    ),
+    auto_error=False,
+)
+
 
 async def get_current_user(
-    request: Request, auth_service: AuthService = Depends(get_auth_service)
+    request: Request,
+    _credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),  # só registra o esquema
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> AuthenticatedUser:
     try:
         return await auth_service.authenticate(_extract_bearer(request.scope))

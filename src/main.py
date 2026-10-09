@@ -36,6 +36,8 @@ from routes.admin_profiles import router as admin_profiles_router
 from routes.admin_users import router as admin_users_router
 from routes.auth import router as auth_router
 from routes.me import router as me_router
+from routes.openapi_docs import OPENAPI_TAGS, TAG_HEALTH
+from config import settings
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -48,7 +50,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await disconnect_config_db()
 
 
-app = FastAPI(lifespan=lifespan)
+_API_DESCRIPTION = """\
+API HTTP do servidor de análise de dados via MCP: emissão de tokens (`/auth`), dados do próprio
+usuário (`/me`), administração (`/admin/*`) e `/health`.
+
+**Autenticação.** Emita um token em `POST /auth/token` (e-mail + senha), clique em **Authorize**
+e cole só o token. `/me` exige um token válido; `/admin/*` exige também administrador.
+
+**Erros.** As rotas de `/auth`, `/me` e `/admin` respondem erros de domínio no formato
+`{"error": "<slug>", "message": "..."}`. Erros de validação do corpo ou dos parâmetros vêm no
+formato padrão do FastAPI (`422`, `{"detail": [...]}`).
+
+**O `/mcp` não está neste documento.** O endpoint MCP (Streamable HTTP/JSON-RPC) é descrito em
+`docs/MCP.md`.
+"""
+
+def docs_urls(enabled: bool) -> dict[str, str | None]:
+    """F16: Swagger só em ambiente local (DOCS_ENABLED). Desligado, as 3 URLs respondem 404."""
+    return {
+        "docs_url": "/docs" if enabled else None,
+        "redoc_url": "/redoc" if enabled else None,
+        "openapi_url": "/openapi.json" if enabled else None,
+    }
+
+
+app = FastAPI(
+    lifespan=lifespan,
+    title="Análise de Dados Genérica com MCP — API HTTP",
+    version="1.0.0",
+    description=_API_DESCRIPTION,
+    openapi_tags=OPENAPI_TAGS,
+    **docs_urls(settings.docs_enabled),
+)
+if settings.docs_enabled:
+    logging.getLogger(__name__).warning("Swagger habilitado (DOCS_ENABLED=true) — use só em ambiente local")
 
 
 @app.exception_handler(Exception)
@@ -71,7 +106,12 @@ app.include_router(admin_executions_router)  # F25: /admin/executions
 app.include_router(me_router)  # F23: GET /me, PUT /me/password — qualquer usuário autenticado
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=[TAG_HEALTH],
+    summary="Saúde do servidor",
+    description="Retorna `status: ok` se o Config DB responde, `degraded` caso contrário. Não exige `Authorization`.",
+)
 async def health() -> JSONResponse:
     db_ok = await check_postgres()
     return JSONResponse({"status": "ok" if db_ok else "degraded", "db": db_ok})

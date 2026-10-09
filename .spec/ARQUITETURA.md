@@ -7,6 +7,8 @@
 **Stack:** FastAPI + Python + PostgreSQL + MCP
 **Status:** ✅ Aprovado
 
+> **Atualização 2026-10-08 (sem mudar a versão):** **F16 implementada** (`features/F16_API_DOCUMENTATION.md` §11) — Swagger (`/docs`, `/redoc`, `/openapi.json`) servido **somente com `DOCS_ENABLED=true`** (ambiente local; padrão `false` = 404 nas três URLs; os compose remote e dist não repassam a variável); esquema de segurança Bearer `BearerToken` (botão **Authorize**) declarado por `HTTPBearer(auto_error=False)` dentro de `get_current_user` — o 401 `{"error":"unauthorized"}` não muda; contrato HTTP versionado em `docs/openapi.json` (gerado por `scripts/export_openapi.py`, com teste de sincronia) e contrato do `/mcp` em `docs/MCP.md` (o `/mcp` não consta no OpenAPI). Sem mudança de schema.
+>
 > **Atualização 2026-10-08 (sem mudar a versão):** **F24 implementada** (`features/F24_*.md` §12) — spec confirmada (`features/F24_*.md`) — `validate` só estático, `cache/invalidate` por `updated_at`, `connection_config` mesclado no PATCH, teste de conexão salvo e prévio, invalidação do pool `AnalysisService._adapters` ao editar/desativar/excluir data source. Sem mudança de schema.
 >
 > **Nota de revisão (v1.25 → v1.26):** planejada a **API administrativa (`/admin/*`)** — features **F23** (base + usuários + perfis + `/me`), **F24** (data sources + analyses) e **F25** (histórico de execuções), para suportar um frontend de gestão (NEGOCIO.md v1.12, RF6/UC4). Nada disso está implementado ainda; este documento registra o desenho aprovado e as specs (`features/F23_*.md`, `F24_*.md`, `F25_*.md`) o detalham antes do código. Novos: **§2.4** (API administrativa: convenções, endpoints, regras), **§3.6** (fluxo de autorização administrativa), **ADR-008** (papel `is_admin`; formato de erro; exclusão híbrida). Mudanças de schema (§2.2): `users.is_admin BOOLEAN NOT NULL DEFAULT false` (bancos existentes: `ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false;`, manual — sem migrations). Mudanças de código previstas: novos routers em `routes/`, services `*_admin_service.py`, métodos de list/count/create/update nos repositórios (hoje só leem), `hash_password` em `security/password_hash.py`, `transaction()` em `PostgreSQLAdapter`, método de invalidação de pool em `AnalysisService`, `PUT`/`PATCH` no CORS (§5.2, §2.4). O desenho do `/mcp` (§3.5, ADR-006/007) **não muda**.
@@ -430,6 +432,8 @@ schemas/analysis_parameters.py
 ---
 
 ### 2.4 API Administrativa (F23, F24, F25 — planejada)
+
+> **F16 (2026-10-08):** a API HTTP (`/auth`, `/me`, `/admin/*`, `/health`) tem Swagger em `/docs`, `/redoc` e `/openapi.json` **somente com `DOCS_ENABLED=true`** (ambiente local; padrão `false` = 404), com o esquema Bearer (`BearerToken`, botão **Authorize**). Contrato versionado em `docs/openapi.json` (gerado por `scripts/export_openapi.py`); o `/mcp` não consta no OpenAPI e é descrito em `docs/MCP.md`. Spec: `features/F16_API_DOCUMENTATION.md`.
 
 Rotas HTTP para gestão da plataforma por um frontend (NEGOCIO.md RF6, UC4). Ficam **fora do `/mcp`**: são routers FastAPI registrados em `main.py` com `include_router` (como `routes/auth.py`), portanto **fora do `AuthMiddleware`**, que envolve só o `/mcp` (§3.5). Por isso a autorização é uma dependência FastAPI aplicada ao router inteiro (`dependencies=[Depends(require_admin)]`) — ver fluxo em §3.6 e decisões em ADR-008.
 
@@ -1078,12 +1082,13 @@ src/
 ├── routes/                    # F12 — rotas HTTP fora do /mcp, registradas em main.py (include_router)
 │   ├── __init__.py
 │   ├── auth.py                # POST /auth/token, POST /auth/revoke (§3.5)
-│   ├── admin_users.py         # F23 (planejada) — /admin/users (§2.4)
-│   ├── admin_profiles.py      # F23 (planejada) — /admin/profiles
-│   ├── me.py                  # F23 (planejada) — GET /me, PUT /me/password
-│   ├── admin_data_sources.py  # F24 (planejada) — /admin/data-sources
-│   ├── admin_analyses.py      # F24 (planejada) — /admin/analyses
-│   └── admin_executions.py    # F25 — /admin/executions (+ atalho em admin_analyses.py)
+│   ├── admin_users.py         # F23 — /admin/users (§2.4)
+│   ├── admin_profiles.py      # F23 — /admin/profiles
+│   ├── me.py                  # F23 — GET /me, PUT /me/password
+│   ├── admin_data_sources.py  # F24 — /admin/data-sources
+│   ├── admin_analyses.py      # F24 — /admin/analyses
+│   ├── admin_executions.py    # F25 — /admin/executions (+ atalho em admin_analyses.py)
+│   └── openapi_docs.py        # F16 — tags, summary e `responses` (slugs vindos de AdminError) do Swagger
 │
 ├── adapters/
 │   ├── __init__.py
@@ -1149,6 +1154,8 @@ src/
 │   ├── app.log
 │   └── audit.log
 ```
+
+Fora de `src/` (F16): `docs/openapi.json` (contrato HTTP gerado), `docs/MCP.md` (contrato do `/mcp`) e `scripts/export_openapi.py` (gera/verifica o JSON sem conectar em banco).
 
 ---
 
@@ -1433,6 +1440,7 @@ POSTGRES_CONFIG_PASSWORD=secure_password
 FERNET_KEY=<chave gerada com Fernet.generate_key(), fora do repositório>
 ACCESS_TOKEN_EXPIRATION_DAYS=90       # F12 — validade padrão de novos tokens (POST /auth/token sem expire_days)
 ACCESS_TOKEN_MAX_EXPIRATION_DAYS=365  # F12 — maior expire_days aceito em POST /auth/token (acima → 400)
+DOCS_ENABLED=false                    # F16 — Swagger (/docs, /redoc, /openapi.json); true só em ambiente local (padrão false = 404)
 ```
 
 **Formato de `data_sources.connection_config`** (ver §2.2, Tabela 1 — antes um placeholder):

@@ -616,6 +616,20 @@ Se o `remove` não encontrar a entrada, confira em qual escopo ela está com `cl
 
 - Para remover o servidor depois: `claude mcp remove analise-dados --scope user`.
 
+### Documentação da API (Swagger, só local)
+
+Com `DOCS_ENABLED=true` (padrão no `.env.example` e no compose local), o app serve `http://localhost:3000/docs` (Swagger UI), `/redoc` e `/openapi.json`. Fora do ambiente local a variável fica ausente (`false`) e as três URLs respondem 404; os compose remote e dist não a repassam.
+
+1. Em `POST /auth/token`, use **Try it out** com e-mail e senha e copie o `token` da resposta.
+2. Clique em **Authorize**, cole só o token (o Swagger acrescenta `Bearer`) e confirme.
+3. Execute qualquer rota; as de `/admin/*` exigem um usuário administrador.
+
+O contrato HTTP versionado está em [`docs/openapi.json`](docs/openapi.json) (para geradores de cliente, Postman etc.) e o do `/mcp`, que o OpenAPI não descreve, em [`docs/MCP.md`](docs/MCP.md). Depois de mudar rotas ou schemas, regenere o arquivo (um teste falha se ele ficar desatualizado):
+
+```bash
+.venv/bin/python scripts/export_openapi.py
+```
+
 ---
 
 ## 7. Testes e cobertura

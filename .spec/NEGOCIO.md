@@ -476,7 +476,7 @@ Então:
 
 ---
 
-### RF6: API Administrativa para Gestão da Plataforma (F23, F24, F25 — planejada)
+### RF6: API Administrativa para Gestão da Plataforma (F23, F24, F25 — implementadas; documentada na F16)
 
 ```
 Dado: Usuário autenticado por token (RF5) marcado como administrador (users.is_admin=true)
@@ -505,6 +505,7 @@ Então:
 - ✅ Listagens paginadas (`limit`/`offset`), com busca por texto onde aplicável
 - ✅ Erros no formato `{"error", "message"}` das rotas `/auth/*` (o contrato `error_code`/`retryable` da F14 continua restrito ao `/mcp`)
 - ✅ Parâmetros e dados sensíveis não aparecem em log (senha, hash, token)
+- ✅ (F16) A API HTTP é documentada em OpenAPI/Swagger (`/docs`, só em ambiente local, `DOCS_ENABLED=true`, com botão **Authorize** por token) e em `docs/openapi.json`; o contrato do `/mcp` está em `docs/MCP.md`
 - ⚠️ Sem proteção contra tentativas de senha e sem tabela de auditoria das ações administrativas em V1.0 (só log) — rever antes de expor fora da rede interna (ver §12)
 
 ---

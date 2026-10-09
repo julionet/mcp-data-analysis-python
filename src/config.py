@@ -18,6 +18,8 @@ F14: QUERY_RETRY_MAX_ATTEMPTS / QUERY_RETRY_BACKOFF_BASE_MS — retry só de fal
     de conexão ao data source (F14_ERROR_HANDLING_VALIDATION.md §4.3, §7).
 F15: PG_POOL_MIN/MAX_SIZE e CONFIG_DB_POOL_MIN/MAX_SIZE — tamanho do pool PostgreSQL
     (F15_PERFORMANCE_OPTIMIZATION.md §4.3, §7). Falha no startup se MIN < 1 ou MAX < MIN.
+F16: DOCS_ENABLED — liga /docs, /redoc e /openapi.json (Swagger) só em ambiente local;
+    padrão false (F16_API_DOCUMENTATION.md §4.2).
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,6 +58,8 @@ class Settings(BaseSettings):
     config_db_pool_max_size: int = 10
 
     fernet_key: str
+
+    docs_enabled: bool = False  # F16: Swagger (/docs, /redoc, /openapi.json) — só em ambiente local
 
     cache_backend: str = "memory"
     cache_max_entries: int = 200

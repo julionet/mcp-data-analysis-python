@@ -84,19 +84,40 @@ class ExpireDaysTooLargeError(Exception):
 
 
 class TokenRequest(BaseModel):
-    email: str = Field(max_length=255)  # = tamanho de users.external_id
-    password: str = Field(max_length=256)  # o bcrypt só aceita 72 bytes de qualquer forma
-    label: str | None = Field(default=None, max_length=255)  # = access_tokens.label
-    expire_days: int | None = Field(default=None, ge=1)
+    email: str = Field(max_length=255, description="E-mail (login) do usuário.")  # = tamanho de users.external_id
+    password: str = Field(max_length=256, description="Senha do usuário.")  # o bcrypt só aceita 72 bytes de qualquer forma
+    label: str | None = Field(
+        default=None, max_length=255, description="Rótulo livre para identificar o token (ex.: `claude-code`)."
+    )  # = access_tokens.label
+    expire_days: int | None = Field(
+        default=None, ge=1, description="Validade em dias; omitido usa o padrão do servidor (limitado ao máximo configurado)."
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "maria@exemplo.com",
+                "password": "Exemplo@123",
+                "label": "claude-code",
+                "expire_days": 90,
+            }
+        }
+    }
 
 
 class TokenResponse(BaseModel):
-    token: str
+    token: str = Field(description="Token opaco. Exibido apenas nesta resposta; guarde-o.")
     token_type: str = "Bearer"
-    expires_at: datetime
+    expires_at: datetime = Field(description="Data/hora de expiração do token.")
 
 
 class RevokeRequest(BaseModel):
-    email: str = Field(max_length=255)
-    password: str = Field(max_length=256)
-    token: str = Field(max_length=256)  # token_urlsafe(32) tem 43 caracteres
+    email: str = Field(max_length=255, description="E-mail (login) do dono do token.")
+    password: str = Field(max_length=256, description="Senha do usuário.")
+    token: str = Field(max_length=256, description="Token a revogar.")  # token_urlsafe(32) tem 43 caracteres
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {"email": "maria@exemplo.com", "password": "Exemplo@123", "token": "<token a revogar>"}
+        }
+    }
