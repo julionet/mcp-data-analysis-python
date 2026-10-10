@@ -21,7 +21,7 @@ def _show_count(value: str) -> int | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.chunk_document",
-        description="Divide um TXT ou PDF em trechos e mostra o resultado (apoio ao teste da F03).",
+        description="Divide um TXT, MD ou PDF em trechos e mostra o resultado (apoio ao teste da F03).",
     )
     parser.add_argument("arquivo")
     parser.add_argument("--strategy", choices=STRATEGIES, default="structured")

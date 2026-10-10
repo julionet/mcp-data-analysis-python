@@ -1,5 +1,7 @@
 # F02 — Leitura de documentos (TXT e PDF)
 
+> **Atualização (F13):** `.md` também é aceito (tipo `md`, lido como o TXT) e a mensagem de formato não aceito passou a ser `Use .txt, .md ou .pdf.`. Detalhes em `F13-suporte-a-markdown.md`.
+
 | Campo | Valor |
 |---|---|
 | **Status da spec** | Aprovada |

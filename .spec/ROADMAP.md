@@ -29,7 +29,7 @@ Em vez de construir cada camada inteira, o primeiro marco entrega o caminho comp
 | ID | Feature | Objetivo | Regras de negócio | Depende de |
 |---|---|---|---|---|
 | F01 | **Ambiente e banco de dados** | Banco e usuário criados, extensão vetorial ativa, esquema aplicado, configuração por `.env`, verificação do ambiente. | — | — |
-| F02 | **Leitura de documentos (TXT e PDF)** | Ler TXT e PDF página a página, rejeitar formatos não aceitos e PDF sem texto. | R7, R8 | — |
+| F02 | **Leitura de documentos (TXT e PDF)** | Ler TXT e PDF página a página (`.md` entra na F13), rejeitar formatos não aceitos e PDF sem texto. | R7, R8 | — |
 | F03 | **Divisão em trechos** | Dividir o texto em trechos que preservam seção e página; corrigir as falhas atuais do chunking. | R2 (base para citar página) | F02 |
 | F04 | **Vetorização dos trechos** | Gerar os vetores de cada trecho e registrar o modelo usado; bloquear e orientar a reindexar se o modelo mudar. | — | F01, F03 |
 | F05 | **Cadastro de documento** | Gravar um documento e seus trechos no banco numa única transação, ignorar duplicados, tratar arquivos grandes com progresso. | R4, R9 | F01–F04 |
@@ -39,6 +39,7 @@ Em vez de construir cada camada inteira, o primeiro marco entrega o caminho comp
 | F09 | **Gestão da base** | Listar pastas e documentos, remover com confirmação. | R10 | F05, F08 |
 | F10 | **CLI e menu interativo** | Comandos diretos e menu numerado que reúnem todas as operações. | — | F06–F09 |
 | F11 | **Avaliação de qualidade** | Conjunto de perguntas de teste e métricas para comparar estratégias de divisão e definir parâmetros padrão (tamanho dos trechos, limiar de relevância). | Critérios da seção 6 do NEGOCIO | F06, F07 |
+| F13 | **Suporte a Markdown (.md)** | Aceitar `.md` (tipo `md`, migração 002 do `file_type`, `init-db` com várias migrações). Ampliação de F01, F02 e F05. | R4, R7 | F01, F02, F05 |
 | F12 | **Limpeza e documentação final** | Remover os módulos antigos substituídos, manter `data/index/`, atualizar o `README.md`. | — | Todas |
 
 ### Observações sobre as features
@@ -59,7 +60,7 @@ Em vez de construir cada camada inteira, o primeiro marco entrega o caminho comp
 
 | Decisão | Bloqueia | Observação |
 |---|---|---|
-| **Busca por palavras em português e inglês.** A configuração textual atual do banco é só portuguesa. | F06 | Precisa ser resolvida e testada com documentos nos dois idiomas. |
+| ~~**Busca por palavras em português e inglês.**~~ **Resolvida na F06:** duas colunas (`tsv` português e `tsv_en` inglês), título da seção com peso menor e palavras vazias dos dois idiomas descartadas da pergunta. | F06 | Verificar com documentos nos dois idiomas (roteiro da F06). |
 | **Acesso simultâneo da equipe** (duas pessoas atualizando a mesma pasta ao mesmo tempo). | F05, F08 | Definir proteção contra atualização concorrente. |
 | **Limites de tamanho de arquivo e de páginas.** | F05 | Podem ser definidos após medir o tempo real de cadastro em F05. |
 | **Idioma da resposta** (acompanha a pergunta ou sempre português). | F07 | Ponto em aberto do NEGOCIO. |
@@ -81,4 +82,7 @@ Ordem sugerida, a planejar depois de M4:
 | F02 | Aprovada | Verificada (2026-10-02) |
 | F03 | Aprovada | Verificada (2026-10-03) |
 | F04 | Aprovada | Verificada (2026-10-03) |
-| F05 a F12 | Pendente | Pendente |
+| F05 | Aprovada | Verificada (2026-10-09) |
+| F13 | Aprovada | Verificada (2026-10-09) |
+| F06 | Aprovada | Verificada (2026-10-09) |
+| F07 a F12 | Pendente | Pendente |

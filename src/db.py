@@ -8,7 +8,7 @@ from src import config
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
 
 EXPECTED_TABLES = ["sources", "documents", "chunks", "app_meta"]
-EXPECTED_INDEXES = ["documents_sha256_uniq", "chunks_embedding_hnsw", "chunks_tsv_gin"]
+EXPECTED_INDEXES = ["documents_sha256_uniq", "chunks_embedding_hnsw", "chunks_tsv_gin", "chunks_tsv_en_gin"]
 EMBEDDING_DIM = 1024
 
 # variável -> o que dizer no aviso quando não estiver definida
@@ -41,6 +41,16 @@ def describe_url(url: str) -> str:
     return f"{host}:{port}/{database} (usuário {user})"
 
 
+def _register_vector(conn: psycopg.Connection) -> None:
+    """Adaptador do tipo vector. Sem a extensão (init-db e check ainda reportam isso), segue sem ele."""
+    from pgvector.psycopg import register_vector
+
+    try:
+        register_vector(conn)
+    except psycopg.ProgrammingError:
+        pass
+
+
 def connect() -> psycopg.Connection:
     url = config.DATABASE_URL
     if not url:
@@ -49,7 +59,9 @@ def connect() -> psycopg.Connection:
     host, port, database, user = _parse(url)
 
     try:
-        return psycopg.connect(url, autocommit=True, connect_timeout=5)
+        conn = psycopg.connect(url, autocommit=True, connect_timeout=5)
+        _register_vector(conn)
+        return conn
     except psycopg.OperationalError as e:
         text = str(e).lower()
         sqlstate = getattr(e, "sqlstate", None)
@@ -77,6 +89,24 @@ def _existing(conn: psycopg.Connection, kind: str) -> set[str]:
     else:
         query = "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
     return {r[0] for r in conn.execute(query).fetchall()}
+
+
+def _migrations() -> list[Path]:
+    """Migrações sql/NNN_*.sql em ordem de nome."""
+    return sorted(SQL_DIR.glob("[0-9][0-9][0-9]_*.sql"))
+
+
+def _file_type_constraint(conn: psycopg.Connection) -> str | None:
+    """Definição do CHECK de documents.file_type, ou None se a tabela/restrição não existe."""
+    row = conn.execute(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+        "WHERE conname = 'documents_file_type_check' AND conrelid = to_regclass('public.documents')"
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _allows_md(definition: str | None) -> bool:
+    return definition is not None and "'md'" in definition
 
 
 def mismatch_message(configured: str, registered: str) -> str:
@@ -135,7 +165,7 @@ def register_embedding_model(conn: psycopg.Connection, model_name: str, dim: int
 
 
 def init_db() -> list[str]:
-    """Aplica sql/001_init.sql. Devolve as linhas de saída para a CLI."""
+    """Aplica as migrações sql/NNN_*.sql em ordem. Devolve as linhas de saída para a CLI."""
     conn = connect()
     with conn:
         lines = [f"Conectado: {describe_url(config.DATABASE_URL)}"]
@@ -152,10 +182,11 @@ def init_db() -> list[str]:
         tables_before = _existing(conn, "tables")
         indexes_before = _existing(conn, "indexes")
 
-        sql = (SQL_DIR / "001_init.sql").read_text(encoding="utf-8")
+        constraint_before = _file_type_constraint(conn)
         try:
             with conn.transaction():
-                conn.execute(sql)
+                for migration in _migrations():
+                    conn.execute(migration.read_text(encoding="utf-8"))
         except psycopg.Error as e:
             raise DbError(f"Erro ao aplicar o esquema (nada foi alterado): {e}") from None
 
@@ -166,7 +197,10 @@ def init_db() -> list[str]:
             lines.append(f"Tabelas criadas: {', '.join(new_tables)}")
         if new_indexes:
             lines.append(f"Índices criados: {', '.join(new_indexes)}")
-        if new_tables or new_indexes:
+        constraint_changed = not _allows_md(constraint_before) and _allows_md(_file_type_constraint(conn))
+        if constraint_changed and "documents" not in new_tables:
+            lines.append("Restrição documents.file_type atualizada (txt, md, pdf).")
+        if new_tables or new_indexes or constraint_changed:
             lines.append("Esquema aplicado com sucesso.")
         else:
             lines.append("Esquema já estava atualizado.")
@@ -236,6 +270,22 @@ def check_environment() -> tuple[list[str], int]:
                         ok(f"chunks.embedding com {EMBEDDING_DIM} dimensões")
                     else:
                         fail(f"chunks.embedding com {dim} dimensões (esperado {EMBEDDING_DIM}).")
+
+                if "chunks" in tables:
+                    columns = {
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema = 'public' AND table_name = 'chunks'"
+                        ).fetchall()
+                    }
+                    if "tsv_en" not in columns:
+                        fail("Busca textual desatualizada (chunks.tsv_en ausente). Execute init-db.")
+                    else:
+                        ok("Busca textual em português e inglês (chunks.tsv e chunks.tsv_en)")
+
+                if "documents" in tables and not _allows_md(_file_type_constraint(conn)):
+                    fail('Restrição documents.file_type não aceita "md". Execute init-db.')
 
                 if "app_meta" in tables:
                     meta = get_embedding_meta(conn)

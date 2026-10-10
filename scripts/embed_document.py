@@ -42,7 +42,7 @@ def _vector_preview(vector: np.ndarray) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.embed_document",
-        description="Vetoriza os trechos de um TXT ou PDF e mostra o resultado (apoio ao teste da F04).",
+        description="Vetoriza os trechos de um TXT, MD ou PDF e mostra o resultado (apoio ao teste da F04).",
     )
     parser.add_argument("arquivo")
     parser.add_argument("--max-chars", type=int, default=MAX_CHARS)

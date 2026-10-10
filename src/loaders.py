@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Iterator
 if TYPE_CHECKING:
     import pymupdf
 
-ACCEPTED_TYPES = {".txt": "txt", ".pdf": "pdf"}
+ACCEPTED_TYPES = {".txt": "txt", ".md": "md", ".pdf": "pdf"}
+TEXT_TYPES = {"txt", "md"}  # lidos como texto simples, em uma página
 HASH_BLOCK_SIZE = 1024 * 1024
 
 
@@ -44,7 +45,7 @@ def _file_type(path: Path) -> str:
     file_type = ACCEPTED_TYPES.get(path.suffix.lower())
     if file_type is None:
         found = f'"{path.suffix}"' if path.suffix else "sem extensão"
-        raise LoaderError(f"Formato não aceito: {found} ({path.name}). Use .txt ou .pdf.")
+        raise LoaderError(f"Formato não aceito: {found} ({path.name}). Use .txt, .md ou .pdf.")
     return file_type
 
 
@@ -107,10 +108,10 @@ def inspect_document(path: str | Path) -> DocumentInfo:
     file_type = _file_type(path)
     sha256 = _sha256(path)
 
-    if file_type == "txt":
+    if file_type in TEXT_TYPES:
         if not _read_txt(path):
             raise LoaderError(f"Arquivo sem texto: {path.name}")
-        return DocumentInfo(path.name, "txt", sha256, 1)
+        return DocumentInfo(path.name, file_type, sha256, 1)
 
     doc = _open_pdf(path)
     try:
@@ -125,7 +126,7 @@ def inspect_document(path: str | Path) -> DocumentInfo:
 
 
 def _pages(path: Path, file_type: str) -> Iterator[Page]:
-    if file_type == "txt":
+    if file_type in TEXT_TYPES:
         yield Page(1, _read_txt(path))
         return
 

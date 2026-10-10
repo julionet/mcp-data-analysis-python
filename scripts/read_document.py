@@ -9,7 +9,7 @@ PREVIEW_CHARS = 300
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m scripts.read_document",
-        description="Lê um TXT ou PDF e mostra o resultado da leitura (apoio ao teste da F02).",
+        description="Lê um TXT, MD ou PDF e mostra o resultado da leitura (apoio ao teste da F02).",
     )
     parser.add_argument("arquivo")
     parser.add_argument("--page", type=int, help="mostra o texto completo da página N")

@@ -1,11 +1,11 @@
-# ARQUITETURA — Evolução da aplicação RAG (TXT + PDF, PostgreSQL/pgvector)
+# ARQUITETURA — Evolução da aplicação RAG (TXT + MD + PDF, PostgreSQL/pgvector)
 
 Status: **proposta aprovada para documentação; nada implementado.**
 Base: análise do código descrito no [README.md](README.md).
 
 ## 1. Objetivos e restrições
 
-- Aceitar **apenas** arquivos `.txt` e `.pdf` (PDF só com texto selecionável, **sem OCR**).
+- Aceitar **apenas** arquivos `.txt`, `.md` e `.pdf` (PDF só com texto selecionável, **sem OCR**).
 - Usar **PostgreSQL** como banco vetorial (extensão **pgvector**).
 - Manter o **SentenceTransformer** (`BAAI/bge-m3`) como modelo de embeddings, com melhorias.
 - Revisar o chunking e adotar uma estratégia mais eficiente como padrão.
@@ -24,7 +24,7 @@ Base: análise do código descrito no [README.md](README.md).
 |---|---|
 | `vector_store.py` (numpy + JSON) | Repositório Postgres + pgvector |
 | `lexical_search.py` (BM25 em memória) | Busca textual do Postgres (`tsvector`, config `portuguese`) |
-| Leitura de TXT dentro dos pipelines | Módulo `loaders` (TXT e PDF) |
+| Leitura de TXT dentro dos pipelines | Módulo `loaders` (TXT, MD e PDF) |
 | `rag.py` + `hybrid_rag.py` | Um único pipeline |
 | Scripts soltos | CLI unificada |
 
@@ -43,7 +43,7 @@ O modelo é adequado: multilíngue (bom em português), 1024 dimensões, context
 Novo módulo `src/loaders.py` com `inspect_document(path) -> DocumentInfo` (valida o arquivo, calcula o `sha256` e conta as páginas), `iter_pages(path)` (entrega uma `Page` por vez, para PDFs grandes) e `load_document(path) -> Document` (tudo em memória, para arquivos pequenos):
 
 - `Document`: `filename`, `file_type`, `sha256`, `pages: list[Page]` (`Page`: `number`, `text`). `DocumentInfo`: `filename`, `file_type`, `sha256`, `page_count`.
-- **TXT**: leitura em UTF-8, com fallback para `utf-8-sig`/`latin-1`. Todo o texto vira a página 1.
+- **TXT e MD**: leitura em UTF-8, com fallback para `utf-8-sig`/`latin-1`. Todo o texto vira a página 1. O `.md` tem tipo próprio (`md`) e segue o mesmo caminho do TXT; os títulos `#` viram a seção dos trechos (F13).
 - **PDF**: `pymupdf4llm` (PyMuPDF) converte cada página em **Markdown**, preservando títulos e tabelas. O número da página fica como metadado.
 - PDF sem texto extraível (provável escaneado): erro claro, sem indexar.
 - Qualquer outra extensão: rejeitada com mensagem explícita.
@@ -100,7 +100,7 @@ CREATE TABLE documents (
   source_id   BIGINT REFERENCES sources(id) ON DELETE CASCADE,  -- NULL = arquivo avulso
   source_path TEXT NOT NULL UNIQUE,   -- caminho absoluto do arquivo
   filename    TEXT NOT NULL,
-  file_type   TEXT NOT NULL CHECK (file_type IN ('txt', 'pdf')),
+  file_type   TEXT NOT NULL CHECK (file_type IN ('txt', 'md', 'pdf')),  -- 'md' entra pela migração 002 (F13)
   sha256      TEXT NOT NULL,          -- detecta arquivo alterado
   pages       INT  NOT NULL,
   status      TEXT NOT NULL DEFAULT 'indexed' CHECK (status IN ('indexing', 'indexed', 'failed')),
@@ -118,7 +118,8 @@ CREATE TABLE chunks (
   section     TEXT,
   content     TEXT   NOT NULL,
   embedding   vector(1024) NOT NULL,
-  tsv         tsvector GENERATED ALWAYS AS (to_tsvector('portuguese', content)) STORED,
+  tsv         tsvector GENERATED ALWAYS AS (to_tsvector('portuguese', content)) STORED,  -- F06: migração 003 passa a ser seção (peso C) + conteúdo (peso A)
+  -- tsv_en    tsvector (inglês, mesma expressão) e índice chunks_tsv_en_gin: criados pela migração 003 (F06)
   UNIQUE (document_id, chunk_index)
 );
 
@@ -158,6 +159,7 @@ ORDER BY score DESC LIMIT %(top_k)s;
 
 - Métodos expostos: `rrf` (padrão), `semantic`, `lexical`. O `weighted` pode permanecer como opção didática, calculado em Python.
 - Isso resolve o tokenizer sem acentos: a config `portuguese` do Postgres cuida de acentos, stemming e stopwords.
+- **F06 (implementado):** a busca textual usa duas colunas, `tsv` (português) e `tsv_en` (inglês), ambas sobre seção (peso `C`) + conteúdo (peso `A`). A pergunta vira uma lista de palavras sem as palavras vazias de **ambos** os idiomas, combinadas por **OU** (`to_tsquery`), e o rank textual é o maior `ts_rank_cd` entre os dois idiomas. O filtro de pasta é por prefixo do caminho do arquivo (`starts_with(source_path, pasta/)`). A busca fica em `src/retrieval.py` (`search`) e `src/search_service.py` (`run_search`).
 - **Atenção a validar:** códigos como `E-5107` podem ser tokenizados de forma diferente pelo `to_tsvector`. Isso será verificado manualmente com o documento de exemplo. Se falhar, a alternativa é uma coluna adicional com `simple`.
 - Busca vetorial inicialmente **exata** nas verificações com poucos documentos, com HNSW para volume maior (ajuste de `ef_search` se necessário).
 
@@ -176,7 +178,8 @@ Estimativa de ordem de grandeza (a medir na fase 1/3): um PDF de 500 páginas ge
 ### Camada de acesso
 
 - `psycopg` 3 + `psycopg_pool` + `pgvector` (adaptador de vetor). SQL explícito, **sem ORM**.
-- `src/db.py` (conexão e migração) e `src/repository.py` (`add_document`, `add_chunks`, `search`, `list_documents`, `delete_document`).
+- `src/db.py` (conexão, adaptador `pgvector` e migração) e `src/repository.py` (`find_by_sha256`, `find_by_path`, `add_document`; depois `search`, `list_documents`, `delete_document`). `src/ingestion.py` orquestra o cadastro (`ingest_file`).
+- `psycopg_pool` foi **adiado** (F05): a CLI usa uma conexão por execução; o pool só faz sentido com API/web.
 - Ingestão de um documento em **uma transação** (documento e chunks gravados juntos ou nada).
 
 ## 7. Geração
@@ -191,9 +194,10 @@ Mantém o `Generator` e o prompt atuais, com ajustes:
 
 | Comando | Função |
 |---|---|
-| `init-db` | Confere conexão e extensão `vector` e aplica `sql/001_init.sql` (idempotente, em uma transação). O modelo de embeddings é gravado em `app_meta` pela **F04**, não aqui. |
-| `ingest <arquivo\|pasta> [--recursive/--no-recursive] [--force] [--prune]` | Indexa um arquivo ou uma pasta (incremental, ver seção 4). Pastas são registradas em `sources`. |
+| `init-db` | Confere conexão e extensão `vector` e aplica todas as migrações `sql/NNN_*.sql` em ordem (idempotente, em uma transação). O modelo de embeddings é gravado em `app_meta` pela **F04**, não aqui. |
+| `ingest <arquivo\|pasta> [--recursive/--no-recursive] [--force] [--prune]` | Indexa um arquivo ou uma pasta (incremental, ver seção 4). Pastas são registradas em `sources`. **Na F05 só aceita um arquivo, sem opções**; pastas e opções entram na F08. |
 | `reindex [<pasta>\|--all] [--prune]` | Reprocessa as pastas registradas, só arquivos novos ou alterados. |
+| `search "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--fetch-k N] [--folder <pasta>] [--full]` | **F06:** mostra os trechos recuperados (arquivo, página, seção, pontuações), sem chamar o Claude. O `ask` (F07) reaproveita a busca. |
 | `ask "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--folder <pasta>]` | Recupera e responde sobre **todas** as pastas (ou só a filtrada), mostrando fontes (arquivo, página, score). |
 | `folders` | Lista pastas registradas, nº de documentos e data da última indexação. |
 | `list [--folder <pasta>]` | Lista documentos, status e quantidade de chunks. |
@@ -245,7 +249,7 @@ Adicionar a `requirements.txt`, cada pacote junto da feature que o usa: `psycopg
 .spec/                 (NEGOCIO.md, ARQUITETURA.md, ROADMAP.md, features/_TEMPLATE.md e as specs FNN-*.md)
 src/
   config.py  loaders.py  chunking.py  embeddings.py
-  db.py  repository.py  retrieval.py  generation.py  pipeline.py  cli.py
+  db.py  repository.py  ingestion.py  retrieval.py  search_service.py  generation.py  pipeline.py  cli.py
 sql/setup_admin.sql    (preparação manual, uma vez: usuário, banco e extensão; exige superusuário)
 sql/001_init.sql
 scripts/experiments/   (compare_chunking, compare_methods, eval_retrieval…)
@@ -257,7 +261,7 @@ data/                  (documentos de exemplo)
 ## 11. Fases de implementação
 
 0. **Ambiente:** pgvector 0.8.7 já instalado via Homebrew (Postgres 18.6); falta criar o banco `rag_training_db` e o usuário `rag_user`, e `CREATE EXTENSION vector` (a criação da extensão exige superusuário ou permissão equivalente, então é feita uma vez pelo administrador do Postgres).
-1. **Loaders** TXT/PDF + verificação manual (PDF de amostra com texto e um sem texto).
+1. **Loaders** TXT/MD/PDF + verificação manual (PDF de amostra com texto e um sem texto).
 2. **Camada Postgres:** `db.py`, `repository.py`, `init-db`.
 3. **Ingestão e CLI** (`ingest`, `list`, `delete`).
 4. **Busca híbrida em SQL** + `ask`, com paridade de resultados com o comportamento atual para as perguntas do manual.
@@ -266,7 +270,7 @@ data/                  (documentos de exemplo)
 
 ## 12. Critérios de aceite
 
-- `ingest` aceita `.txt` e `.pdf` e rejeita outros formatos; PDF sem texto gera erro claro.
+- `ingest` aceita `.txt`, `.md` e `.pdf` e rejeita outros formatos; PDF sem texto gera erro claro.
 - Reingerir o mesmo arquivo não duplica chunks; arquivo alterado substitui os chunks antigos; `reindex` só reprocessa o que mudou.
 - O mesmo conteúdo em dois caminhos (mesma pasta ou pastas diferentes) é indexado uma única vez, e o duplicado é informado no resumo.
 - Indexar duas pastas diferentes e perguntar sem filtro usa documentos das duas; com `--folder` usa só a escolhida.

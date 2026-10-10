@@ -5,3 +5,4 @@ numpy
 python-dotenv
 psycopg[binary]
 pymupdf4llm
+pgvector

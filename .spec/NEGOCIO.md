@@ -20,7 +20,7 @@ Uma aplicação em que a pessoa **faz uma pergunta em linguagem natural** e rece
 
 ### O que a aplicação faz
 
-1. **Cadastrar documentos** em formato **TXT** e **PDF**, informando uma ou mais pastas, uma de cada vez.
+1. **Cadastrar documentos** em formato **TXT**, **Markdown (MD)** e **PDF**, informando uma ou mais pastas, uma de cada vez.
 2. **Atualizar a base** de uma pasta quando os documentos mudam, trazendo só o que é novo ou foi alterado.
 3. **Consultar** todos os documentos cadastrados de uma vez, ou limitar a consulta a uma pasta.
 4. **Responder com fontes**: cada resposta indica o documento e a página de onde veio.
@@ -29,7 +29,7 @@ Uma aplicação em que a pessoa **faz uma pergunta em linguagem natural** e rece
 
 ### Tipos de documento e idioma
 
-- Aceitos: **TXT** e **PDF com texto selecionável**.
+- Aceitos: **TXT**, **Markdown (.md)** e **PDF com texto selecionável**.
 - O conteúdo é **misto**: não há um tipo ou tema único de documento.
 - Documentos e perguntas podem estar em **português e em inglês**.
 - Tamanho: a base deve comportar **centenas de arquivos**, incluindo PDFs grandes.
@@ -62,7 +62,7 @@ O tempo de cadastro de arquivos grandes **não foi definido como critério de su
 
 **Cadastrar e atualizar**
 1. A pessoa informa uma pasta.
-2. A aplicação lê os arquivos TXT e PDF, ignora duplicados e informa o que fez com cada um.
+2. A aplicação lê os arquivos TXT, MD e PDF, ignora duplicados e informa o que fez com cada um.
 3. Quando os documentos mudam, a pessoa atualiza a pasta e só o necessário é refeito.
 4. Pode repetir o processo com outras pastas, e todas passam a compor a mesma base.
 
@@ -73,7 +73,7 @@ O tempo de cadastro de arquivos grandes **não foi definido como critério de su
 
 ## 8. Fora de escopo nesta fase
 
-- Outros formatos além de TXT e PDF (Word, planilhas, páginas web, imagens).
+- Outros formatos além de TXT, MD e PDF (Word, planilhas, páginas web, imagens).
 - PDFs escaneados (que exigem reconhecimento de texto em imagem).
 - Edição ou criação de documentos pela aplicação.
 - Controle de acesso por pessoa, grupo ou documento.
@@ -87,7 +87,7 @@ Registradas para planejamento posterior, **não** fazem parte desta fase:
 1. **Acesso pela equipe via API e/ou interface web**, para que as pessoas consultem sem usar linha de comando.
 2. **Controle de acesso**: documentos visíveis apenas para pessoas ou grupos autorizados. Hoje todos veem tudo.
 3. Reconhecimento de texto em PDFs escaneados.
-4. Outros formatos além de TXT e PDF (Word, planilhas).
+4. Outros formatos além de TXT, MD e PDF (Word, planilhas).
 
 ## 10. Pontos em aberto
 

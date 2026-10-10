@@ -1,5 +1,8 @@
 # F01 — Ambiente e banco de dados
 
+> **Atualização (F13):** `init-db` passou a aplicar todas as migrações `sql/NNN_*.sql` em ordem (a `002` acrescenta `md` ao CHECK de `documents.file_type`) e `check` confere essa restrição. Detalhes em `F13-suporte-a-markdown.md`.
+> **Atualização (F06):** a migração `003` recria `tsv` (seção + conteúdo, português) e cria `tsv_en` e `chunks_tsv_en_gin`; `check` confere a coluna e o índice. Detalhes em `F06-busca-de-trechos.md`.
+
 | Campo | Valor |
 |---|---|
 | **Status da spec** | Aprovada |
