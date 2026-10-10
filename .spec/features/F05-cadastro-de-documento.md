@@ -1,6 +1,7 @@
 # F05 — Cadastro de documento
 
 > **Atualização (F13):** `ingest` também aceita `.md` (gravado com `file_type = 'md'`). Detalhes em `F13-suporte-a-markdown.md`.
+> **Atualização (F08):** `ingest` também aceita pasta e passa a **substituir** um arquivo alterado no mesmo caminho. Os passos 12 (pasta é erro) e 13 (alterado é erro) deste roteiro foram superados; ver `F08-pastas-e-atualizacao-incremental.md`.
 > **Atualização (F06):** a decisão "`tsv` só com `content`" foi revogada: a migração 003 gera `tsv` e `tsv_en` a partir de seção + conteúdo. O cadastro não muda (colunas geradas pelo banco).
 
 | Campo | Valor |

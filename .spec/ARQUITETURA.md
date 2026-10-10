@@ -54,9 +54,10 @@ Novo módulo `src/loaders.py` com `inspect_document(path) -> DocumentInfo` (vali
   - **conteúdo duplicado** (mesmo `sha256` de um documento já indexado em outro caminho, mesma pasta ou outra) → **ignorado**, sem gerar chunks. O resumo da ingestão informa "duplicado de `<caminho do original>`". O índice único em `sha256` garante isso também no banco;
   - se um arquivo existente for editado e o novo conteúdo for idêntico ao de outro documento, os chunks antigos são removidos e o arquivo é reportado como duplicado;
   - se o original sair do banco (`--prune` ou `delete`), um duplicado antes ignorado passa a ser indexado na próxima ingestão ou reindexação (cobre o caso de arquivo movido de pasta);
-  - arquivo sumiu da pasta → removido do banco só com `--prune` (nunca por padrão);
+  - arquivo sumiu da pasta → removido do banco só com `--prune` (nunca por padrão), **depois de listar e pedir confirmação** `[s/N]`, apenas em terminal interativo (F08);
   - `--force` reindexa tudo.
 - **Várias pastas:** cada pasta indexada é registrada em `sources`. Pode-se indexar uma a uma, em vezes diferentes. A busca (`ask`) usa **todos** os documentos de todas as pastas por padrão, com filtro opcional `--folder <pasta>`.
+- **F08 (implementado):** a pasta é registrada em `sources` (caminho resolvido; pastas não se sobrepõem). Uma **trava por pasta** (lock consultivo do PostgreSQL) recusa uma segunda atualização da mesma pasta. A varredura ignora e lista arquivos ocultos (`.nome`) e links simbólicos, além de formatos não aceitos. Um arquivo alterado que passa a ser idêntico a outro documento é reportado como duplicado e a versão anterior é removida. Arquivo avulso encontrado na pasta, com mesmo caminho e conteúdo, é vinculado à pasta sem revetorizar. Em pasta não recursiva, documentos já cadastrados em subpastas ficam na base, sem atualização, com aviso no resumo.
 - Extensões são casadas sem diferenciar maiúsculas (`.PDF`); arquivos de outros formatos na pasta são listados como ignorados.
 
 ## 5. Chunking
@@ -172,7 +173,7 @@ Estimativa de ordem de grandeza (a medir na fase 1/3): um PDF de 500 páginas ge
 - **Barra de progresso** (páginas/chunks processados e tempo estimado).
 - **Retomada:** `documents.status` (`indexing`/`indexed`/`failed`) permite detectar uma ingestão interrompida e refazê-la; o documento só passa a `indexed` quando termina, e nunca aparece parcial nas buscas (a busca filtra por `status = 'indexed'`).
 - **Limites configuráveis:** tamanho máximo de arquivo e de páginas (padrão a definir) com mensagem clara ao exceder.
-- **Falha isolada:** um arquivo corrompido não interrompe a indexação da pasta; vai para `failed` com o motivo em `error` e aparece no resumo final.
+- **Falha isolada:** um arquivo corrompido não interrompe a indexação da pasta e aparece no resumo final com o motivo. **F08:** a falha **não** é gravada no banco (`failed`/`error` ficam sem uso): o arquivo é tentado de novo na próxima execução e, se já havia uma versão cadastrada, ela é mantida.
 - Índice HNSW: a criação é incremental, e para cargas muito grandes é possível criá-lo depois da carga inicial.
 
 ### Camada de acesso
@@ -195,8 +196,8 @@ Mantém o `Generator` e o prompt atuais, com ajustes:
 | Comando | Função |
 |---|---|
 | `init-db` | Confere conexão e extensão `vector` e aplica todas as migrações `sql/NNN_*.sql` em ordem (idempotente, em uma transação). O modelo de embeddings é gravado em `app_meta` pela **F04**, não aqui. |
-| `ingest <arquivo\|pasta> [--recursive/--no-recursive] [--force] [--prune]` | Indexa um arquivo ou uma pasta (incremental, ver seção 4). Pastas são registradas em `sources`. **Na F05 só aceita um arquivo, sem opções**; pastas e opções entram na F08. |
-| `reindex [<pasta>\|--all] [--prune]` | Reprocessa as pastas registradas, só arquivos novos ou alterados. |
+| `ingest <arquivo\|pasta> [--recursive/--no-recursive] [--force] [--prune]` | Indexa um arquivo ou uma pasta (incremental, ver seção 4). Pastas são registradas em `sources`. Na F05 aceitava só um arquivo; **a F08 acrescentou pastas e as opções**: `--prune` lista os ausentes e pede confirmação `[s/N]` em terminal interativo; `--force` revetoriza mesmo sem mudança. |
+| `reindex <pasta>\|--all [--prune]` | **F08:** reprocessa as pastas registradas, só arquivos novos ou alterados, com o `recursive` guardado em `sources`. Exige `<pasta>` ou `--all`. |
 | `search "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--fetch-k N] [--folder <pasta>] [--full]` | **F06:** mostra os trechos recuperados (arquivo, página, seção, pontuações), sem chamar o Claude. O `ask` (F07) reaproveita a busca. |
 | `ask "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--fetch-k N] [--folder <pasta>]` | **F07:** recupera (F06) e responde sobre **todas** as pastas (ou só a filtrada), em português, mostrando só as fontes citadas (arquivo, página, seção). Busca vazia responde "não encontrei" sem chamar o Claude; sem limiar de relevância até a F11. Código em `src/answer_service.py` e `src/generation.py` (`Generator.answer_hits`). |
 | `folders` | Lista pastas registradas, nº de documentos e data da última indexação. |
@@ -249,7 +250,7 @@ Adicionar a `requirements.txt`, cada pacote junto da feature que o usa: `psycopg
 .spec/                 (NEGOCIO.md, ARQUITETURA.md, ROADMAP.md, features/_TEMPLATE.md e as specs FNN-*.md)
 src/
   config.py  loaders.py  chunking.py  embeddings.py
-  db.py  repository.py  ingestion.py  retrieval.py  search_service.py  generation.py  pipeline.py  cli.py
+  db.py  repository.py  ingestion.py  folder_ingestion.py  retrieval.py  search_service.py  generation.py  pipeline.py  cli.py
 sql/setup_admin.sql    (preparação manual, uma vez: usuário, banco e extensão; exige superusuário)
 sql/001_init.sql
 scripts/experiments/   (compare_chunking, compare_methods, eval_retrieval…)

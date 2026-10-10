@@ -20,6 +20,15 @@ class DocumentRow:
     sha256: str
     status: str
     pages: int
+    source_id: int | None = None
+
+
+@dataclass(frozen=True)
+class SourceRow:
+    id: int
+    path: str
+    recursive: bool
+    last_indexed_at: object  # datetime | None
 
 
 def folder_prefix(folder: str | None) -> str | None:
@@ -39,7 +48,7 @@ def count_indexed(conn: psycopg.Connection, folder: str | None = None) -> int:
         raise DbError("Tabela documents ausente. Execute init-db.") from None
 
 
-_SELECT = "SELECT id, source_path, sha256, status, pages FROM documents"
+_SELECT = "SELECT id, source_path, sha256, status, pages, source_id FROM documents"
 
 
 def _fetch(conn: psycopg.Connection, where: str, value: str) -> DocumentRow | None:
@@ -63,6 +72,7 @@ def add_document(
     info: DocumentInfo,
     source_path: str,
     chunks: Iterable[tuple[Chunk, np.ndarray]],
+    source_id: int | None = None,
 ) -> int:
     """Grava o documento e todos os trechos numa única transação. Devolve o id do documento.
 
@@ -73,8 +83,8 @@ def add_document(
         with conn.transaction():
             document_id = conn.execute(
                 "INSERT INTO documents (source_id, source_path, filename, file_type, sha256, pages, status) "
-                "VALUES (NULL, %s, %s, %s, %s, %s, 'indexed') RETURNING id",
-                (source_path, info.filename, info.file_type, info.sha256, info.page_count),
+                "VALUES (%s, %s, %s, %s, %s, %s, 'indexed') RETURNING id",
+                (source_id, source_path, info.filename, info.file_type, info.sha256, info.page_count),
             ).fetchone()[0]
             with conn.cursor() as cur:
                 cur.executemany(
@@ -90,3 +100,129 @@ def add_document(
     except psycopg.errors.UndefinedTable:
         raise DbError("Tabela documents ou chunks ausente. Execute init-db.") from None
     return document_id
+
+
+def _insert_chunks(conn: psycopg.Connection, document_id: int, rows: list[tuple[Chunk, np.ndarray]]) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO chunks (document_id, chunk_index, page, section, content, embedding) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            [(document_id, c.chunk_index, c.page, c.section, c.content, vector) for c, vector in rows],
+        )
+
+
+def replace_document(
+    conn: psycopg.Connection,
+    document_id: int,
+    info: DocumentInfo,
+    chunks: Iterable[tuple[Chunk, np.ndarray]],
+) -> None:
+    """Troca os dados e os trechos de um documento numa única transação (F08, T1). Mantém o id.
+
+    Levanta DuplicateContent se o novo `sha256` já pertence a outro documento (nada é alterado).
+    """
+    rows = list(chunks)
+    try:
+        with conn.transaction():
+            conn.execute("SELECT id FROM documents WHERE id = %s FOR UPDATE", (document_id,))
+            conn.execute(
+                "UPDATE documents SET filename = %s, file_type = %s, sha256 = %s, pages = %s, "
+                "status = 'indexed', error = NULL, updated_at = now() WHERE id = %s",
+                (info.filename, info.file_type, info.sha256, info.page_count, document_id),
+            )
+            conn.execute("DELETE FROM chunks WHERE document_id = %s", (document_id,))
+            _insert_chunks(conn, document_id, rows)
+    except psycopg.errors.UniqueViolation:
+        raise DuplicateContent() from None
+    except psycopg.errors.UndefinedTable:
+        raise DbError("Tabela documents ou chunks ausente. Execute init-db.") from None
+
+
+def remove_document(conn: psycopg.Connection, document_id: int) -> None:
+    """Remove o documento e, em cascata, seus trechos."""
+    conn.execute("DELETE FROM documents WHERE id = %s", (document_id,))
+
+
+def adopt_document(conn: psycopg.Connection, document_id: int, source_id: int) -> None:
+    """Vincula um documento avulso a uma pasta, sem mexer nos trechos."""
+    conn.execute("UPDATE documents SET source_id = %s WHERE id = %s", (source_id, document_id))
+
+
+def list_documents_of_source(conn: psycopg.Connection, source_id: int) -> list[DocumentRow]:
+    rows = conn.execute(f"{_SELECT} WHERE source_id = %s ORDER BY source_path", (source_id,)).fetchall()
+    return [DocumentRow(*row) for row in rows]
+
+
+_SOURCE_SELECT = "SELECT id, path, recursive, last_indexed_at FROM sources"
+
+
+def _sources_error() -> DbError:
+    return DbError("Tabela sources ausente. Execute init-db.")
+
+
+def get_source(conn: psycopg.Connection, path: str) -> SourceRow | None:
+    try:
+        row = conn.execute(f"{_SOURCE_SELECT} WHERE path = %s", (path,)).fetchone()
+    except psycopg.errors.UndefinedTable:
+        raise _sources_error() from None
+    return SourceRow(*row) if row else None
+
+
+def list_sources(conn: psycopg.Connection) -> list[SourceRow]:
+    try:
+        rows = conn.execute(f"{_SOURCE_SELECT} ORDER BY id").fetchall()
+    except psycopg.errors.UndefinedTable:
+        raise _sources_error() from None
+    return [SourceRow(*row) for row in rows]
+
+
+def add_source(conn: psycopg.Connection, path: str, recursive: bool) -> SourceRow:
+    try:
+        row = conn.execute(
+            "INSERT INTO sources (path, recursive) VALUES (%s, %s) "
+            "ON CONFLICT (path) DO UPDATE SET path = EXCLUDED.path "
+            "RETURNING id, path, recursive, last_indexed_at",
+            (path, recursive),
+        ).fetchone()
+    except psycopg.errors.UndefinedTable:
+        raise _sources_error() from None
+    return SourceRow(*row)
+
+
+def update_source(
+    conn: psycopg.Connection,
+    source_id: int,
+    recursive: bool | None = None,
+    indexed_now: bool = False,
+) -> None:
+    if recursive is not None:
+        conn.execute("UPDATE sources SET recursive = %s WHERE id = %s", (recursive, source_id))
+    if indexed_now:
+        conn.execute("UPDATE sources SET last_indexed_at = now() WHERE id = %s", (source_id,))
+
+
+def find_overlap(conn: psycopg.Connection, path: str) -> str | None:
+    """Caminho de outra pasta registrada que contém `path` ou está dentro dele (F08, T7)."""
+    prefix = path.rstrip("/") + "/"
+    try:
+        row = conn.execute(
+            "SELECT path FROM sources WHERE path <> %(path)s "
+            "AND (starts_with(%(prefix)s::text, rtrim(path, '/') || '/') OR starts_with(path, %(prefix)s::text)) "
+            "ORDER BY id LIMIT 1",
+            {"path": path, "prefix": prefix},
+        ).fetchone()
+    except psycopg.errors.UndefinedTable:
+        raise _sources_error() from None
+    return row[0] if row else None
+
+
+_LOCK_KEY = "hashtextextended('rag-folder:' || %s, 0)"
+
+
+def try_lock_folder(conn: psycopg.Connection, path: str) -> bool:
+    """Lock consultivo por pasta, preso à conexão (F08, T5). False se outra execução o tem."""
+    return conn.execute(f"SELECT pg_try_advisory_lock({_LOCK_KEY})", (path,)).fetchone()[0]
+
+
+def unlock_folder(conn: psycopg.Connection, path: str) -> None:
+    conn.execute(f"SELECT pg_advisory_unlock({_LOCK_KEY})", (path,))

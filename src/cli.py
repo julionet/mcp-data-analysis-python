@@ -1,8 +1,11 @@
 import argparse
+import itertools
 import sys
 import time
+from pathlib import Path
 
 from src import db
+from src.folder_ingestion import ConfirmUnavailable, Reporter
 
 
 def cmd_init_db(args: argparse.Namespace) -> int:
@@ -70,15 +73,215 @@ class _Progress:
             self.drawn = False
 
 
+def _print_file_result(result) -> int:
+    info = result.info
+    pages = f"{info.page_count} página" + ("s" if info.page_count != 1 else "")
+    print(f"Arquivo:    {result.path} ({info.file_type}, {pages})")
+    if result.outcome == "unchanged":
+        print(f"Resultado:  já cadastrado, sem mudanças (documento id {result.document_id})")
+    elif result.outcome == "duplicate":
+        note = " (versão anterior removida)" if result.replaced_previous else ""
+        print(f"Resultado:  duplicado de {result.duplicate_of} (nada cadastrado){note}")
+    else:
+        label = "atualizado (versão anterior substituída)" if result.outcome == "updated" else "cadastrado"
+        print(f"Resultado:  {label}")
+        print(f"Documento:  id {result.document_id} | {result.chunk_count} trechos | páginas 1–{info.page_count}")
+        note = "registrado em app_meta" if result.model_registered else "confere com o registro"
+        print(f"Modelo:     {result.model_name} ({note})")
+        print(f"Tempo:      {_fmt(result.elapsed)} s")
+    return 0
+
+
+_LABELS = {
+    "created": "cadastrado",
+    "updated": "atualizado",
+    "unchanged": "sem mudanças",
+    "adopted": "vinculado",
+    "duplicate": "duplicado",
+    "absent": "ausente",
+    "removed": "removido",
+    "failed": "falhou",
+    "ignored": "ignorado",
+}
+_SINGULAR = {
+    "created": "cadastrado",
+    "updated": "atualizado",
+    "adopted": "vinculado",
+    "duplicate": "duplicado",
+    "absent": "ausente",
+    "removed": "removido",
+    "failed": "falhou",
+    "ignored": "ignorado",
+}
+_PLURAL = {
+    "created": "cadastrados",
+    "updated": "atualizados",
+    "adopted": "vinculados",
+    "duplicate": "duplicados",
+    "absent": "ausentes",
+    "removed": "removidos",
+    "failed": "falharam",
+    "ignored": "ignorados",
+}
+
+
+def _count_label(n: int, outcome: str) -> str:
+    if outcome in ("unchanged",):
+        return f"{n} sem mudanças"
+    return f"{n} {(_SINGULAR if n == 1 else _PLURAL)[outcome]}"
+
+
+def _file_detail(item) -> str:
+    if item.outcome == "created":
+        return f"{item.chunk_count} trechos"
+    if item.outcome == "updated":
+        return f"{item.chunk_count} trechos (versão anterior substituída)"
+    if item.outcome == "adopted":
+        return "arquivo avulso adotado pela pasta"
+    if item.outcome == "absent":
+        return "não existe mais em disco (use --prune para remover da base)"
+    return item.detail
+
+
+class _FolderReporter(Reporter):
+    """Progresso em stderr e, antes da confirmação do --prune, a lista de arquivos em stdout."""
+
+    def __init__(self) -> None:
+        self.progress: _Progress | None = None
+        self.files_printed = False
+
+    def file_start(self, index: int, total: int, rel: str):
+        print(f"[{index}/{total}] {rel}", file=sys.stderr, flush=True)
+        self.progress = _Progress()
+        return self.progress
+
+    def file_end(self) -> None:
+        if self.progress:
+            self.progress.finish()
+            self.progress = None
+
+    def before_prune(self, result) -> None:
+        _print_folder_header(result)
+        _print_folder_files(result)
+        self.files_printed = True
+
+
+def _print_folder_header(result) -> None:
+    status = "registrada agora" if result.registered_now else "já registrada"
+    print(f"Pasta:      {result.folder} ({status} | recursiva: {'sim' if result.recursive else 'não'})")
+    print(f"Arquivos:   {result.accepted} aceitos | {len(result.ignored)} ignorados")
+
+
+def _print_folder_files(result) -> None:
+    items = sorted([*result.files, *result.ignored], key=lambda f: f.path)
+    if result.accepted == 0 and not result.files and not result.error:
+        print(f"Nenhum arquivo TXT, MD ou PDF encontrado em {result.folder}.")
+    if items:
+        print()
+        width = min(max(len(f.path) for f in items), 40)
+        for item in items:
+            print(f"  {_LABELS[item.outcome]:<13} {item.path:<{width}}  {_file_detail(item)}".rstrip())
+
+
+def _confirm_prune(folder: str, paths: list[str], folder_missing: bool) -> bool:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ConfirmUnavailable()
+    print()
+    print("Documentos ausentes da pasta (arquivo não existe mais em disco):")
+    for path in paths:
+        print(f"  {path}")
+    if folder_missing:
+        question = (
+            f"A pasta {folder} não foi encontrada em disco (unidade desmontada?). "
+            f"Todos os {len(paths)} documentos dela seriam removidos. Remover? [s/N] "
+        )
+    else:
+        question = f"Remover {len(paths)} documento(s) da base? [s/N] "
+    try:
+        return input(question).strip().lower() == "s"
+    except EOFError:
+        return False
+
+
+def _print_folder_summary(result, reporter: _FolderReporter) -> None:
+    if result.error:
+        print(result.error, file=sys.stderr)
+        return
+    if not reporter.files_printed:
+        _print_folder_header(result)
+        _print_folder_files(result)
+    if result.prune_status == "removed":
+        print(f"Removido:   {result.count('removed')} documento(s)")
+    elif result.prune_status == "none":
+        print("Nenhum documento ausente.")
+    elif result.prune_status == "declined":
+        print("Nada foi removido.")
+    elif result.prune_status == "unavailable":
+        print("--prune exige confirmação em um terminal interativo; nada foi removido.", file=sys.stderr)
+    elif result.prune_status == "cancelled":
+        print("Remoção cancelada.", file=sys.stderr)
+
+    counts = [(result.count(o), o) for o in ("created", "updated", "unchanged", "adopted", "duplicate", "absent", "removed", "failed")]
+    parts = [_count_label(n, o) for n, o in counts if n]
+    if result.ignored:
+        parts.append(_count_label(len(result.ignored), "ignored"))
+    print()
+    print(f"Resumo:     {', '.join(parts) if parts else 'nenhum arquivo'}")
+    if result.out_of_scope:
+        print(f"Aviso:      {result.out_of_scope} documento(s) em subpastas não são mais atualizados (a pasta não é recursiva).")
+    if result.interrupted:
+        print("Atualização interrompida; os arquivos já concluídos foram mantidos.", file=sys.stderr)
+    if result.fatal:
+        print(result.fatal, file=sys.stderr)
+    print(f"Tempo:      {_fmt(result.elapsed)} s")
+
+
+def _run_folder_command(runner, reporter: _FolderReporter) -> int:
+    """Imprime os resultados de ingest/reindex e devolve o código de saída."""
+    problem = False
+    try:
+        for result in runner:
+            _print_folder_summary(result, reporter)
+            reporter.files_printed = False
+            problem = problem or result.has_problem
+    except KeyboardInterrupt:
+        print("Atualização interrompida; os arquivos já concluídos foram mantidos.", file=sys.stderr)
+        return 1
+    return 1 if problem else 0
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     # imports tardios: ingestion/embeddings não devem pesar nos comandos init-db e check
     from src.embeddings import EmbeddingError
+    from src.folder_ingestion import FolderError, ingest_folder
     from src.ingestion import IngestError, ingest_file
     from src.loaders import LoaderError
 
+    target = Path(args.arquivo)
+    if target.is_dir():
+        reporter = _FolderReporter()
+        try:
+            result = ingest_folder(
+                target, args.recursive, args.force, args.prune, reporter, _confirm_prune
+            )
+        except (FolderError, LoaderError, EmbeddingError, db.DbError) as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("Atualização interrompida; os arquivos já concluídos foram mantidos.", file=sys.stderr)
+            return 1
+        return _run_folder_command(iter([result]), reporter)
+
+    option = "--prune" if args.prune else None
+    if args.recursive is not None:
+        option = "--recursive" if args.recursive else "--no-recursive"
+    if option:
+        print(f"{option} só se aplica a pastas.", file=sys.stderr)
+        return 1
+
     progress = _Progress()
     try:
-        result = ingest_file(args.arquivo, progress)
+        result = ingest_file(args.arquivo, progress, args.force)
     except KeyboardInterrupt:
         progress.finish()
         print("Cadastro interrompido; nada foi gravado.", file=sys.stderr)
@@ -88,21 +291,24 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
     progress.finish()
+    return _print_file_result(result)
 
-    info = result.info
-    pages = f"{info.page_count} página" + ("s" if info.page_count != 1 else "")
-    print(f"Arquivo:    {result.path} ({info.file_type}, {pages})")
-    if result.outcome == "unchanged":
-        print(f"Resultado:  já cadastrado, sem mudanças (documento id {result.document_id})")
-    elif result.outcome == "duplicate":
-        print(f"Resultado:  duplicado de {result.duplicate_of} (nada cadastrado)")
-    else:
-        print("Resultado:  cadastrado")
-        print(f"Documento:  id {result.document_id} | {result.chunk_count} trechos | páginas 1–{info.page_count}")
-        note = "registrado em app_meta" if result.model_registered else "confere com o registro"
-        print(f"Modelo:     {result.model_name} ({note})")
-        print(f"Tempo:      {_fmt(result.elapsed)} s")
-    return 0
+
+def cmd_reindex(args: argparse.Namespace) -> int:
+    from src.embeddings import EmbeddingError
+    from src.folder_ingestion import reindex_folders
+
+    reporter = _FolderReporter()
+    try:
+        runner = reindex_folders(None if args.all else args.pasta, args.prune, reporter, _confirm_prune)
+        first = next(runner, None)
+        if first is None:
+            print("Nenhuma pasta registrada. Cadastre com: python -m src.cli ingest <pasta>")
+            return 0
+        return _run_folder_command(itertools.chain([first], runner), reporter)
+    except (EmbeddingError, db.DbError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
 
 SNIPPET_CHARS = 240
@@ -239,8 +445,16 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("init-db", help="aplica o esquema do banco (idempotente)")
     sub.add_parser("check", help="verifica configuração e banco")
-    ingest = sub.add_parser("ingest", help="cadastra um arquivo TXT, MD ou PDF")
-    ingest.add_argument("arquivo")
+    ingest = sub.add_parser("ingest", help="cadastra ou atualiza um arquivo TXT, MD ou PDF, ou uma pasta")
+    ingest.add_argument("arquivo", help="arquivo ou pasta")
+    ingest.add_argument("--recursive", action=argparse.BooleanOptionalAction, default=None, help="percorre as subpastas (só pasta)")
+    ingest.add_argument("--force", action="store_true", help="revetoriza mesmo sem mudança")
+    ingest.add_argument("--prune", action="store_true", help="remove da base, com confirmação, o que sumiu da pasta")
+
+    reindex = sub.add_parser("reindex", help="reprocessa pastas registradas, só o que mudou")
+    reindex.add_argument("pasta", nargs="?")
+    reindex.add_argument("--all", action="store_true", help="todas as pastas registradas")
+    reindex.add_argument("--prune", action="store_true", help="remove da base, com confirmação, o que sumiu da pasta")
 
     search = sub.add_parser("search", help="mostra os trechos mais relevantes para uma pergunta")
     search.add_argument("pergunta")
@@ -258,10 +472,16 @@ def main(argv: list[str] | None = None) -> int:
     ask.add_argument("--folder", help="limita a busca a documentos dentro desta pasta")
 
     args = parser.parse_args(argv)
+    if args.command == "reindex":
+        if args.all and args.pasta:
+            parser.error("Use <pasta> ou --all, não os dois.")
+        if not args.all and not args.pasta:
+            parser.error("Informe <pasta> ou --all.")
     commands = {
         "init-db": cmd_init_db,
         "check": cmd_check,
         "ingest": cmd_ingest,
+        "reindex": cmd_reindex,
         "search": cmd_search,
         "ask": cmd_ask,
     }
