@@ -170,6 +170,70 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_ask_header(question: str, result) -> None:
+    print(f"Pergunta:  {question.strip()}")
+    print(
+        f"Método:    {result.method} | top-k {result.top_k} | fetch-k {result.fetch_k} | "
+        f"pasta: {result.folder or '(todas)'}"
+    )
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    # imports tardios: o ask não deve pesar nos comandos init-db e check
+    from src.answer_service import AskError, run_ask
+    from src.embeddings import EmbeddingError
+    from src.generation import GenerationError
+    from src.search_service import SearchError
+
+    header_done = False
+
+    def before_send(search) -> None:
+        nonlocal header_done
+        _print_ask_header(args.pergunta, search)
+        header_done = True
+        print("Os trechos encontrados serão enviados ao Claude (serviço externo).", file=sys.stderr, flush=True)  # R11
+
+    try:
+        result = run_ask(args.pergunta, args.method, args.top_k, args.fetch_k, args.folder, before_send)
+    except KeyboardInterrupt:
+        print("Pergunta interrompida.", file=sys.stderr)
+        return 1
+    except (AskError, SearchError, GenerationError, EmbeddingError, db.DbError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    search = result.search
+    if search.status == "empty_base":
+        print("A base está vazia. Cadastre um arquivo com: python -m src.cli ingest <arquivo>")
+        return 0
+    if search.status == "no_documents_in_folder":
+        print(f"Nenhum documento cadastrado em {search.folder}.")
+        return 0
+
+    if not header_done:  # busca sem trechos: o Claude não foi chamado
+        _print_ask_header(args.pergunta, search)
+    print()
+    print("Resposta:")
+    print(result.answer)
+    if result.truncated:
+        print("A resposta foi cortada pelo limite de tokens.", file=sys.stderr)
+    if result.sources:
+        print()
+        print("Fontes:")
+        for number, hit in result.sources:
+            print(f"[{number}] {hit.filename} | página {hit.page} | {hit.section or '—'}")
+    elif result.cited_none:
+        print()
+        print("Fontes: o Claude não citou nenhum trecho.")
+        print("A resposta não traz citações [n]; confira nos documentos.", file=sys.stderr)
+    if header_done:
+        total = search.elapsed + result.answer_elapsed
+        print(
+            f"Tempo: {_fmt(total)} s (busca {_fmt(search.elapsed)} s, resposta {_fmt(result.answer_elapsed)} s)"
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m src.cli", description="RAG Training — CLI")
     sub = parser.add_subparsers(dest="command")
@@ -186,8 +250,21 @@ def main(argv: list[str] | None = None) -> int:
     search.add_argument("--folder", help="limita a busca a documentos dentro desta pasta")
     search.add_argument("--full", action="store_true", help="mostra o trecho inteiro")
 
+    ask = sub.add_parser("ask", help="responde a uma pergunta com base nos documentos, citando as fontes")
+    ask.add_argument("pergunta")
+    ask.add_argument("--method", choices=("rrf", "semantic", "lexical"), default="rrf")
+    ask.add_argument("--top-k", type=_positive_int, default=5)
+    ask.add_argument("--fetch-k", type=_positive_int, default=20)
+    ask.add_argument("--folder", help="limita a busca a documentos dentro desta pasta")
+
     args = parser.parse_args(argv)
-    commands = {"init-db": cmd_init_db, "check": cmd_check, "ingest": cmd_ingest, "search": cmd_search}
+    commands = {
+        "init-db": cmd_init_db,
+        "check": cmd_check,
+        "ingest": cmd_ingest,
+        "search": cmd_search,
+        "ask": cmd_ask,
+    }
     if args.command is None:
         parser.print_help()
         return 0

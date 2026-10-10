@@ -63,7 +63,7 @@ Em vez de construir cada camada inteira, o primeiro marco entrega o caminho comp
 | ~~**Busca por palavras em português e inglês.**~~ **Resolvida na F06:** duas colunas (`tsv` português e `tsv_en` inglês), título da seção com peso menor e palavras vazias dos dois idiomas descartadas da pergunta. | F06 | Verificar com documentos nos dois idiomas (roteiro da F06). |
 | **Acesso simultâneo da equipe** (duas pessoas atualizando a mesma pasta ao mesmo tempo). | F05, F08 | Definir proteção contra atualização concorrente. |
 | **Limites de tamanho de arquivo e de páginas.** | F05 | Podem ser definidos após medir o tempo real de cadastro em F05. |
-| **Idioma da resposta** (acompanha a pergunta ou sempre português). | F07 | Ponto em aberto do NEGOCIO. |
+| ~~**Idioma da resposta**~~ **Resolvida na F07:** sempre português. | F07 | — |
 | **Layout real dos PDFs** (colunas, tabelas, cabeçalhos repetidos). | F02, F03 | Exige amostras de PDFs reais. |
 
 ## Fora desta fase (evoluções futuras)
@@ -85,4 +85,5 @@ Ordem sugerida, a planejar depois de M4:
 | F05 | Aprovada | Verificada (2026-10-09) |
 | F13 | Aprovada | Verificada (2026-10-09) |
 | F06 | Aprovada | Verificada (2026-10-09) |
-| F07 a F12 | Pendente | Pendente |
+| F07 | Aprovada | Verificada (2026-10-09) |
+| F08 a F12 | Pendente | Pendente |

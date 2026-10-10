@@ -94,4 +94,4 @@ Registradas para planejamento posterior, **não** fazem parte desta fase:
 - Quantas pessoas consultam ao mesmo tempo, e se precisam de histórico de perguntas.
 - Meta de tempo para cadastrar arquivos grandes, se vier a ser necessária.
 - Limites de tamanho de arquivo aceitos.
-- Se o idioma da resposta deve acompanhar o da pergunta ou ser sempre português.
+- ~~Se o idioma da resposta deve acompanhar o da pergunta ou ser sempre português.~~ **Resolvido na F07:** a resposta é sempre em português.

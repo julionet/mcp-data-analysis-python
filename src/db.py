@@ -13,8 +13,6 @@ EMBEDDING_DIM = 1024
 
 # variável -> o que dizer no aviso quando não estiver definida
 OPTIONAL_ENV = {
-    "ANTHROPIC_API_KEY": "necessária a partir da F07",
-    "LLM_MODEL": "necessária a partir da F07",
     "EMBEDDING_MODEL": "necessária a partir da F04",
     "HF_TOKEN": "opcional",
 }
@@ -302,6 +300,12 @@ def check_environment() -> tuple[list[str], int]:
                             )
                         else:
                             ok(f"Modelo de embeddings: {registered} ({registered_dim} dimensões)")
+
+    for name in ("ANTHROPIC_API_KEY", "LLM_MODEL"):  # exigidas pelo ask (F07); só a presença é conferida
+        if getattr(config, name):
+            ok(f"{name} definida")
+        else:
+            fail(f"{name} não definida. Copie .env.example para .env e preencha.")
 
     for name, note in OPTIONAL_ENV.items():
         if not getattr(config, name):
