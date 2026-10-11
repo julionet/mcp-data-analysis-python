@@ -204,7 +204,7 @@ Mantém o `Generator` e o prompt atuais, com ajustes:
 | `list [--folder <pasta>]` | **F09 (implementado):** lista documentos, status e quantidade de chunks. |
 | `delete <arquivo\|pasta>` | **F09 (implementado, `src/management_service.py`):** remove o documento (ou todos os da pasta) e seus chunks. Pede confirmação. |
 | `check` | Verifica variáveis do `.env`, conexão, extensão, tabelas e índices (F01). A verificação dos embeddings (F04) compara o `EMBEDDING_MODEL` do `.env` com o registrado em `app_meta` e a dimensão, sem carregar o modelo; a do Claude (F07) confere só a presença de `ANTHROPIC_API_KEY` e `LLM_MODEL`, sem chamar a API. |
-| `menu` (padrão sem argumentos) | Menu interativo (abaixo). |
+| `menu` (padrão sem argumentos) | **F10 (implementado, `src/menu.py`):** menu interativo (abaixo) quando há terminal; sem terminal, mostra a ajuda. |
 
 ### Menu interativo
 

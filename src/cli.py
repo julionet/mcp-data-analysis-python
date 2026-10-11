@@ -384,7 +384,9 @@ def _print_ask_header(question: str, result) -> None:
     )
 
 
-def cmd_ask(args: argparse.Namespace) -> int:
+def _ask_and_print(
+    question: str, method: str, top_k: int, fetch_k: int, folder: str | None, embedder_source=None
+) -> int:
     # imports tardios: o ask não deve pesar nos comandos init-db e check
     from src.answer_service import AskError, run_ask
     from src.embeddings import EmbeddingError
@@ -395,12 +397,12 @@ def cmd_ask(args: argparse.Namespace) -> int:
 
     def before_send(search) -> None:
         nonlocal header_done
-        _print_ask_header(args.pergunta, search)
+        _print_ask_header(question, search)
         header_done = True
         print("Os trechos encontrados serão enviados ao Claude (serviço externo).", file=sys.stderr, flush=True)  # R11
 
     try:
-        result = run_ask(args.pergunta, args.method, args.top_k, args.fetch_k, args.folder, before_send)
+        result = run_ask(question, method, top_k, fetch_k, folder, before_send, embedder_source)
     except KeyboardInterrupt:
         print("Pergunta interrompida.", file=sys.stderr)
         return 1
@@ -417,7 +419,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
         return 0
 
     if not header_done:  # busca sem trechos: o Claude não foi chamado
-        _print_ask_header(args.pergunta, search)
+        _print_ask_header(question, search)
     print()
     print("Resposta:")
     print(result.answer)
@@ -438,6 +440,10 @@ def cmd_ask(args: argparse.Namespace) -> int:
             f"Tempo: {_fmt(total)} s (busca {_fmt(search.elapsed)} s, resposta {_fmt(result.answer_elapsed)} s)"
         )
     return 0
+
+
+def cmd_ask(args: argparse.Namespace) -> int:
+    return _ask_and_print(args.pergunta, args.method, args.top_k, args.fetch_k, args.folder)
 
 
 def _table(headers: list[str], rows: list[list[str]], right: set[int] = frozenset()) -> None:
@@ -542,7 +548,10 @@ def cmd_delete(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m src.cli", description="RAG Training — CLI")
+    parser = argparse.ArgumentParser(
+        prog="python -m src.cli",
+        description="RAG Training — CLI. Sem argumentos, em um terminal interativo, abre o menu.",
+    )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("init-db", help="aplica o esquema do banco (idempotente)")
     sub.add_parser("check", help="verifica configuração e banco")
@@ -596,6 +605,10 @@ def main(argv: list[str] | None = None) -> int:
         "delete": cmd_delete,
     }
     if args.command is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from src.menu import run_menu
+
+            return run_menu()
         parser.print_help()
         return 0
     return commands[args.command](args)

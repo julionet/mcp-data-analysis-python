@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,24 @@ from src.retrieval import FETCH_K, TOP_K, SearchHit, search
 
 class SearchError(Exception):
     """Erro esperado, com mensagem já pronta para a pessoa."""
+
+
+class EmbedderCache:
+    """Carrega o modelo na primeira vez e o reaproveita nas perguntas seguintes (F10, T10)."""
+
+    def __init__(self) -> None:
+        self._embedder: Embedder | None = None
+        self._name: str | None = None
+
+    def __call__(self, model_name: str) -> Embedder:
+        if self._embedder is None or self._name != model_name:
+            embedder = Embedder(model_name)
+            embedder.check_dimension(db.EMBEDDING_DIM)
+            self._embedder, self._name = embedder, model_name
+        return self._embedder
+
+
+EmbedderSource = Callable[[str], Embedder]
 
 
 @dataclass(frozen=True)
@@ -28,6 +47,7 @@ def run_search(
     top_k: int = TOP_K,
     fetch_k: int = FETCH_K,
     folder: str | None = None,
+    embedder_source: EmbedderSource | None = None,
 ) -> SearchOutcome:
     """Fluxo da seção 4.1 da F06: base vazia, conferência do modelo, vetor da pergunta, busca."""
     text = text.strip()
@@ -53,8 +73,11 @@ def run_search(
             if not model_name:
                 raise EmbeddingError("EMBEDDING_MODEL não definida. Copie .env.example para .env e preencha.")
             db.ensure_embedding_model(conn, model_name)  # falha antes de carregar o modelo (T1)
-            embedder = Embedder(model_name)
-            embedder.check_dimension(db.EMBEDDING_DIM)
+            if embedder_source:
+                embedder = embedder_source(model_name)
+            else:
+                embedder = Embedder(model_name)
+                embedder.check_dimension(db.EMBEDDING_DIM)
             vector = embedder.embed_one(text)
 
         hits = search(conn, text, vector, method, top_k, fetch_k, folder)

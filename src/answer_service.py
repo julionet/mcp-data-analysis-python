@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from src import config
 from src.generation import NOT_FOUND_ANSWER
 from src.retrieval import FETCH_K, TOP_K, SearchHit
-from src.search_service import SearchOutcome, run_search
+from src.search_service import EmbedderSource, SearchOutcome, run_search
 
 
 class AskError(Exception):
@@ -47,6 +47,7 @@ def run_ask(
     fetch_k: int = FETCH_K,
     folder: str | None = None,
     before_send: Callable[[SearchOutcome], None] | None = None,
+    embedder_source: EmbedderSource | None = None,
 ) -> AskOutcome:
     """Fluxo da seção 4.1 da F07: configuração, busca (F06), chamada ao Claude e fontes citadas."""
     if not text.strip():
@@ -55,7 +56,7 @@ def run_ask(
         if not getattr(config, name):
             raise AskError(f"{name} não definida. Copie .env.example para .env e preencha.")
 
-    search = run_search(text, method, top_k, fetch_k, folder)
+    search = run_search(text, method, top_k, fetch_k, folder, embedder_source)
     if search.status != "ok":
         return AskOutcome(search)
     if not search.hits:

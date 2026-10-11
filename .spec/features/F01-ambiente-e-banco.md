@@ -66,7 +66,7 @@ Deixar o ambiente pronto para as demais features: banco `rag_training_db` com a 
 | Esquema incompleto (falta tabela ou índice) | `init-db` completa o que falta. `check` aponta o item ausente. | `[FALHA] Tabela chunks ausente. Execute init-db.` |
 | `check` com variáveis opcionais ausentes (`ANTHROPIC_API_KEY`, `LLM_MODEL`, `EMBEDDING_MODEL`, `HF_TOKEN`) | Só aviso, não falha, pois são usadas por features futuras. | `[AVISO] LLM_MODEL não definida (necessária a partir da F07).` |
 | Qualquer erro na aplicação do esquema | A transação inteira é desfeita. Nada fica pela metade. | Mensagem do erro, sem senha. |
-| Comando `python -m src.cli` sem argumentos | Mostra a ajuda com os comandos disponíveis. (O menu virá na F10.) | Lista de comandos. |
+| Comando `python -m src.cli` sem argumentos | Em terminal interativo abre o menu (F10); sem terminal, mostra a ajuda com os comandos disponíveis. | Lista de comandos. |
 
 ### 4.3 Saída para a pessoa
 
