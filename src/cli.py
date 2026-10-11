@@ -440,6 +440,107 @@ def cmd_ask(args: argparse.Namespace) -> int:
     return 0
 
 
+def _table(headers: list[str], rows: list[list[str]], right: set[int] = frozenset()) -> None:
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+
+    def line(cells: list[str]) -> str:
+        return "  ".join(c.rjust(widths[i]) if i in right else c.ljust(widths[i]) for i, c in enumerate(cells)).rstrip()
+
+    print(line(headers))
+    for row in rows:
+        print(line(row))
+
+
+def cmd_folders(args: argparse.Namespace) -> int:
+    from src import management_service
+
+    try:
+        stats = management_service.list_folders()
+    except db.DbError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if not any(s.path for s in stats):
+        print("Nenhuma pasta registrada. Cadastre com: python -m src.cli ingest <pasta>")
+    if not stats:
+        return 0
+    rows = [
+        [
+            s.path or "(avulsos)",
+            "—" if s.recursive is None else ("sim" if s.recursive else "não"),
+            str(s.documents),
+            str(s.chunks),
+            s.last_indexed_at.astimezone().strftime("%Y-%m-%d %H:%M") if s.last_indexed_at else "—",
+        ]
+        for s in stats
+    ]
+    _table(["PASTA", "RECURSIVA", "DOCS", "TRECHOS", "ÚLTIMA INDEXAÇÃO"], rows, right={2, 3})
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    from src import management_service
+
+    try:
+        docs = management_service.list_documents(args.folder)
+    except db.DbError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if not docs:
+        if args.folder:
+            print(f"Nenhum documento em {Path(args.folder).resolve()}.")
+        else:
+            print("Nenhum documento na base.")
+        return 0
+    rows = [[d.source_path, d.file_type, str(d.pages), str(d.chunks), d.status] for d in docs]
+    _table(["CAMINHO", "TIPO", "PÁG", "TRECHOS", "STATUS"], rows, right={2, 3})
+    print()
+    print(f"{len(docs)} documento(s), {sum(d.chunks for d in docs)} trecho(s).")
+    return 0
+
+
+DELETE_LIST_LIMIT = 20
+
+
+def _confirm_delete(kind: str, target: str, paths: list[str], chunks: int) -> bool:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ConfirmUnavailable()
+    label = "Pasta" if kind == "folder" else "Documento"
+    print(f"{label}: {target} ({len(paths)} documento(s), {chunks} trecho(s))")
+    if kind == "folder":
+        for path in paths[:DELETE_LIST_LIMIT]:
+            print(f"  {path}")
+        if len(paths) > DELETE_LIST_LIMIT:
+            print(f"  … e mais {len(paths) - DELETE_LIST_LIMIT}")
+    print("Os arquivos no disco não serão apagados." + (" A pasta deixará de ser registrada." if kind == "folder" else ""))
+    try:
+        return input("Remover? [s/N] ").strip().lower() == "s"
+    except EOFError:
+        return False
+
+
+def cmd_delete(args: argparse.Namespace) -> int:
+    from src import management_service
+
+    try:
+        result = management_service.delete_target(args.alvo, _confirm_delete)
+    except ConfirmUnavailable:
+        print("delete exige confirmação em um terminal interativo; nada foi removido.", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("Remoção cancelada.", file=sys.stderr)
+        return 1
+    except (management_service.ManagementError, db.DbError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if result.status == "declined":
+        print("Nada foi removido.")
+        return 0
+    print(f"Removido: {result.documents} documento(s), {result.chunks} trecho(s).")
+    if result.kind == "folder":
+        print(f"Pasta {result.target} removida do registro.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m src.cli", description="RAG Training — CLI")
     sub = parser.add_subparsers(dest="command")
@@ -471,6 +572,12 @@ def main(argv: list[str] | None = None) -> int:
     ask.add_argument("--fetch-k", type=_positive_int, default=20)
     ask.add_argument("--folder", help="limita a busca a documentos dentro desta pasta")
 
+    sub.add_parser("folders", help="lista as pastas registradas")
+    list_cmd = sub.add_parser("list", help="lista os documentos da base")
+    list_cmd.add_argument("--folder", help="mostra só os documentos dentro desta pasta")
+    delete = sub.add_parser("delete", help="remove um documento ou uma pasta registrada, com confirmação")
+    delete.add_argument("alvo", help="arquivo ou pasta registrada")
+
     args = parser.parse_args(argv)
     if args.command == "reindex":
         if args.all and args.pasta:
@@ -484,6 +591,9 @@ def main(argv: list[str] | None = None) -> int:
         "reindex": cmd_reindex,
         "search": cmd_search,
         "ask": cmd_ask,
+        "folders": cmd_folders,
+        "list": cmd_list,
+        "delete": cmd_delete,
     }
     if args.command is None:
         parser.print_help()

@@ -200,9 +200,9 @@ Mantém o `Generator` e o prompt atuais, com ajustes:
 | `reindex <pasta>\|--all [--prune]` | **F08:** reprocessa as pastas registradas, só arquivos novos ou alterados, com o `recursive` guardado em `sources`. Exige `<pasta>` ou `--all`. |
 | `search "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--fetch-k N] [--folder <pasta>] [--full]` | **F06:** mostra os trechos recuperados (arquivo, página, seção, pontuações), sem chamar o Claude. O `ask` (F07) reaproveita a busca. |
 | `ask "<pergunta>" [--method rrf\|semantic\|lexical] [--top-k N] [--fetch-k N] [--folder <pasta>]` | **F07:** recupera (F06) e responde sobre **todas** as pastas (ou só a filtrada), em português, mostrando só as fontes citadas (arquivo, página, seção). Busca vazia responde "não encontrei" sem chamar o Claude; sem limiar de relevância até a F11. Código em `src/answer_service.py` e `src/generation.py` (`Generator.answer_hits`). |
-| `folders` | Lista pastas registradas, nº de documentos e data da última indexação. |
-| `list [--folder <pasta>]` | Lista documentos, status e quantidade de chunks. |
-| `delete <arquivo\|pasta>` | Remove o documento (ou todos os da pasta) e seus chunks. Pede confirmação. |
+| `folders` | **F09 (implementado):** lista pastas registradas, nº de documentos e data da última indexação. |
+| `list [--folder <pasta>]` | **F09 (implementado):** lista documentos, status e quantidade de chunks. |
+| `delete <arquivo\|pasta>` | **F09 (implementado, `src/management_service.py`):** remove o documento (ou todos os da pasta) e seus chunks. Pede confirmação. |
 | `check` | Verifica variáveis do `.env`, conexão, extensão, tabelas e índices (F01). A verificação dos embeddings (F04) compara o `EMBEDDING_MODEL` do `.env` com o registrado em `app_meta` e a dimensão, sem carregar o modelo; a do Claude (F07) confere só a presença de `ANTHROPIC_API_KEY` e `LLM_MODEL`, sem chamar a API. |
 | `menu` (padrão sem argumentos) | Menu interativo (abaixo). |
 

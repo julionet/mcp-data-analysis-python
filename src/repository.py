@@ -226,3 +226,69 @@ def try_lock_folder(conn: psycopg.Connection, path: str) -> bool:
 
 def unlock_folder(conn: psycopg.Connection, path: str) -> None:
     conn.execute(f"SELECT pg_advisory_unlock({_LOCK_KEY})", (path,))
+
+
+@dataclass(frozen=True)
+class DocumentListing:
+    source_path: str
+    file_type: str
+    pages: int
+    chunks: int
+    status: str
+
+
+@dataclass(frozen=True)
+class SourceStats:
+    path: str | None  # None = documentos avulsos
+    recursive: bool | None
+    documents: int
+    chunks: int
+    last_indexed_at: object  # datetime | None
+
+
+def list_documents(conn: psycopg.Connection, folder: str | None = None) -> list[DocumentListing]:
+    """Documentos com nº de trechos, por caminho; `folder` filtra por prefixo (F09, T7)."""
+    try:
+        rows = conn.execute(
+            "SELECT d.source_path, d.file_type, d.pages, count(c.id), d.status "
+            "FROM documents d LEFT JOIN chunks c ON c.document_id = d.id "
+            "WHERE (%(prefix)s::text IS NULL OR starts_with(d.source_path, %(prefix)s::text)) "
+            "GROUP BY d.id ORDER BY d.source_path",
+            {"prefix": folder_prefix(folder)},
+        ).fetchall()
+    except psycopg.errors.UndefinedTable:
+        raise DbError("Tabela documents ausente. Execute init-db.") from None
+    return [DocumentListing(*row) for row in rows]
+
+
+def source_stats(conn: psycopg.Connection) -> list[SourceStats]:
+    """Pastas registradas (por cadastro) e, se houver, a linha dos documentos avulsos."""
+    try:
+        rows = conn.execute(
+            "SELECT s.path, s.recursive, count(DISTINCT d.id), count(c.id), s.last_indexed_at "
+            "FROM sources s LEFT JOIN documents d ON d.source_id = s.id "
+            "LEFT JOIN chunks c ON c.document_id = d.id GROUP BY s.id ORDER BY s.id"
+        ).fetchall()
+        loose = conn.execute(
+            "SELECT count(DISTINCT d.id), count(c.id) FROM documents d "
+            "LEFT JOIN chunks c ON c.document_id = d.id WHERE d.source_id IS NULL"
+        ).fetchone()
+    except psycopg.errors.UndefinedTable:
+        raise DbError("Tabela documents ausente. Execute init-db.") from None
+    stats = [SourceStats(*row) for row in rows]
+    if loose[0]:
+        stats.append(SourceStats(None, None, loose[0], loose[1], None))
+    return stats
+
+
+def count_chunks(conn: psycopg.Connection, document_ids: list[int]) -> int:
+    if not document_ids:
+        return 0
+    return conn.execute(
+        "SELECT count(*) FROM chunks WHERE document_id = ANY(%s)", (document_ids,)
+    ).fetchone()[0]
+
+
+def remove_source(conn: psycopg.Connection, source_id: int) -> None:
+    """Remove a pasta do registro; documentos e trechos saem em cascata."""
+    conn.execute("DELETE FROM sources WHERE id = %s", (source_id,))
